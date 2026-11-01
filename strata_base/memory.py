@@ -63,4 +63,4 @@ def _mac_available() -> int | None:
 
 
 def _run(argv: list[str]) -> str:
-    return subprocess.run(argv, capture_output=True, text=True, timeout=5, check=True).stdout.strip()
+    return subprocess.run(argv, capture_output=True, text=True, errors="replace", timeout=5, check=True).stdout.strip()

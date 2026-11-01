@@ -21,7 +21,7 @@ HF_REVISIONS = {
     "unsloth/Qwen3.8-Flash-Next-GGUF": "38bb39ee97821de2c9009abb7e93950eec396e66",                   # 2026-09-30
     "unsloth/Qwen3.6-35B-A3B-MTP-GGUF": "5bc3e238d916f48a861bac2f8a1990a0e9b7e98d",                  # 2026-10-12
     "agentionai/Qwen3.8-Flash-Next-Gyro-GGUF": "1ada08422e404aca51ab9df665f089f34c419c6b",           # 2026-10-13
-    "unsloth/DeepSeek-V4.1-Flash-1017-GGUF": "f924b94f19c1fea02c06a65c8475b0a45e2b88b1",             # 2026-10-20 (the port's reference)
+    "unsloth/DeepSeek-V4.1-Flash-1017-GGUF": "8a6ec9cf118e785a362ea94ee123c61c70553be6",             # 2026-10-30 (adds UD-IQ1_S / UD-IQ1_M; every file pinned from the 2026-10-20 commit has the same size and SHA-256 here)
     "ISTA-DASLab/DeepSeek-V4.1-Flash-1017-GSQ-RCO-GGUF": "65d53bc8be65123e255ff02f3ded958b6dbf54fd",    # 2026-10-28 (6 shards)
 }
 
@@ -447,8 +447,7 @@ PREVIEW_FAMILIES = OWN_PATH_FAMILIES             # the earlier name (tools and t
 # in shard 8 the 202.8 GB n-gram table that stays on the SSD), the engine's pack folder (tools/dsv41/pack_gguf.py: hash
 # tables, tensor map, the tokenizer and the GGUF's own chat template, a few MB) beside them.  MULTI_FILE_FAMILIES, offered
 # in the same menu and installed by install_dsv41.  Where it fits: strata_control/dsv41_fit.py (real numbers).  The DSpark
-# drafter (dspark-...-Q8_0.gguf, 8.0 GB) and the picture reader (mmproj-BF16.gguf, 1.0 GB) are pinned here but not fetched: the
-# engine does not use them yet.
+# drafter (dspark-...-Q8_0.gguf, 8.0 GB) and the vision tower's weights (mmproj-BF16.gguf, 1.0 GB) are pinned here too.
 DSV41_REPO = "unsloth/DeepSeek-V4.1-Flash-1017-GGUF"
 DSV41_SHARD = "DeepSeek-V4.1-Flash-1017-UD-Q8_K_XL-{i:05d}-of-00009.gguf"
 DSV41_FILES = {
@@ -526,6 +525,14 @@ DSV41_OLDER_FILES = {
     "model-2.25bpw-00004-of-00004.gguf": (36771591232, "e5b2f8781fab688cd4bc3bc7a69651b5dbb90ed94965657c6bead8bb4774f3cf"),
     "engram-IQ4_NL.gguf": (110595290720, "1f17d8ae37e9df3bb45f7ef1b4fcd1706d7b759af0413c117bf8e92aed459281"),
 }
+# ISTA re-published shard 1 of each 4-shard set on 2026-10-26 with a larger chat template (images in tool results; their
+# PATCHING.md, and what their patch_chat_template.py makes of a shard 1 already downloaded): the same weights, accepted
+# from files already here by its own size and SHA-256, never fetched.
+DSV41_NEW_SHARD1 = {
+    "DeepSeek-V4.1-Flash-1017-GSQ-RCO-IQ1_M-00001-of-00004.gguf": (39358841536, "a7be0d5a48e4d1c13c5535f9123d9131ab8964e5acf8a0c01d14970e4b7f4df9"),
+    "DeepSeek-V4.1-Flash-1017-GSQ-RCO-IQ2_XS-00001-of-00004.gguf": (39535788064, "d9b949d55e27242b8afc7c2928749b888372d4c39682f9a131670d1c2555155e"),
+    "DeepSeek-V4.1-Flash-1017-GSQ-RCO-IQ2_XXS-00001-of-00004.gguf": (39075725728, "2dfe9711eac1f7814aa59154d11e8f27739f8b96875dc1e667eac9f8c756e1fe"),
+}
 # A file's SHA-256 at an earlier revision of its repository, with the same name and size: accepted as that file.  The
 # Engram of the 4-shard layout differs from today's in its header only (8 ranges of its tensor data compared equal,
 # 2026-10-29).
@@ -533,15 +540,36 @@ DSV41_EARLIER_SHA256 = {DSV41_ISTA_ENGRAM: "eb19f30d368d393784e1fc54fdfaffc427eb
 # a shared file -> its name in the first release
 DSV41_FIRST_NAMES = {DSV41_ISTA_ENGRAM: "engram-IQ4_NL.gguf"}
 DSV41_ENGRAM_META = DSV41_SHARD.format(i=1)       # only its metadata is read (pack_gguf --engram-meta)
+DSV41_MMPROJ = "mmproj-BF16.gguf"     # the vision tower's weights (972 MB, pinned): packed into the model's pack when pictures are on (0.2.7)
 # the files every official set shares (name -> where it comes from); they live in models/deepseek-v4.1-flash-shared, once
 DSV41_SHARED = {
     DSV41_ISTA_ENGRAM: hf(DSV41_ISTA_REPO),
     DSV41_ENGRAM_META: hf(DSV41_REPO) + "UD-Q8_K_XL/",
     DSV41_DSPARK: hf(DSV41_REPO),
+    DSV41_MMPROJ: hf(DSV41_REPO),
 }
+# Unsloth's own low-bit sets (2026-10-30, unsloth/DeepSeek-V4.1-Flash-1017-GGUF, UD-IQ1_S and UD-IQ1_M): shard 1 = metadata, shards 2-4 = the
+# model, shard 5 = the Engram table (IQ4_NL, 110.6 GB; its data is byte-identical to ISTA's Engram file, so an ISTA Engram already here is used
+# instead of fetching shard 5).  Same tensor names as the IST-DAS six-shard layout; dense weights in Q6_K / Q8_0 / Q5_K, router F32.  Opt-in
+# model names, not the download default.
+DSV41_UD_SHARD = "DeepSeek-V4.1-Flash-1017-{quant}-{i:05d}-of-00005.gguf"
+DSV41_UD_FILES = {
+    "DeepSeek-V4.1-Flash-1017-UD-IQ1_M-00001-of-00005.gguf": (5780868, "5197c309479c7be06e3612dc696d7f18e13e5942cfe52e70c3c586b7e585a5ac"),
+    "DeepSeek-V4.1-Flash-1017-UD-IQ1_M-00002-of-00005.gguf": (49707332128, "fbfb546557a33f41332ffbed7f15fbed249b9f7796975d9db571c8cf3870f335"),
+    "DeepSeek-V4.1-Flash-1017-UD-IQ1_M-00003-of-00005.gguf": (49292777280, "394b7a06e04d4b1b96b6028ec3d4dec49e4716900c26a493e8c2aa38a357ea1a"),
+    "DeepSeek-V4.1-Flash-1017-UD-IQ1_M-00004-of-00005.gguf": (40803165856, "323a7f59a2938879eaac82b37c443c85151e518071ad44c79b1e4580c91d0ed7"),
+    "DeepSeek-V4.1-Flash-1017-UD-IQ1_M-00005-of-00005.gguf": (110595290592, "771805301e695d72d268151dfc43043581ba904298574aa879d4349cbe67b020"),
+    "DeepSeek-V4.1-Flash-1017-UD-IQ1_S-00001-of-00005.gguf": (5780868, "5197c309479c7be06e3612dc696d7f18e13e5942cfe52e70c3c586b7e585a5ac"),
+    "DeepSeek-V4.1-Flash-1017-UD-IQ1_S-00002-of-00005.gguf": (49120285248, "e83af39db628614d252d49a316af8cd5911d78ab96a9e7a5997b392ece26eaf7"),
+    "DeepSeek-V4.1-Flash-1017-UD-IQ1_S-00003-of-00005.gguf": (48899707008, "6caa1da6302b532374d55da6510fc92a9031a0ee1bd2bb5bf7defca2477f3d98"),
+    "DeepSeek-V4.1-Flash-1017-UD-IQ1_S-00004-of-00005.gguf": (24358544704, "71c6c54dd1f20008e2130188cc655742d3738a365de4571d21a56de503b206b7"),
+    "DeepSeek-V4.1-Flash-1017-UD-IQ1_S-00005-of-00005.gguf": (110595290592, "771805301e695d72d268151dfc43043581ba904298574aa879d4349cbe67b020"),
+}
+DSV41_FILES.update(DSV41_UD_FILES)      # (the repository's pins: REPO_PINS)
 DSV41_ALL_FILES = {**DSV41_FILES, **DSV41_ISTA_FILES, **DSV41_OLDER_FILES}
 _UD_SHARDS = [DSV41_SHARD.format(i=i) for i in range(1, 10)]
 DSV41_CONTEXT = 8192          # the context the engine was checked at (4096 and 8192; 64K is not tried yet)
+DSV41_MAC_VISION = False      # an Apple Silicon Mac: the Metal engine has not run DeepSeek's picture tower (0.2.7.1), so pictures stay off there
 MULTI_FILE_FAMILIES = {
     "deepseek41": {"title": "DeepSeek-V4.1-Flash", "by": "DeepSeek; the 2-bit GGUFs by IST-DAS, UD-Q8_K_XL by Unsloth", "arch": "deepseek41",
                    "about": "a big model that runs on a PC with a 12 GB card and 64 GB of RAM (the two official 2-bit versions: 257 or "
@@ -551,7 +579,7 @@ MULTI_FILE_FAMILIES = {
                    "models": {"UD-Q8_K_XL": {"about": "Unsloth Dynamic 8-bit: the experts in MXFP4 as DeepSeek made them, the rest "
                                                        "in BF16 (the checkpoint's own precision)",
                               "ram_gb": 306, "shards": _UD_SHARDS}},
-                   "sha256": DSV41_ALL_FILES, "vision": False}
+                   "sha256": DSV41_ALL_FILES, "vision": True}     # the engine's own tower (strata-dsv41 --vision on, the default), 0.2.7
 }
 
 
@@ -567,6 +595,16 @@ def make_ista_set(quant: str, first_release: str | None = None) -> dict:
         layouts.append(["model-%s-%05d-of-00004.gguf" % (first_release, i) for i in range(1, 5)])
     return {"recipe": "ista", "subdir": None, "legacy_subdir": first_release, "hf": hf(DSV41_ISTA_REPO),
             "shards": layouts[0], "layouts": layouts, "shared": [DSV41_ISTA_ENGRAM, DSV41_DSPARK]}
+
+
+def make_unsloth_low_set(quant: str) -> dict:
+    """Builds the file part of the entry of one of Unsloth's low-bit sets (DSV41_UD_FILES) in MULTI_FILE_FAMILIES: packed
+    and checked like an official IST-DAS set ("recipe" udlow), from the set's shards 1-4; its shard 5 ("engram_shard") is
+    the Engram, taken only when no copy of ISTA's Engram file is here."""
+    shards = [DSV41_UD_SHARD.format(quant=quant, i=i) for i in range(1, 5)]
+    return {"recipe": "udlow", "subdir": quant, "legacy_subdir": None, "hf": hf(DSV41_REPO) + quant + "/",
+            "shards": shards, "layouts": [shards], "engram_shard": DSV41_UD_SHARD.format(quant=quant, i=5),
+            "shared": [DSV41_ISTA_ENGRAM, DSV41_DSPARK]}
 
 
 def pick_dsv41_layout(md: dict, has) -> list:
@@ -597,6 +635,14 @@ MULTI_FILE_FAMILIES["deepseek41"]["models"] = {
         "about": "the smallest official version: 121 GB of model + 111 GB n-gram table + 8 GB drafter (239 GB of disk, 18 GB less than 2.00). Runs "
                  "where 2.00 is tight (a 12 GB card and 32-40 GB of RAM). Smallest: fine for code and agent work, noticeably weaker on plain prose; pick 2.00 if it fits",
         "ram_gb": 34, "profile": "profile-2.00.bin", **make_ista_set("IQ1_M")},
+    "UD-IQ1_S": {
+        "label": "Unsloth UD-IQ1_S",
+        "about": "Unsloth's smallest dynamic version: 122 GB of model (experts in IQ1_S / IQ2_XXS, attention in Q6_K) + the 111 GB n-gram table + 8 GB drafter. Same size class as IST-DAS 1.75 bpw. A 1-bit version: expect weaker answers than the 2.00 and 2.25 versions on long, detailed or careful work (short answers, code and tool calls looked fine in our check; its quality is not measured against the original yet). Pick 2.00 or 2.25 if they fit",
+        "ram_gb": 36, "profile": "profile-2.00.bin", **make_unsloth_low_set("UD-IQ1_S")},
+    "UD-IQ1_M": {
+        "label": "Unsloth UD-IQ1_M",
+        "about": "Unsloth's next dynamic version: 140 GB of model (experts in IQ1_S / IQ2_XXS / IQ2_XS / IQ2_S, attention in Q6_K) + the 111 GB n-gram table + 8 GB drafter. Same size class as IST-DAS 2.00 bpw. Part of its experts are 1-bit: expect somewhat weaker answers than the 2.25 version on long, detailed or careful work (short answers, code and tool calls looked fine in our check; its quality is not measured against the original yet)",
+        "ram_gb": 40, "profile": "profile-2.00.bin", **make_unsloth_low_set("UD-IQ1_M")},
     "UD-Q8_K_XL": {
         "label": "Unsloth UD-Q8_K_XL",
         "about": "Unsloth Dynamic 8-bit: the experts in MXFP4 as DeepSeek made them, the rest in BF16 (the checkpoint's own precision); "

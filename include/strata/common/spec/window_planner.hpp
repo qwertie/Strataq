@@ -5,6 +5,7 @@
 
 #include "strata/common/spec/draft_policy.hpp"
 #include "strata/common/spec/draft_source.hpp"
+#include "strata/common/spec/gated_proposal.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -47,7 +48,7 @@ public:
     /// and `lookup_chain_min`: the options of those names; `max_context` sizes the suffix drafter's history.
     WindowPlanner(int rows, int mtp_rows, int suffix_draft, int lookup_chain, int lookup_chain_min,
                   int64_t max_context)
-        : policy(rows), sfx(std::max(1, suffix_draft), 64, (size_t) max_context + 4096), rows_(rows),
+        : policy(rows), source(rows), sfx(std::max(1, suffix_draft), 64, (size_t) max_context + 4096), rows_(rows),
           mtp_rows_(mtp_rows), suffix_draft_(suffix_draft), lookup_chain_(lookup_chain),
           lookup_chain_min_(lookup_chain_min), lookup_src_(sfx), sbuf_((size_t) rows), cbuf_((size_t) rows),
           probs_((size_t) rows) {
@@ -58,6 +59,10 @@ public:
     /// (DraftPolicy::keep_draft, draft by draft) instead of "draft probability >= --spec-min-p".
     const bool cost_aware = [] { const char* v = std::getenv("STRATA_SPEC_COST"); return v && v[0] == '1'; }();
     DraftPolicy policy;
+    /// STRATA_SPEC_PROB's source planner: a copy of `policy` taken at the start of a request (the caller copies it),
+    /// which then learns only committed outcomes (DraftPolicy::observe_committed), so that a window's choice of source
+    /// never depends on a draw the next rounds draw again.
+    DraftPolicy source;
     SuffixDrafter sfx;
     DraftTally lookup, chained;   ///< this request's lookup windows and lookup-chain tokens
 
@@ -97,14 +102,33 @@ public:
         return w;
     }
     /// Takes a lookup window instead where the policy expects it to pay and its first token agrees with `mtp_drafts`.
-    void pick_lookup(Window& w, const int32_t* mtp_drafts) {
+    /// `probabilistic` (the MTP's drafts are sampled, STRATA_SPEC_PROB): the choice must not depend on the draw, so
+    /// `source` chooses for the MTP's widest window and the first tokens need not agree.
+    void pick_lookup(Window& w, const int32_t* mtp_drafts, bool probabilistic) {
         if (suffix_draft_ <= 0 || w.first) return;
         const int k = sfx.propose(rows_ - 1, sbuf_.data());
         w.match = sfx.last_match();
-        if (k <= 0 || (w.mtp && sbuf_[0] != mtp_drafts[0])) return;
-        const DraftPolicy::Pick pick = policy.choose(w.T, k, w.match);
+        if (k <= 0 || (w.mtp && !probabilistic && sbuf_[0] != mtp_drafts[0])) return;
+        const DraftPolicy::Pick pick = probabilistic ? source.choose(mtp_rows_, k, w.match)
+                                                     : policy.choose(w.T, k, w.match);
         w.lookup = pick.lookup;
         if (pick.lookup) w.T = pick.t;
+    }
+    /// Gets the lookup root of a gated proposal (gated_proposal.hpp) for a window of at most `room` rows: the suffix
+    /// drafter's proposal, eligible where `source` would take it.  Only the context decides, never a draw.
+    core::gated::RootChoice choose_gated_root(Window& w, int room) {
+        core::gated::RootChoice root;
+        w.match = 0;
+        if (suffix_draft_ <= 0 || w.first || room <= 1) return root;
+        const int k = sfx.propose(room - 1, sbuf_.data());
+        w.match = sfx.last_match();
+        if (k > 0) {
+            const DraftPolicy::Pick pick = source.choose(std::min(mtp_rows_, room), k, w.match);
+            root.eligible = pick.lookup;
+            root.rescue_id = sbuf_[0];
+            root.window = pick.t;
+        }
+        return root;
     }
     /// Appends lookup-chain tokens after the MTP's `w.T - 1` drafts that pay, keeping the window within `room` rows.
     void pick_chain(Window& w, const int32_t* mtp_drafts, int room) {

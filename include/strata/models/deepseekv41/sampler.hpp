@@ -10,7 +10,14 @@
 namespace strata::dsv41k {
 
 using kernels::SamplerParams;
+#if defined(STRATA_METAL)
+/// Draws one token per row like the shared sample_tokens, on the host (src/models/deepseekv41/vendor/sampler.cu): the
+/// Metal build has no CUDA sampler kernel.
+void sample_tokens(const float* logits, int n_tokens, int n_vocab, const int* history, int history_len,
+                   const SamplerParams& p, int* out, void* stream);
+#else
 using kernels::sample_tokens;
+#endif
 
 // SPECULATIVE SAMPLING (Leviathan et al. 2023, Chen et al. 2023) for the pipelined NextN decode - opt-in
 // (DS4_DSPARK_SAMPLE=1).  The draft is DRAWN from the draft block's own distribution q (this chain on its logits,

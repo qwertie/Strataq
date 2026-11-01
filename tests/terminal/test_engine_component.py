@@ -20,6 +20,7 @@ from strata_control import components
 
 WINDOWS = os.name == "nt"
 HERE = components.host_platform()
+NO_HIP = HERE == "linux-aarch64"      # the DGX Spark: CUDA only
 EXE = "strata.exe" if WINDOWS else "strata"
 
 
@@ -116,6 +117,7 @@ class Resolution(unittest.TestCase):
             ec.resolve(self.root, backend="cuda")
         self.assertIn(f"is for {other}", str(caught.exception))
 
+    @unittest.skipIf(NO_HIP, "there is no HIP engine for arm64 Linux (BACKEND_MATRIX): this test builds one for the host platform")
     def test_another_backend_is_refused_with_the_reason(self):
         make_package(self.root, backend="hip")
         with self.assertRaises(ec.EngineMissing) as caught:
@@ -293,6 +295,7 @@ class WindowsAmd(unittest.TestCase):
             self.assertEqual(ec.detect_backend({}), ("hip", "display adapters"))
 
 
+@unittest.skipIf(NO_HIP, "there is no HIP engine for arm64 Linux (BACKEND_MATRIX): this test builds one for the host platform")
 class WrongCardFamily(unittest.TestCase):
     """A tester build is for one AMD card family; on another family the person gets one plain line, not a technical list."""
 
@@ -323,6 +326,7 @@ class WrongCardFamily(unittest.TestCase):
             self.assertEqual(ec.resolve(self.root, backend="hip", runtime="1").backend, "hip")
 
 
+@unittest.skipIf(NO_HIP, "there is no HIP engine for arm64 Linux (BACKEND_MATRIX): this test builds one for the host platform")
 class Rx6000Package(unittest.TestCase):
     """0.2.2: the RX 6000 package (gfx1030 / gfx1031) is the one an RX 6000 card finds, and no other card family finds it."""
 

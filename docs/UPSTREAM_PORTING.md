@@ -8,8 +8,8 @@ a change over.
 ## Where we are
 
 - The `upstream` remote is `https://github.com/Niko1221/Strata.git`.
-- **Last upstream commit carried over: `4b9e05a2`** (2026-10-25, "Windows uninstaller: remove the app's own
-  folders …"). Update this line whenever you finish a batch.
+- **Last upstream commit carried over: `c62d5e3a`** (2026-10-31, "DeepSeek plan: the NVIDIA cards it counts are the
+  ones setup runs …", version 0.2.9). Update this line whenever you finish a batch.
 
 ## Steps
 
@@ -54,6 +54,7 @@ code updates its rows here. Rows are grouped by step; `{a,b}` lists several file
 | `serve/{launch_identity,lifeline,ready,telemetry}.py` | `strata_common/` | A2 | done |
 | `strata_control/{acquisition,draft_layer,drafting,engine_component,gpu_fit,gpu_roles,hipblaslt_tuning,offline,paths,presets,procs,profiles,signing,targets,tune_history,tune_knobs,tune_machine,user_args,vision_reader}.py`, `strata_control/update_keys.json` | `strata_common/` | A2 | done |
 | the engine client in `serve/server.py` (`StrataEngine`, `MockEngine`, `engine_args`, `child_env`, the API-key helpers, the `Engine*` errors and the module values they read) | `strata_common/engine_client.py` | A2 | done |
+| `strata_control/replica_profile.py` (added upstream after 4b9e05a2) | `strata_common/replica_profile.py`: the server reads it and may not import `strata_control` | merge of c62d5e3a | done |
 | `serve/{loader_diag,logit_bias}.py` | `strata_common/` | A2 | done |
 | `strata_cli/bench.py` | `strata_control/bench.py` | A2 | done |
 | `_source`, `_redact_argv`, `_effective`, `_launch_plan` in `strata_cli/cli.py` | `strata_control/launch_plan.py`: `read_source`, `redact_argv`, `get_effective`, `make_launch_plan` | A2 | done |
@@ -65,7 +66,7 @@ code updates its rows here. Rows are grouped by step; `{a,b}` lists several file
 | `repoint_config`, `library_size_gb` in `setup.py`; `library_gb` in `strata_cli/launch/library.py` | `strata_control/models_move.py`: `repoint_config`, `library_gb` | A2 | done |
 | `model_config_files` in `setup.py`, `config_files` in `strata_control/models_move.py` | `strata_control/discovery.py`: `config_files` | A2 | done |
 | the RAM probes: `_memory_status`, `ram_gb` in `setup.py`; `memory` in `strata_control/tune_machine.py`; `_CpuRamFallback.ram` in `serve/telemetry.py`; `ram_bytes` in `strata_cli/bench_facts.py`; `own_ram_gb` in `tools/strata_mcp.py`; `total_ram_gib` in `tools/strata_bench.py` | `strata_base/memory.py` (`read_ram`, `windows_memory_status`); the old names that remain call it | A2 | done |
-| `_feed_source`, `DEFAULT_FEED`, `ENV_FEED` in `strata_cli/update_cmd.py` | `strata_control/updater.py`: `feed_source`, `DEFAULT_FEED`, `ENV_FEED` | A2 | done |
+| `_feed_source`, `default_feed`, `DEFAULT_FEED`, `ENV_FEED` in `strata_cli/update_cmd.py` | `strata_control/updater.py`: `feed_source`, `default_feed`, `DEFAULT_FEED`, `ENV_FEED` | A2 | done |
 | the DeepSeek engine upgrade: `upgrade_dsv41_engine` in `setup.py` and the body of `Runner.upgrade_dsv41_engine` in `strata_cli/launch/runner.py` | `strata_control/dsv41_engine.py`: `try_upgrade` | A2 | done |
 | the address test in `local_feed` in `setup.py` | `strata_base/transfer.py`: `is_local` | A2 | done |
 | the model catalog in `setup.py` (`MODELS`, `FAMILIES`, `CONTEXTS`, `OWN_PATH_FAMILIES`, `MULTI_FILE_FAMILIES`, the `*_FILES` and `*_SHARDS` pins, `NVFP4_REPOS`, `REPO_PINS`, `HF_REVISIONS`, `hf`, `hf_endpoint`); its copies: `FALLBACK_*` in `tools/strata_mcp.py` and `strata_cli/launch/settings.py`, the sizes in `PINNED_PROJECTORS` in `strata_control/models.py` and the DeepSeek file sizes in `strata_control/dsv41_fit.py` | `strata_common/catalog.py` (`setup.py` imports the names it had) | A2 | done |
@@ -120,8 +121,52 @@ code updates its rows here. Rows are grouped by step; `{a,b}` lists several file
 | `src/dsv41/{ds4_iq,ds4_gguf,ds4_tq}*` | kept in `src/models/deepseekv41/`: not copies of the shared quant kernels ([open issue](REFACTOR_PLAN.md#open-issues)). `ds4_iq_cpu.cpp` lost its unbuilt ggml-cpu rows (`iq_cpu_own_rows` is gone) and now only chooses between `ds4_tq_cpu.cpp` and `ds4_gg_cpu.cpp` | B2 | kept |
 | `src/core/{peer_experts,remote_experts}.cpp`, `src/core/remote_expert_opt.cu` | kept in `src/core/`: they include Qwen3.8's kernel headers (`s2_expert_grouped.hpp`, `verify_kernels.hpp`), which `src/common/` must not, and call the CUDA runtime directly (peer access, contexts, streams, events, mapped host memory). `PeerExperts` switches devices with `OnDevice` (`include/strata/base/gpu/on_device.hpp`); the SYCL build compiles the shared `peer_experts.hpp` instead of its copy (`sycl/include/strata/core/peer_experts.hpp`). `remote_experts.hpp` keeps its SYCL copy: the SYCL `ExpertSource` lacks the functions `RemotePrefillSource` overrides | B3 | kept |
 | the other SYCL copies of `src/` files | the shared `src/` file | C1 | planned |
+| files upstream added after 4b9e05a2, Qwen3.8's own: `include/strata/core/{ple_residency,window_evict}.hpp`, `include/strata/kernels/{qsa_pattn,window_start}.hpp`, `include/strata/prefill/{copy_events,gdn_probe,kva,kva_floor,moe_ws}.hpp`, `src/kernels/cuda/qsa_pattn.cu`, `src/prefill/{gdn_harness.cu,gdn_tc.cuh,gdn_wmma12.inc,moe_ws*.cu,moe_ws.cuh}`, and their tests | `include/strata/models/qwen38/` (`kernels/`, `prefill/`), `src/models/qwen38/` (`kernels/`, `prefill/`) | merge of c62d5e3a | done |
+| files upstream added after 4b9e05a2, shared: `include/strata/core/{auto_cache,gated_proposal,spec_proposal,expert_nibble}.hpp`, `include/strata/kernels/window_limits.hpp`, `include/strata/platform/cpu_relax.hpp`, `src/kernels/cuda/nib_gu_proto.cuh`, `src/kernels/cpu/{portable.cpp,…}` | `auto_cache`: `common/experts/`; `gated_proposal` (and `spec_admission_test`): `common/spec/`; `spec_proposal`, `expert_nibble` (included by `iq_kernels.hpp`), `window_limits`, `nib_gu_proto.cuh`, the CPU files: `common/kernels/`; `cpu_relax`: `base/platform/`. `include/strata/core/defaults_026.hpp` stays beside `arch_defaults`; the new `src/core/window_limits_test.cpp` is in `src/program/` (it reads `program/pipe_probe.hpp`) | merge of c62d5e3a | done |
+| `src/dsv41/ds4_os_apple.h`; `include/strata/qwen35/sampling.hpp`; `sycl/include/strata/{kernels/qsa_prompt_attn_esimd,pipeline_auto}.hpp` | `include/strata/base/platform/os_apple.hpp` (`os.hpp` includes it); `include/strata/models/qwen36/sampling.hpp` (its `apply_penalties` takes `serve::Sampling`); `sycl/include/strata/models/qwen38/{kernels/qsa_prompt_attn_esimd,pipeline_auto}.hpp` | merge of c62d5e3a | done |
 
 ## Log
 
 | Upstream | Decision | Here | Notes |
 |---|---|---|---|
+| `4b9e05a2..c62d5e3a` (0.2.7 to 0.2.9: 733 commits, 146 first-parent units) | carry over, all of it | one merge commit on `local` (not cherry-picks: too many) | details per area below |
+| f4612b1a (#3416) gated proposals | carry over | `strata::spec::WindowPlanner` | the planner got a `source` policy and `choose_gated_root()`; `pick_lookup` takes upstream's rule; `spec_cost` is `wplan.cost_aware` |
+| 6fb110e5, 1fb3e9a3 coalesced prompt reads (BCO) | carry over | `generate.cpp` | BCO is parsed at the top of the `serve::Loop` loop (an engine command); `pc.drain` is in `hooks.before_line` |
+| the concurrent prompt read (`STRATA_BATCH_CONCURRENT_READ`) | carry over | `generate.cpp` | uses `Input::wake`, `wait_for_line`, `take_slot_controls` instead of the old stdin internals |
+| 690172c4 `prefill=1`, 9ea04496 `logprobs` / `allowed` | carry over | `generate.cpp` | read from `parse_request_line`'s values |
+| 0f7224d1, ca378670 checkpoint opt-ins (`STRATA_CKPT_ASYNC`, `VRAM_SLOTS`, `GATHER`) | carry over | `src/models/qwen38/conversation_state.cpp` | the sync path stays one `copy_running_state`; the async and gather paths are upstream's |
+| 07d5ecfa (#4051) `wait_for_ram` | carry over | `src/common/experts/ram_tier.{hpp,cpp}` | |
+| `src/dsv41/vendor/sampler.cu` changes (Metal host sampler) | carry over | `src/models/deepseekv41/vendor/sampler.cu` | Metal's `dsv41k::sample_tokens` falls back to the host chain: the CUDA greedy kernel it used is gone (B2) |
+| b2dbd942 DeepSeek idle cache settle | carry over | `ds4_main.cpp` around `serve::Loop::next()` | after a command the shared loop answers itself (LIST_CONVERSATIONS), the settle waits for the next engine command; upstream restarted it at once |
+| 6c01f85a (#3911) Qwen3.6 penalties | carry over | `include/strata/models/qwen36/sampling.hpp` | over `serve::Sampling` |
+| ebe3383a (#3602) PLE reader failed read, SYCL copy | already done | `src/models/qwen38/ngram/ple_reader.cpp` | the SYCL copy stays deleted |
+| SYCL `prefill/{moe_fused,moe_fused_iq,moe_mmq}.dp.cpp` | skip | | still never built upstream; upstream only added includes |
+| the `serve/` additions (split serving, DeepSeek pictures, web chat page, KaTeX, tests) | carry over | `strata_server/` | imports rewritten as in A2 |
+| the engine-client hunks of `serve/server.py` (leftover-engine wait #4051, `PAR_COUNTERS`, coalesced prefill, the parallel and GDN env defaults, logprobs, `prefill_only`) | carry over | `strata_common/engine_client.py` | |
+| ISTA's six-shard DeepSeek set (`shards6`, `DSV41_ISTA6_*`, `DSV41_LEGACY_*`, `dsv41_parts`, `dsv41_pack_layout`) | already done | `strata_common/catalog.py` `"layouts"`, `pick_dsv41_layout` | the fork's layouts cover it; upstream's Unsloth UD-IQ1 sets, pictures by default, the re-published shard 1 and the rebuild of a pack from another layout's files went into them |
+| 80073010 (#3619, #3326) the redactor's order | carry over | `strata_cli/bench_facts.redactor` | |
+
+**What `memory-manager` must port by hand** when it merges `local` (it moved Qwen3.8's loader and most of `main()` from
+`generate.cpp` into `src/models/qwen38/{model,options}.cpp`, and gave the K/V kernels the page-pool `units` argument):
+
+- Into `Model::load()` (`model.cpp`): 7dacaf8e and ad1660aa (PLE table in RAM: its "table + expert arena + 8 GiB" rule
+  should count strata-q38's RAM pool), 9c8c9039 (`pcie_share_gfx12_default`, the KVA gate), a3ab37fc
+  (`pcie_start_frac`), 2526f2ff (`nv_serial_faster`), 77287f13 (#4474 expert-cache reserve, #4518 PLE lock), c0e245c8
+  (`set_batch_slots`), 32f0c44f (the 16-row clamps), d96873fc (2048 fallback), and about 35 hunks of 6ca60e9a (4-bit
+  expert slots, later-card VRAM reserve, `STRATA_PIPED_MTP`, ARM64 guards, `drive_pool*_impl`).
+- Into `options.{hpp,cpp}`: d96873fc (`prefill_own_keep_chunk`, the gfx1151 16K chunk), 6ca60e9a (`--adapt-decay` check).
+- The `units` argument for upstream's new K/V readers: `qsa_block_scores_long` (also in `Verifier::record_window`),
+  `qsa_pattn`, the layer-major prefill's `kv_append*` and indexer calls in `prefill.cpp`, and 86bed1c9's new SYCL
+  kernels (which take it and refuse it).
+- 32f0c44f makes verify windows up to 16 rows (HIP default): memory-manager's 8-row limit (`runconfig._LIVE_RANGE`,
+  the window sizing, `share_guess_rows`) can follow `kVerifyMaxT`.
+- `src/core/expert_cache.cpp` (`device_slot`, `fill_slot`, `fill_slot_blocking`: `span_`, `get_reach()`); the batch-slot
+  code in `strata_common/engine_client.py` (logprobs, parking before an admission, BCO reservations) next to the
+  priority and preemption code; `strata_server/web/{app.js,index.html}` (the memory panel's lines); and the
+  `set_env` / `unset_env` rename in upstream's new lines of `src/core/{arch,nv}_defaults*.cpp` and the DeepSeek tests.
+- Old engine only, keep off in strata-q38: split serving (ccf18ea1), coalesced prompt reads (1fb3e9a3), replicas with
+  a shared expert arena (16e08b50), `STRATA_EXPERT_NIBBLE` (slot sizes against the pool's page size), the old
+  conversation cache's park and checkpoint opt-ins, `STRATA_RAM_ADAPT`, `STRATA_VRAM_FREE=device`.
+- Worth adding to strata-q38 later: `wait_for_ram` before sizing its RAM pool (b82d1d45), `LP` logprob lines in
+  `paged_engine.cpp`, and a measurement under the server's Linux CUDA parallel-stack env defaults (dd471d31, 2a9ccfe3,
+  b60fbb54), or leaving its engine out of them.

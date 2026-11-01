@@ -65,6 +65,10 @@ build-vision-cuda12.bat
 /.ccache/
 /.rocm-win/
 
+# Optional MCP raster cache
+*.tool-media/
+/.tool-media/
+
 # local Windows HIP packaging output
 dist-hip/
 
@@ -89,3 +93,9 @@ node_modules/
 /apps/host/docs/checkpoints/
 # the NVIDIA test session's output (tools/nvidia_session/run.ps1)
 /tools/nvidia_session/results/
+
+# DGX Spark build outputs and local venv (docs/DGX_SPARK_LINUX.md)
+/out-spark/
+/build-spark/
+/build-vision-spark/
+/.venv-build/

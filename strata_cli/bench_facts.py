@@ -1,12 +1,13 @@
 """What a standard benchmark report says about the machine, the build, the model and the settings (docs/BENCHMARK_PROTOCOL.md).
 
-Every probe is best effort and local: it reads the inference host's own tools (nvidia-smi, rocm-smi, PowerShell, /proc, sysctl) and the
+Every probe is best effort and local: it reads the inference host's own tools (nvidia-smi, rocm-smi, amd-smi, PowerShell, /proc, sysctl) and the
 server's answers. A fact that cannot be read becomes `None` with a reason in `Why`, never a guess. Nothing here changes the machine.
 """
 
 from __future__ import annotations
 
 import getpass
+import glob
 import hashlib
 import json
 import os
@@ -43,14 +44,14 @@ def pointer(*parts) -> str:
 def redactor(key: str = "", extra=()):
     """text -> text with this machine's home folders, user and host names, the Strata folder, private IP addresses and the API key replaced.
     `extra` lists more private words (whole words only) to replace."""
-    subs: list[tuple[re.Pattern, str]] = []
+    subs: list[tuple[re.Pattern, str, int]] = []
 
     def add(value, label, word=False):
         if value and len(str(value)) >= 4:
             text = str(value)
             for form in sorted({text, text.replace("\\", "/"), text.replace("/", "\\")}, key=len, reverse=True):
                 pattern = re.escape(form)
-                subs.append((re.compile(r"(?<![\w-])" + pattern + r"(?![\w-])" if word else pattern, re.I), label))
+                subs.append((re.compile(r"(?<![\w-])" + pattern + r"(?![\w-])" if word else pattern, re.I), label, len(form)))
 
     add(ROOT, "<strata>")
     add(Path.home(), "<home>")
@@ -64,7 +65,7 @@ def redactor(key: str = "", extra=()):
     for word in extra:
         add(word, "<private>", True)
     add(key, "<key>")
-    subs.sort(key=lambda item: -len(item[0].pattern))
+    subs.sort(key=lambda item: -item[2])      # by the text replaced: the word wrappers would rank a short user name above its folder
     path_user = re.compile(r"(?i)([A-Za-z]:)?([\\/])(Users|home)([\\/])(?!<)[^\\/\s\"':;,]+")
     private_ip = re.compile(r"\b(?:192\.168|10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])"
                             r"|169\.254)\.\d{1,3}\.\d{1,3}\b")
@@ -73,7 +74,7 @@ def redactor(key: str = "", extra=()):
     def clean(text):
         if not isinstance(text, str):
             return text
-        for pattern, label in subs:
+        for pattern, label, _ in subs:
             text = pattern.sub(label, text)
         text = path_user.sub(lambda m: f"{m.group(1) or ''}{m.group(2)}{m.group(3)}{m.group(4)}<user>", text)
         text = bearer.sub(r"\1<key>", text)
@@ -177,12 +178,62 @@ def other_gpus() -> tuple[list[dict], str | None]:
             driver = next((c.get("driver") for c in found if c.get("driver")), None)
         except Exception:                               # noqa: BLE001 - a report without the card's name is still a report
             pass
+    elif os.name != "nt" and sys.platform != "darwin":      # (a Mac has no AMD card to ask for; its chip is read below)
+        # ROCm 7 and newer ship amd-smi and no rocm-smi (verified on ROCm 10.1). Different grammar: `static --asic`
+        # gives the marketing name, `static --driver` the kernel driver's version, and the PCI address only comes
+        # from `amd-smi list`; the VRAM size is the amdgpu driver's sysfs file for that address.
+        def amd_json(args):
+            try:
+                return json.loads(run_cmd(["amd-smi", "static"] + args + ["--json"]).strip() or "{}").get("gpu_data") or []
+            except (ValueError, OSError):
+                return []
+        try:
+            bdf = {e.get("gpu"): (e.get("bdf") or "") for e in json.loads(run_cmd(["amd-smi", "list", "--json"]).strip() or "[]")}
+        except (ValueError, OSError):
+            bdf = {}
+        drv = {e.get("gpu"): ((e.get("driver") or {}).get("version") or "") for e in amd_json(["--driver"])}
+        for i, e in enumerate(amd_json(["--asic"])):
+            name = ((e.get("asic") or {}).get("market_name") or "").strip()
+            if not name:
+                continue
+            d = drv.get(e.get("gpu"), "")
+            driver = driver or (d if d.upper() not in ("", "N/A") else None)
+            vram = None
+            for dev in glob.glob("/sys/class/drm/card[0-9]*/device"):
+                try:
+                    if bdf.get(e.get("gpu")) and os.path.basename(os.path.realpath(dev)).lower() == bdf[e["gpu"]].lower():
+                        with open(os.path.join(dev, "mem_info_vram_total"), encoding="utf-8") as f:
+                            total = f.read().strip()
+                        vram = int(total) if total.isdigit() else None
+                except OSError:
+                    pass
+            cards.append({"device_index": i, "name": name, "memory_bytes": vram, "memory_kind": "dedicated",
+                          "power_limit_w": None})
     elif sys.platform == "darwin":
         chip = cpu_name()
         if chip:
             cards = [{"device_index": 0, "name": chip, "memory_bytes": ram_bytes(), "memory_kind": "shared",
                       "power_limit_w": None}]
     return cards, driver
+
+
+def rocm_version() -> str | None:
+    """ROCm's own version, which `rocm-smi --showdriverversion` used to report with the driver. ROCm 10 has no
+    `rocm-smi` and no `/opt/rocm/.info/`: its version file sits under `<install>/core/.info/version`, and
+    `amd-smi -h` prints the same version."""
+    for base in [os.environ.get("ROCM_PATH", ""), "/opt/rocm"]:
+        if not base:
+            continue
+        for sub in (".info/version", "core/.info/version"):
+            try:
+                with open(os.path.join(base, sub), encoding="utf-8") as f:
+                    found = f.read().strip()
+                if found:
+                    return found
+            except OSError:
+                pass
+    match = re.search(r"ROCm version:\s*([\d.]+)", run_cmd(["amd-smi", "-h"]))
+    return match.group(1) if match else None
 
 
 def lsblk_disk(data: dict) -> list[dict] | None:
@@ -261,7 +312,12 @@ def hardware(why: Why, *, selected: list[int], served_gpu: str | None, model_dir
         named = [c for c in cards if c["name"] == served_gpu]
         cards = named[:1] or cards[:1]
     served = [n for n in (served_gpu or "").split(" + ") if n and n != "?"]
-    if served and cards and not all(n in {c["name"] for c in cards} for n in served):
+    # the amdgpu driver's product_name is empty on some cards (gfx1201 among them), so the server falls back to a bare
+    # "AMD Radeon": that names the vendor, not the card, and the local probe's marketing name is the one to keep
+    stub = re.compile(r"(?i)^(amd radeon|advanced micro devices(,? inc\.?)?|nvidia( corporation)?|intel"
+                      r"( corporation)?)( graphics)?$")
+    if served and cards and not all(stub.match(n) for n in served) \
+            and not all(n in {c["name"] for c in cards} for n in served):
         # the server reads cards the local tools do not list (another vendor's, or a different numbering)
         cards = [{"device_index": i, "name": n, "memory_bytes": None, "memory_kind": "dedicated", "power_limit_w": None}
                  for i, n in enumerate(served)]
@@ -292,7 +348,10 @@ def hardware(why: Why, *, selected: list[int], served_gpu: str | None, model_dir
     if not declared_background:
         why.add(pointer("hardware", "background_workloads"),
                 "the runner does not inspect other programs; none were declared with --background")
-    return block, {"driver": driver, "cuda": cuda}
+    # an AMD card on Linux runs on ROCm, which the report names as the runtime; on ROCm 7 and newer that version no
+    # longer comes from rocm-smi, but from the install itself
+    rocm = rocm_version() if (sys.platform.startswith("linux") and cards and not cuda) else None
+    return block, {"driver": driver, "cuda": cuda, "rocm": rocm}
 
 
 # ------------------------------------------------------------------------------------------------------------ software
@@ -348,6 +407,8 @@ def software(why: Why, machine: dict, *, engine_version: str | None, build_optio
             runtime.append({"name": "cuda-driver-supports", "version": machine["cuda"]})
     elif machine.get("cuda"):
         runtime.append({"name": "cuda", "version": machine["cuda"]})
+    if machine.get("rocm") and not any(r.get("name") == "rocm" for r in runtime):
+        runtime.append({"name": "rocm", "version": machine["rocm"]})
     if sys.platform == "darwin":
         runtime.append({"name": "metal", "version": platform.mac_ver()[0] or platform.release()})
     drivers = [{"name": "gpu-driver", "version": machine["driver"]}] if machine.get("driver") else []

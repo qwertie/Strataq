@@ -325,7 +325,31 @@ def top_logprobs(req: dict):
     return None
 
 
+def install_two_card_spec():
+    """engine_client.engine_args -> the config's --spec 2 on exactly two Arc B-series cards (strata_control/intel_spec.py), at every start: a
+    config written before (by an older setup, or by the launcher) gets what a new setup run would write.  The person's own
+    --spec ("user_args", or a value other than setup's 4) is never touched; one plain line says what changed."""
+    from strata_control import intel_spec
+    original = engine_client.engine_args
+
+    def engine_args(cfg):
+        args = original(cfg)
+        try:
+            if cfg.get("backend") == "sycl" and engine_client.layer_split_of(cfg):
+                sysfs = intel_spec.sysfs_cards()
+                cards = [sysfs[i] for i in engine_client.gpu_list(cfg) if isinstance(i, int) and 0 <= i < len(sysfs)]
+                new, note = intel_spec.plan(args, cfg.get("user_args"), cards, mtp_off=cfg.get("mtp") is False)
+                if note:
+                    print("[strata] " + note, flush=True)
+                    return new
+        except Exception as exc:  # noqa: BLE001 - a rule that cannot be read leaves the config's own args
+            print(f"[strata] two-card --spec rule skipped: {exc}", flush=True)
+        return args
+    engine_client.engine_args = engine_args
+
+
 if __name__ == "__main__":
+    install_two_card_spec()
     install_xe_reader()
     install_shared_embeddings()
     install_narrator()
