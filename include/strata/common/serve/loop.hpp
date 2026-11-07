@@ -30,6 +30,8 @@ public:
     bool next(std::string& line);
     /// Takes the oldest queued line if there is one, without waiting.
     bool try_next(std::string& line);
+    /// Removes queued host-only inspection commands without admitting generation or settings changes.
+    std::vector<std::string> take_inspections();
 
     /// Tells whether STOP has come since the last clear_stop().
     bool is_stop_requested() const;
@@ -92,10 +94,17 @@ public:
 
     /// Gets the next command for the engine; false when stdin has ended or a hook failed (is_failed()).
     bool next(std::string& line);
+    /// Answers host-only inspection at a model's safe prompt-chunk boundary.
+    void poll_inspections();
     /// Tells whether next() returned false because a step or before_line failed.
     bool is_failed() const { return failed_; }
 
 private:
+    /// Answers a supported read-only command; returns false for other commands.
+    bool answer_inspection(const std::string& line);
+    /// Sends the current allocation report, including any partial settings-change result.
+    void write_memory_report(const std::string& shortfall = {});
+
     /// Records a failed hook; returns next()'s false.
     bool fail() {
         failed_ = true;

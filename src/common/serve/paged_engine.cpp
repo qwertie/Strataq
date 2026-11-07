@@ -400,6 +400,7 @@ private:
     std::optional<strata::core::SessionFileIdentity> identity_;
     uint64_t requests_ = 0;            ///< the requests served so far (Held::used)
     const Held* reading_ = nullptr;    ///< the conversation whose prompt read_prompt reads, which make_room keeps
+    strata::serve::Loop* command_loop_ = nullptr; ///< The active serve loop, used at prompt-chunk boundaries.
     std::string fatal_error_; ///< Stops serving when the model cannot recover its layer ownership.
     bool residency_changed_ = false;   ///< the model's residency table changed since the devices' were uploaded
     /// Per layer, the card whose pool holds the layer's experts that its own card's does not (the model's hop
@@ -632,6 +633,7 @@ int PagedEngine::serve() {
         return change_settings(values, shortfall);
     };
     strata::serve::Loop loop(input_, hooks);
+    command_loop_ = &loop;
     std::string line;
     while (loop.next(line)) {
         if (line == "QUIT") break;
@@ -645,6 +647,7 @@ int PagedEngine::serve() {
         }
         print_response("ERR %s does not take %s\n", facts_.name.c_str(), line.substr(0, line.find(' ')).c_str());
     }
+    command_loop_ = nullptr;
     return loop.is_failed() ? 1 : 0;
 }
 
@@ -1063,19 +1066,23 @@ void PagedEngine::finish_request(Held& h, const char* finish) {
 bool PagedEngine::read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t from, int64_t to,
                               Clock::time_point t0, int64_t& read_to, bool& fatal, std::string& err) {
     reading_ = &h;
+    h.live.assign(ids.begin(), ids.begin() + from);
     const PagedModel::ChunkDone on_chunk = [&](int64_t pos0, int64_t T, std::string& e) -> bool {
         read_to = pos0 + T;
+        h.live.insert(h.live.end(), ids.begin() + h.live.size(), ids.begin() + read_to);
         h.last_tokens_at = (uint64_t) std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         const double ms = get_ms_since(t0);
         print_response("PP %lld %lld %.0f %.1f\n", (long long) read_to, (long long) ids.size(), ms,
                     ms > 0 ? 1000.0 * (double) (read_to - from) / ms : 0.0);
         strata::core::progress_beat();
+        if (command_loop_)
+            command_loop_->poll_inspections();
         if (!input_.is_stop_requested()) return true;
         e = "cancelled";
         return false;
     };
     // beside conversations that decode, a chunk at a time, and they decode between two chunks
-    const int64_t piece = is_decoding() ? std::max<int64_t>(model_.get_prompt_chunk(), 1) : to - from;
+    const int64_t piece = std::max<int64_t>(model_.get_prompt_chunk(), 1);
     bool ok = true;
     for (int64_t q = from; ok && q < to; q += piece) {
         const Clock::time_point tq = Clock::now();
@@ -1766,11 +1773,11 @@ std::vector<strata::core::HeldConversation> PagedEngine::list_conversations() co
     for (size_t i = 0; i < at_.size(); ++i) {
         const size_t place = i;
         const Held& h = get_held(place);
-        if (h.live.empty() && !h.decoding)
+        if (h.live.empty() && !h.decoding && &h != reading_)
             continue;
         strata::core::HeldConversation c;
         c.id = "conversation" + std::to_string(h.session);
-        c.state = h.decoding ? "decoding" : h.live.empty() ? "empty" : "holding";
+        c.state = &h == reading_ ? "reading" : h.decoding ? "decoding" : h.live.empty() ? "empty" : "holding";
         c.ids = h.live.data();
         c.n = h.live.size();
         c.capacity = (uint64_t) settings_.conversation_context;

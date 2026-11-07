@@ -58,9 +58,13 @@ is reserved for a distinguished request. Cached contexts have independent
 
 The paged command loop runs between decode steps, so settings can change while
 one or several requests are generating. Commands still wait for a model
-operation that is in progress. Prompt admission currently completes its prefill
-before returning to that loop. Command identities keep late replies safe if a
-long prefill outlasts a caller's timeout.
+operation that is in progress. During prefill, the paged engine services
+`LIST_CONVERSATIONS`, `GET_CONTEXT_WINDOWS` and `GET_MEMORY_USE` between prompt
+chunks, without admitting queued generation or settings changes. A reading
+conversation exposes the prompt tokens processed so far. Context reads allow
+up to five minutes for a reply, since an individual GPU chunk can exceed the
+ordinary query deadline. Command identities keep late replies isolated if an
+operation still outlasts its caller's timeout.
 
 The older Qwen3.8, Qwen3.6, DeepSeek and SYCL handlers use the shared transport
 adapter. It chooses their internal placement, frames their events, and combines

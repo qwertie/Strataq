@@ -252,13 +252,13 @@ public:
 
     // ---- the prompt, the step and the drafter
 
-    /// Gets the tokens one piece of a prompt read beside decoding conversations takes.
+    /// Gets the maximum tokens per prompt piece between inspection and concurrent decode opportunities.
     virtual int64_t get_prompt_chunk() const = 0;
     /// Called after each chunk of a prompt read, `n` tokens from `pos0`; false (and `err`) stops the read.
     using ChunkDone = std::function<bool(int64_t pos0, int64_t n, std::string& err)>;
     /// Reads `ids[from, from + n)` into the conversation of `parts`, calling `on_chunk` after each chunk; the drafter
     /// reads it too when `drafting`.  `ids` is the whole prompt; the engine may read it in pieces of
-    /// get_prompt_chunk tokens with decode steps of other conversations between them.
+    /// get_prompt_chunk tokens with inspections and decode steps of other conversations between them.
     virtual bool read_prompt(const PagedParts& parts, const std::vector<int64_t>& ids, int64_t from, int64_t n,
                              bool drafting, const ChunkDone& on_chunk, std::string& err) = 0;
     /// Supplies the consumed tokens for each row's conversation, valid until run_rows returns.

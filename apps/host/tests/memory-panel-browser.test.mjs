@@ -15,6 +15,7 @@ test('context selection retains scroll position and shows snippets and individua
     let release = () => {};
     try {
       const page = await browser.newPage({viewport: {width: 1280, height: 720}});
+      let failContext = false;
 
       const waiting = new Promise(resolve => { release = resolve; });
       const entries = [1, 2].map(n => ({id: `conversation${n}`, name: `Conversation ${n}`, state: 'holding',
@@ -33,6 +34,9 @@ test('context selection retains scroll position and shows snippets and individua
         if (url.pathname === '/api/requests') body = {requests: []};
         if (url.pathname === '/api/context') {
           const id = url.searchParams.get('id');
+          if (id && failContext)
+            return route.fulfill({status: 503,
+              json: {error: {message: 'the engine did not answer GET_CONTEXT_WINDOWS'}}});
           if (id === 'conversation2') await waiting;
           body = id ? {id, tokens: [1], pieces: [`${id}\n` + 'context text\n'.repeat(1000)]} :
             {available: true, at: 1, entries};
@@ -52,6 +56,12 @@ test('context selection retains scroll position and shows snippets and individua
       release();
       await page.waitForFunction(() => document.querySelector('#ctx-view').textContent.startsWith('conversation2'));
       assert.equal(await page.evaluate(() => window.scrollY), before);
+      failContext = true;
+      await page.locator('#ctx-refresh').click();
+      await page.waitForFunction(() => !document.querySelector('#ctx-refresh').disabled);
+      assert.match(await page.locator('#ctx-view').textContent(), /^conversation2/);
+      assert.match(await page.locator('#ctx-sum').textContent(), /refresh failed/);
+      assert.match(await page.locator('#ctx-note').textContent(), /GET_CONTEXT_WINDOWS.*previous context snapshot/);
       await page.setContent('<div id="panel" style="width:1210px"></div>');
       await page.addStyleTag({content: await read('tokens.css') + await read('memory-panel.css')});
       await page.evaluate(async () => {

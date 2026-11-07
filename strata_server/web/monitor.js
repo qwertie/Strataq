@@ -207,11 +207,18 @@ function showContext() {
 async function loadEntry() {
   const e = ctxEntry();
   if (!e) { entry = null; showContext(); return; }
+  text("ctx-note", `Reading tokens for ${e.name}; waiting for the current model operation if needed…`);
   let answer;
   try { answer = e.count ? await api(`/api/context?id=${encodeURIComponent(e.id)}`) :
     {id: e.id, tokens: [], pieces: []}; }
   catch (error) { answer = {id: e.id, error: error.message}; }
   if (ctxEntry() === e) {
+    if (answer.error && entry?.id === e.id && entry.tokens) {
+      text("ctx-sum", `${e.name}: refresh failed`);
+      text("ctx-note", `${answer.error}. Showing the previous context snapshot` +
+        (entry.at ? ` from ${new Date(entry.at * 1000).toLocaleTimeString()}.` : "."));
+      return;
+    }
     entry = answer; ctxPage = -1;
     showContext();
   }

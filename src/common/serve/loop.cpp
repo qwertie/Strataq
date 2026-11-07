@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <deque>
 #include <mutex>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -115,6 +116,26 @@ bool Input::try_next(std::string& line) {
     return true;
 }
 
+std::vector<std::string> Input::take_inspections() {
+    std::vector<std::string> lines;
+    std::lock_guard<std::mutex> lock(shared_->mu);
+    for (auto it = shared_->lines.begin(); it != shared_->lines.end();) {
+        std::string_view command = *it;
+        if (command.rfind("ASK ", 0) == 0) {
+            const size_t end = command.find(' ', 4);
+            if (end != std::string::npos && is_protocol_identity(std::string(command.substr(4, end - 4))))
+                command.remove_prefix(end + 1);
+        }
+        if (command == "GET_MEMORY_USE" || command.starts_with("LIST_CONVERSATIONS") ||
+            command.starts_with("GET_CONTEXT_WINDOWS")) {
+            lines.push_back(std::move(*it));
+            it = shared_->lines.erase(it);
+        } else
+            ++it;
+    }
+    return lines;
+}
+
 bool Input::is_stop_requested() const {
     return shared_->stop.load() || is_cancel_requested(get_output_request());
 }
@@ -192,30 +213,47 @@ bool Loop::next(std::string& line) {
             if (hooks_.on_late_yield) hooks_.on_late_yield();
             continue;
         }
-        if (hooks_.list_conversations && core::is_conversation_command(line)) {
-            core::answer_conversation_command(line, hooks_.list_conversations(),
-                [](const std::string& reply) { print_response("%s", reply.c_str()); });
+        if (answer_inspection(line))
+            continue;
+        if (!hooks_.change_settings || !hooks_.describe_memory || line.rfind("CHANGE_SETTINGS", 0) != 0)
+            return true;
+        std::vector<std::pair<std::string, std::string>> values;
+        std::string why, shortfall;
+        if (!parse_settings_line(line, values, why) || !(why = hooks_.change_settings(values, shortfall)).empty()) {
+            print_response("ERR %s\n", why.c_str());
+            std::fflush(stdout);
             continue;
         }
-        std::string shortfall;
-        if (hooks_.change_settings && hooks_.describe_memory && line.rfind("CHANGE_SETTINGS", 0) == 0) {
-            std::vector<std::pair<std::string, std::string>> values;
-            std::string why;
-            if (!parse_settings_line(line, values, why) || !(why = hooks_.change_settings(values, shortfall)).empty()) {
-                print_response("ERR %s\n", why.c_str());
-                std::fflush(stdout);
-                continue;
-            }
-        } else if (!hooks_.describe_memory || line != "GET_MEMORY_USE") {
-            return true;
-        }
-        MemoryReport report = hooks_.describe_memory();
-        report.shortfall = shortfall;
-        const std::string s = format_memory_report(
-            report, hooks_.list_conversations ? hooks_.list_conversations() : std::vector<core::HeldConversation>{});
-        print_response("%s", s.c_str());
-        std::fflush(stdout);
+        write_memory_report(shortfall);
     }
+}
+
+void Loop::poll_inspections() {
+    for (std::string line : in_.take_inspections()) {
+        const InspectionOutput output;
+        if (translate_protocol_command(line) && !answer_inspection(line))
+            print_response("ERR inspection is unavailable\n");
+    }
+}
+
+bool Loop::answer_inspection(const std::string& line) {
+    if (hooks_.list_conversations && core::is_conversation_command(line)) {
+        core::answer_conversation_command(line, hooks_.list_conversations(),
+            [](const std::string& reply) { print_response("%s", reply.c_str()); });
+        return true;
+    }
+    if (line != "GET_MEMORY_USE" || !hooks_.describe_memory)
+        return false;
+    write_memory_report();
+    return true;
+}
+
+void Loop::write_memory_report(const std::string& shortfall) {
+    MemoryReport report = hooks_.describe_memory();
+    report.shortfall = shortfall;
+    const std::string text = format_memory_report(report,
+        hooks_.list_conversations ? hooks_.list_conversations() : std::vector<core::HeldConversation>{});
+    print_response("%s", text.c_str());
 }
 
 }  // namespace strata::serve

@@ -35,6 +35,14 @@ std::string merge_legacy_done(const std::string& stats, const std::string& compl
 
 RequestOutput::RequestOutput(const std::string& id) : previous_(request_id) { request_id = id; }
 RequestOutput::~RequestOutput() { request_id = previous_; }
+InspectionOutput::InspectionOutput() : request_(std::move(request_id)), command_(std::move(command_id)) {
+    request_id.clear();
+    command_id.clear();
+}
+InspectionOutput::~InspectionOutput() {
+    request_id = std::move(request_);
+    command_id = std::move(command_);
+}
 const std::string& get_output_request() { return request_id; }
 
 void configure_legacy_requests(int batch_capacity) { legacy.capacity = batch_capacity; }

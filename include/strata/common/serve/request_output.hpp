@@ -18,6 +18,18 @@ private:
     std::string previous_;
 };
 
+/// Preserves outer generation framing while the command loop answers a nested inspection.
+/// Callers finish any fragmented response line before entering this scope.
+class InspectionOutput {
+public:
+    InspectionOutput();
+    ~InspectionOutput();
+    InspectionOutput(const InspectionOutput&) = delete;
+    InspectionOutput& operator=(const InspectionOutput&) = delete;
+private:
+    std::string request_, command_;
+};
+
 /// Configures the shared adapter used by engines that still execute legacy command handlers.
 void configure_legacy_requests(int batch_capacity);
 /// Opens ASK reply framing and adapts RUN to legacy handlers without exposing placement.

@@ -278,6 +278,40 @@ def test_settings_allow_a_slower_reply_than_memory_queries(start_engine):
     assert engine.alive()
 
 
+def test_inspection_during_prefill_preserves_generation_and_defers_settings(start_engine):
+    engine = start_engine("prefill")
+    first = threading.Event()
+    with ThreadPoolExecutor() as pool:
+        generation = pool.submit(collect, engine, 31, 5, first)
+        deadline = time.monotonic() + 5
+        while engine.progress is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert engine.progress is not None
+        engine._send("ASK deferred CHANGE_SETTINGS rows=3")
+        records = engine._ask("GET_CONTEXT_WINDOWS conversation0", "CONTEXT_WINDOW", timeout=0.5)
+        assert records == [["CONTEXT_WINDOW", "conversation0", "2", "31,32"]]
+        assert engine.list_conversations()[0]["state"] == "reading"
+        assert engine.memory()["settings"]["rows"] == 2
+        assert not first.is_set()
+        assert generation.result(timeout=5)[0] == [31] * 5
+        assert engine.memory()["settings"]["rows"] == 3
+
+
+def test_context_read_waits_for_a_chunk_longer_than_the_ordinary_query_budget(start_engine):
+    engine = start_engine("prefill")
+    ask = engine._ask
+    engine._ask = lambda command, kind, timeout=0.02, **kwargs: ask(command, kind, timeout=timeout, **kwargs)
+    engine.CONTEXT_QUERY_TIMEOUT_S = 0.5
+    with ThreadPoolExecutor() as pool:
+        generation = pool.submit(collect, engine, 31, 5)
+        deadline = time.monotonic() + 5
+        while engine.progress is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert engine.progress is not None
+        assert engine.context_windows(["conversation0"])["conversation0"].tolist() == [31, 32]
+        assert generation.result(timeout=5)[0] == [31] * 5
+
+
 @pytest.mark.parametrize("mode", ["native", "legacy", "serial"])
 def test_started_retires_queue_deadline_once_before_a_longer_generation(start_engine, mode):
     engine = start_engine(mode)

@@ -1178,18 +1178,21 @@ class StrataEngine:
         requests: the caller holds the service's FIFO and, with --batch, the control lines; the slots may decode
         meanwhile (the engine answers between their windows)."""
         command = "LIST_CONVERSATIONS" + (f" {','.join(map(str, marker))} {int(preview)}" if marker and preview else "")
-        return [parse_conversation_line(f) for f in self._ask(command, "CONVERSATION")]
+        return [parse_conversation_line(f) for f in self._ask(command, "CONVERSATION",
+                                                            timeout=self.CONTEXT_QUERY_TIMEOUT_S)]
 
     def context_windows(self, ids) -> dict:
         """`GET_CONTEXT_WINDOWS`: the tokens of the conversations `ids` names (as list_conversations gives them), as
         array("i"); None for one the engine no longer holds.  The same turn rules as list_conversations."""
         out = {}
-        for f in self._ask("GET_CONTEXT_WINDOWS " + " ".join(ids), "CONTEXT_WINDOW"):
+        for f in self._ask("GET_CONTEXT_WINDOWS " + " ".join(ids), "CONTEXT_WINDOW",
+                           timeout=self.CONTEXT_QUERY_TIMEOUT_S):
             # CONTEXT_WINDOW <id> <n> [<ids>]  or  CONTEXT_WINDOW <id> gone
             out[f[1]] = None if f[2] == "gone" else array("i", map(int, f[3].split(","))) if len(f) > 3 else array("i")
         return out
 
     MEMORY_QUERY_TIMEOUT_S = 30.0
+    CONTEXT_QUERY_TIMEOUT_S = 300.0  # A single large prompt chunk may exceed the ordinary query deadline.
     SETTINGS_REPLY_TIMEOUT_S = 300.0  # Page-locked allocation and paused-state moves can outlast a query.
 
     def memory(self) -> dict:

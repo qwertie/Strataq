@@ -34,13 +34,19 @@ int main(int argc, char** argv) {
     std::printf("INFO request_capacity=%d concurrent=2 context_capacity=8192\n", serial ? 1 : 2);
     if (!legacy && !serial)
         std::printf("INFO request_queue=1\n");
-    std::printf("READY 8192 stop memory settings requests\n");
+    std::printf("READY 8192 stop memory settings requests%s\n", mode == "prefill" ? " conversations" : "");
     std::fflush(stdout);
     Input input;
     std::vector<Request> running;
     int rows = 2;
     std::set<std::string> preempted;
+    std::vector<int32_t> context{31, 32};
     EngineHooks hooks;
+    if (mode == "prefill")
+        hooks.list_conversations = [&] {
+            return std::vector<strata::core::HeldConversation>{
+                {"conversation0", "vram", "reading", context.data(), context.size(), 8192, 1024, 1024}};
+        };
     hooks.is_busy = [&] { return !running.empty(); };
     hooks.step = [&] {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -110,6 +116,12 @@ int main(int argc, char** argv) {
             print_response("STARTED\n");
         const int token = std::stoi(parsed.ids);
         print_response("PP 2 2 1 2000\n");
+        if (mode == "prefill")
+            for (int chunk = 0; chunk < 100; ++chunk) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(chunk == 0 ? 150 : 10));
+                loop.poll_inspections();
+                print_response("PP 2 2 1 2000\n");
+            }
         if (serial) {
             int produced = 0;
             while (produced < parsed.max_new && !input.is_stop_requested()) {
