@@ -9,6 +9,40 @@ const executablePath = [process.env.CHROME,
   .find(path => path && existsSync(path));
 const read = name => readFile(new URL(`../../../strata_server/web/${name}`, import.meta.url), 'utf8');
 
+test('the monitor VRAM widget uses Memory report data when hardware telemetry is unavailable',
+  {skip: !executablePath}, async () => {
+    const browser = await chromium.launch({executablePath, headless: true});
+    try {
+      const page = await browser.newPage();
+      const errors = [];
+      page.on('pageerror', error => errors.push(error.message));
+      await page.route('http://strata.test/**', async route => {
+        const path = new URL(route.request().url()).pathname;
+        if (path === '/')
+          return route.fulfill({contentType: 'text/html', body: await read('index.html')});
+        if (path.startsWith('/web/'))
+          return route.fulfill({contentType: path.endsWith('.js') ? 'text/javascript' : 'text/css',
+            body: await read(path.slice(5))});
+        if (path === '/metrics')
+          return route.fulfill({json: {engine: {}, live: {state: 'idle'}, hardware: {}, history: {},
+            requests: [], totals: {}}});
+        if (path === '/v1/memory')
+          return route.fulfill({json: {available: true, settings: {}, memories: [
+            {id: 'gpu0', name: 'AMD GPU', total: 64 * 2 ** 30, free: 24 * 2 ** 30,
+              uses: {experts: 32 * 2 ** 30}}]}});
+        return route.fulfill({json: {}});
+      });
+      await page.goto('http://strata.test/#monitor');
+      await page.waitForFunction(() => document.querySelector('#mv-vram')?.textContent.includes('40'));
+      assert.match(await page.locator('#mv-vram').textContent(), /40.*64 GB/);
+      assert.match(await page.locator('#ms-vram').textContent(), /Memory report/);
+      await page.waitForFunction(() => document.querySelector('#sp-vram .line').getAttribute('d'));
+      assert.deepEqual(errors, []);
+    } finally {
+      await browser.close();
+    }
+  });
+
 test('context selection retains scroll position and shows snippets and individual limits',
   {skip: !executablePath}, async () => {
     const browser = await chromium.launch({executablePath, headless: true});

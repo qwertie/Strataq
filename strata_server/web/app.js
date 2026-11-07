@@ -3,6 +3,7 @@
 "use strict";
 
 import {getModelHeading} from "./model-heading.js";
+import {getVramReading} from "./vram-reading.js";
 
 const $ = (id) => document.getElementById(id);
 const SPRITE = "web/sprite.svg";
@@ -166,6 +167,10 @@ function setMetric(key, value, unit, sub) {
 }
 
 let lastMetrics = null, metricsFailures = 0, keyWarned = false, monitorTick = 0;
+/** Recent fallback readings, sampled with monitor ticks and bounded to its one-minute history. */
+let vramSamples = [];
+/** Distinguishes whole-device readings from Strata-only allocation totals. */
+let vramSampleSource = "";
 let reqShowAll = false;   // the Monitor's request table: the last 12, or every one the server keeps (issue #35)
 async function poll() {
   try {
@@ -300,10 +305,24 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
   setMetric("gpu", hw.gpu_util == null ? null : fmt(hw.gpu_util), "%",
             multi ? per((g) => (g.util == null ? "–" : `${fmt(g.util)}%`)) : st.gpu_name || (st.gpu_note ? "not available" : ""));
   spark("sp-gpu", h.gpu_util, 100);
-  setMetric("vram", hw.gpu_mem_used == null ? null : gb(hw.gpu_mem_used), hw.gpu_mem_total ? `/ ${gb(hw.gpu_mem_total, 0)} GB` : "GB",
-            multi ? per((g) => (g.mem_used == null ? "–" : `${gb(g.mem_used)} GB`))
-                  : eng.expert_slots ? `${fmt(eng.expert_slots)} experts cached` : (st.gpu_note ? "not available on Windows AMD yet" : ""));
-  spark("sp-vram", h.gpu_mem_used, hw.gpu_mem_total);
+  const vram = getVramReading(hw, memoryReading?.memories);
+  const source = vram.source === "memory" ? "Memory report" : vram.source === "engine" ? "Strata allocation" : "";
+  const vramDetail = vram.gpus.length > 1 ? vram.gpus.map(g =>
+    `GPU ${g.index} ${g.mem_used == null ? "-" : `${gb(g.mem_used)} GB`}`).join(" · ") :
+    eng.expert_slots ? `${fmt(eng.expert_slots)} experts cached` : "";
+  setMetric("vram", vram.used == null ? null : gb(vram.used), vram.total ? `/ ${gb(vram.total, 0)} GB` : "GB",
+    [vram.used == null ? "" : source, vramDetail].filter(Boolean).join(" · "));
+  const now = Date.now();
+  if (vramSampleSource !== vram.source) {
+    vramSamples = [];
+    vramSampleSource = vram.source;
+  }
+  if (vram.source !== "telemetry" && vram.used != null) {
+    vramSamples.push({at: now, used: vram.used});
+    vramSamples = vramSamples.filter(sample => now - sample.at <= 60000);
+  } else
+    vramSamples = [];
+  spark("sp-vram", vram.source === "telemetry" ? h.gpu_mem_used : vramSamples.map(sample => sample.used), vram.total);
   setMetric("temp", hw.gpu_temp == null ? null : fmt(hw.gpu_temp), "°C",
             multi ? per((g) => (g.temp == null ? "–" : `${fmt(g.temp)}°`)) : "");
   spark("sp-temp", h.gpu_temp, 90);
