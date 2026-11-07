@@ -177,6 +177,60 @@ def test_http_settings_apply_during_generation_including_first_lazy_request(star
         server.server_close()
 
 
+def test_ready_does_not_admit_parallel_work_before_initial_memory_is_cached(start_engine):
+    from strata_server.frontend import ChatTemplate
+    from strata_server.server import ByteTokenizer, Service, serve
+
+    engine = start_engine(lazy=True)
+    service = Service(engine, ByteTokenizer(), ChatTemplate(Path(__file__).parent / "chat_template.jinja"))
+    reading, release, generating = threading.Event(), threading.Event(), threading.Event()
+    memory, generate = engine.memory, engine.generate
+
+    def wait_for_memory():
+        reading.set()
+        assert release.wait(5)
+        return memory()
+
+    def observe(*args, **kwargs):
+        generating.set()
+        yield from generate(*args, **kwargs)
+
+    def load():
+        with service.fifo:
+            service.ensure_loaded()
+
+    def post():
+        request = urllib.request.Request(base + "/v1/chat/completions",
+                                         data=json.dumps({"messages": [{"role": "user", "content": "Hi"}],
+                                                          "max_tokens": 3}).encode(),
+                                         headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.load(response)
+
+    engine.memory, engine.generate = wait_for_memory, observe
+    server = serve(service, port=0)
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with ThreadPoolExecutor() as pool:
+            loading = pool.submit(load)
+            try:
+                assert reading.wait(30)
+                assert engine.alive()
+                request = pool.submit(post)
+                assert not generating.wait(0.1)
+            finally:
+                release.set()
+            loading.result(timeout=5)
+            assert service.memory_last["at"] is not None
+            assert service.memory_last["settings"]["rows"] == 2
+            assert not service.initializing_engine
+            assert request.result(timeout=5)["choices"]
+    finally:
+        release.set()
+        server.shutdown()
+        server.server_close()
+
+
 def test_native_admission_does_not_hide_requests_behind_a_python_capacity_semaphore(start_engine):
     engine = start_engine()
     one, two, three = threading.Event(), threading.Event(), threading.Event()

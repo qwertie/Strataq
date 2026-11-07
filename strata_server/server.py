@@ -1193,6 +1193,7 @@ class Service:
         self.context_shown = None                       # ... and the context window it read last (context_window)
         # the engine's last GET_MEMORY_USE answer (memory_view)
         self.memory_last = {"at": None, "memories": [], "settings": {}}
+        self.initializing_engine = False  # READY precedes post-load restoration and the first memory snapshot.
         self.api_requests = collections.deque(maxlen=100)  # bounded I/O in memory; no headers or API keys
         self.request_trace = threading.local()
         self.history = collections.deque(maxlen=500)    # the last finished requests, newest last (GET /metrics)
@@ -1251,6 +1252,16 @@ class Service:
             slots = conversation_slots(engine)
             self.prompts = PromptEncoder(tokenizer, keep=slots) if slots is not None and slots > 0 \
                 else PromptEncoder(tokenizer)
+        self._read_initial_memory()
+
+    def _read_initial_memory(self) -> None:
+        """Caches allocations before this service admits work to a newly loaded engine."""
+        self.memory_last = {"at": None, "memories": [], "settings": {}}
+        if self.loaded() and getattr(self.engine, "can_report_memory", False):
+            try:
+                self.memory_last = {"at": time.time(), **self.engine.memory()}
+            except engine_client.EngineDied as error:
+                print(f"[strata] the initial memory reading failed: {error}", flush=True)
 
     def set_family(self, family: str | None) -> None:
         """A family whose text differs from the Qwen form this server was written for (DeepSeek-V4.1: its own end
@@ -1647,24 +1658,29 @@ class Service:
             code = self.engine.exit_code() if hasattr(self.engine, "exit_code") else None
             print(f"[strata] the engine had stopped (exit code {code}); starting it again "
                   "(a minute or two) ...", flush=True)
+        self.initializing_engine = True
         try:
-            self.engine.restart()
-        except Exception as e:
-            if vision_started:
-                self.vision.unload()
-            # the program could not be started at all (missing, not executable, or blocked by Windows - #735): the
-            # request path answers EngineDied with a 503, but takes a bare OSError for a client that went away (#2496)
-            if isinstance(e, OSError):
-                raise engine_client.EngineDied(f"the engine could not be started: {e}") from e
-            raise
-        print("[strata] the engine is running again", flush=True)
-        if self.restore_after_load:                      # an image job unloaded it: its conversation comes back
-            images_api.restore_session(self)
-        if self.vram_reserve is not None and hasattr(self.engine, "vram"):   # #533: the reserve asked for last
             try:
-                self.engine.vram(self.vram_reserve)
-            except (ValueError, engine_client.EngineDied) as e:
-                print(f"[strata] the VRAM reserve ({self.vram_reserve} MiB) was not applied: {e}", flush=True)
+                self.engine.restart()
+            except Exception as e:
+                if vision_started:
+                    self.vision.unload()
+                # the program could not be started at all (missing, not executable, or blocked by Windows - #735): the
+                # request path answers EngineDied with a 503, but takes a bare OSError for a client that went away (#2496)
+                if isinstance(e, OSError):
+                    raise engine_client.EngineDied(f"the engine could not be started: {e}") from e
+                raise
+            print("[strata] the engine is running again", flush=True)
+            if self.restore_after_load:                      # an image job unloaded it: its conversation comes back
+                images_api.restore_session(self)
+            if self.vram_reserve is not None and hasattr(self.engine, "vram"):   # #533: the reserve asked for last
+                try:
+                    self.engine.vram(self.vram_reserve)
+                except (ValueError, engine_client.EngineDied) as e:
+                    print(f"[strata] the VRAM reserve ({self.vram_reserve} MiB) was not applied: {e}", flush=True)
+            self._read_initial_memory()
+        finally:
+            self.initializing_engine = False
 
     vram_wait_s = 300.0                                  # #533: how long POST /v1/vram waits for a running request
 
@@ -1971,7 +1987,8 @@ class Service:
         and free are the BIOS share's, and what it borrows beyond the share counts against the RAM (the RAM's
         `gpu_borrowed`).  The engine's RAM the GPU maps (the RAM's `mapped`: strata-q38's page-locked pool) is in the
         GPU's borrowed use too, as Windows and Linux count it, and is not borrowed again: the RAM's bar has it as the
-        engine's.  While a request has the engine's turn: the last answer, marked busy."""
+        engine's. During prompt processing or while a request has the engine's turn, returns the last reading,
+        marked busy. The initial reading is cached before generation starts."""
         from strata_base.memory import read_ram
         from strata_common.telemetry import read_shared_gpu_memory
         eng, ram = self.engine, read_ram()
@@ -1990,9 +2007,15 @@ class Service:
         busy, error = False, None
         try:
             if answered is None:
-                with self._engine_turn() as turn:
-                    busy = not turn
-                    answered = eng.memory() if turn else None
+                with self.status_lock:
+                    reading = any(s.get("busy") and s.get("first_token") is None
+                                  for s in ([st for st, _ in self.live_reqs.values()] or [self.status]))
+                if reading and self.memory_last["at"] is not None:
+                    busy = True
+                else:
+                    with self._engine_turn() as turn:
+                        busy = not turn
+                        answered = eng.memory() if turn else None
             if answered is not None:
                 self.memory_last = {"at": time.time(), **answered}
         except engine_client.EngineDied as e:
@@ -2813,7 +2836,7 @@ class Service:
                     # loaded engine has nothing to start, so it does not wait for the fifo at all
                     if not par:
                         self.ensure_loaded()
-                    elif not (self.loaded() and not self._vision_down()):
+                    elif self.initializing_engine or not (self.loaded() and not self._vision_down()):
                         with self._inference_fifo(deadline, cancel):
                             self.ensure_loaded()
                     if not par and getattr(self.engine, "request_protocol", False):

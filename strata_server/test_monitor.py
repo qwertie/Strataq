@@ -58,6 +58,71 @@ class MonitorOff(unittest.TestCase):
             httpd.server_close()
 
 
+class InitialMemory(unittest.TestCase):
+    """The first monitor poll can use a real reading while prompt processing owns the engine."""
+
+    def test_start_and_reload_cache_memory_before_requests(self):
+        for lazy in (False, True):
+            with self.subTest(lazy=lazy):
+                tok = ByteTokenizer()
+                engine = ReloadableEngine(tok, "Hello.")
+                engine.running = not lazy
+                engine.can_report_memory = True
+                report = {"memories": [{"id": "gpu0", "name": "GPU", "total": 4096, "free": 1024,
+                          "unified": False, "uses": {"weights": 3072}, "paused_count": None, "paused_budget": None}],
+                          "settings": {"rows": 4}}
+                engine.memory = mock.Mock(return_value=report)
+                svc = Service(engine, tok, ChatTemplate(Path(__file__).parent / "chat_template.jinja"))
+                if lazy:
+                    engine.memory.assert_not_called()
+                    svc.load()
+                self.assertEqual(engine.memory.call_count, 1)
+                svc.CONTEXT_WAIT_S = 0
+                with svc.fifo:
+                    reading = svc.memory_view()
+                self.assertTrue(reading["busy"])
+                self.assertEqual(reading["memories"][0]["uses"], {"weights": 3072})
+                self.assertEqual(reading["settings"], {"rows": 4})
+                self.assertIsNotNone(reading["at"])
+                svc.status.update(busy=True, first_token=None)
+                reading = svc.memory_view()
+                self.assertTrue(reading["busy"])
+                self.assertEqual(reading["settings"], {"rows": 4})
+                self.assertEqual(engine.memory.call_count, 1)
+                svc.live_reqs[1] = ({"busy": True, "first_token": time.time()}, [])
+                self.assertFalse(svc.memory_view()["busy"])
+                self.assertEqual(engine.memory.call_count, 2)
+                svc.live_reqs.clear()
+                engine.memory.reset_mock()
+                svc.status.update(busy=False)
+                engine.unload()
+                engine.memory.return_value = {**report, "settings": {"rows": 6}}
+                with svc.fifo:
+                    svc.ensure_loaded()
+                    reading = svc.memory_view()
+                self.assertEqual(engine.memory.call_count, 1)
+                self.assertEqual(reading["settings"], {"rows": 6})
+
+    def test_monitor_failure_does_not_prevent_loading(self):
+        tok = ByteTokenizer()
+        engine = ReloadableEngine(tok, "Hello.")
+        engine.can_report_memory = True
+        engine.memory = mock.Mock(side_effect=EngineDied("report unavailable"))
+        svc = Service(engine, tok, ChatTemplate(Path(__file__).parent / "chat_template.jinja"))
+        self.assertTrue(svc.loaded())
+        self.assertIsNone(svc.memory_last["at"])
+
+    def test_failed_restart_releases_initialization_gate(self):
+        tok = ByteTokenizer()
+        engine = ReloadableEngine(tok, "Hello.")
+        svc = Service(engine, tok, ChatTemplate(Path(__file__).parent / "chat_template.jinja"))
+        engine.unload()
+        engine.restart = mock.Mock(side_effect=EngineDied("cannot start"))
+        with self.assertRaises(EngineDied), svc.fifo:
+            svc.ensure_loaded()
+        self.assertFalse(svc.initializing_engine)
+
+
 class Monitor(unittest.TestCase):
     def setUp(self):
         self.tok = ByteTokenizer()
