@@ -6,6 +6,7 @@
 #include "strata/base/platform/aux_cpus.hpp"
 #include "strata/base/platform/thread_name.hpp"
 
+#include <algorithm>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -24,6 +25,17 @@
 #endif
 
 namespace strata::serve {
+namespace {
+/// Gets the handler command inside a valid ASK envelope without copying a queued prompt.
+std::string_view get_handler_command(std::string_view command) {
+    if (command.starts_with("ASK ")) {
+        const size_t end = command.find(' ', 4);
+        if (end != std::string::npos && is_protocol_identity(std::string(command.substr(4, end - 4))))
+            command.remove_prefix(end + 1);
+    }
+    return command;
+}
+}
 
 struct Input::Shared {
     std::atomic<bool> stop{false};
@@ -120,12 +132,7 @@ std::vector<std::string> Input::take_inspections() {
     std::vector<std::string> lines;
     std::lock_guard<std::mutex> lock(shared_->mu);
     for (auto it = shared_->lines.begin(); it != shared_->lines.end();) {
-        std::string_view command = *it;
-        if (command.rfind("ASK ", 0) == 0) {
-            const size_t end = command.find(' ', 4);
-            if (end != std::string::npos && is_protocol_identity(std::string(command.substr(4, end - 4))))
-                command.remove_prefix(end + 1);
-        }
+        const std::string_view command = get_handler_command(*it);
         if (command == "GET_MEMORY_USE" || command.starts_with("LIST_CONVERSATIONS") ||
             command.starts_with("GET_CONTEXT_WINDOWS")) {
             lines.push_back(std::move(*it));
@@ -134,6 +141,14 @@ std::vector<std::string> Input::take_inspections() {
             ++it;
     }
     return lines;
+}
+
+bool Input::has_pending_settings() const {
+    std::lock_guard<std::mutex> lock(shared_->mu);
+    return std::any_of(shared_->lines.begin(), shared_->lines.end(), [](const std::string& line) {
+        const auto command = get_handler_command(line);
+        return command == "CHANGE_SETTINGS" || command.starts_with("CHANGE_SETTINGS ");
+    });
 }
 
 bool Input::is_stop_requested() const {

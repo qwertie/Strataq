@@ -29,12 +29,13 @@ int main(int argc, char** argv) {
     const std::string mode = argc > 1 && std::string(argv[argc - 1]) != "--serve" ?
                              argv[argc - 1] : "native";
     const bool legacy = mode == "legacy", serial = mode == "serial";
+    const bool prefill = mode == "prefill" || mode == "settings-prefill";
     if (legacy || serial)
         configure_legacy_requests(legacy ? 2 : 0);
     std::printf("INFO request_capacity=%d concurrent=2 context_capacity=8192\n", serial ? 1 : 2);
     if (!legacy && !serial)
         std::printf("INFO request_queue=1\n");
-    std::printf("READY 8192 stop memory settings requests%s\n", mode == "prefill" ? " conversations" : "");
+    std::printf("READY 8192 stop memory settings requests%s\n", prefill ? " conversations" : "");
     std::fflush(stdout);
     Input input;
     std::vector<Request> running;
@@ -42,7 +43,7 @@ int main(int argc, char** argv) {
     std::set<std::string> preempted;
     std::vector<int32_t> context{31, 32};
     EngineHooks hooks;
-    if (mode == "prefill")
+    if (prefill)
         hooks.list_conversations = [&] {
             return std::vector<strata::core::HeldConversation>{
                 {"conversation0", "vram", "reading", context.data(), context.size(), 8192, 1024, 1024}};
@@ -66,6 +67,9 @@ int main(int argc, char** argv) {
                 input.finish_request(request.id);
                 if (legacy)
                     print_response("BDONE %d %d %s 1\n", request.place, request.produced,
+                                   request.cancelled ? "cancel" : "length");
+                else if (mode == "settings-prefill")
+                    print_response("DONE %d 2 1 1 %s 0 0 0 0 0 0 0 0.0 1 0\n", request.produced,
                                    request.cancelled ? "cancel" : "length");
                 else
                     print_response("DONE %d 2 1 1 %s\n", request.produced,
@@ -116,12 +120,21 @@ int main(int argc, char** argv) {
             print_response("STARTED\n");
         const int token = std::stoi(parsed.ids);
         print_response("PP 2 2 1 2000\n");
-        if (mode == "prefill")
+        bool yielded = false;
+        if (prefill)
             for (int chunk = 0; chunk < 100; ++chunk) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(chunk == 0 ? 150 : 10));
                 loop.poll_inspections();
+                if (mode == "settings-prefill" && input.has_pending_settings()) {
+                    input.finish_request(id);
+                    print_response("DONE 0 2 1 0 preempted 0 0 0 0 0 0 0 0.0 1 0\n");
+                    yielded = true;
+                    break;
+                }
                 print_response("PP 2 2 1 2000\n");
             }
+        if (yielded)
+            continue;
         if (serial) {
             int produced = 0;
             while (produced < parsed.max_new && !input.is_stop_requested()) {

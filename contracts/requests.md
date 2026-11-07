@@ -66,6 +66,11 @@ up to five minutes for a reply, since an individual GPU chunk can exceed the
 ordinary query deadline. Command identities keep late replies isolated if an
 operation still outlasts its caller's timeout.
 
+Queued settings make prefill yield at its next completed chunk. The engine
+returns `DONE ... preempted`, retaining the processed prefix, and handles the
+settings through its ordinary command loop. Python resubmits the same request
+identity and combines its statistics, as with other scheduler preemptions.
+
 The older Qwen3.8, Qwen3.6, DeepSeek and SYCL handlers use the shared transport
 adapter. It chooses their internal placement, frames their events, and combines
 their admission and completion statistics into one DONE. Their `GEN`, `BGEN`,

@@ -32,6 +32,8 @@ public:
     bool try_next(std::string& line);
     /// Removes queued host-only inspection commands without admitting generation or settings changes.
     std::vector<std::string> take_inspections();
+    /// Tells whether prefill must yield so the main loop can apply queued settings safely.
+    bool has_pending_settings() const;
 
     /// Tells whether STOP has come since the last clear_stop().
     bool is_stop_requested() const;

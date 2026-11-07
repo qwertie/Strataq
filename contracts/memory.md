@@ -46,8 +46,9 @@ or shortfall response.
 
 Manual RAM resizing uses available physical RAM and remaining commit capacity.
 The headroom used to choose an automatic startup size does not limit manual changes.
-Memory queries wait up to 30 seconds for a reply. Settings changes wait up to
-five minutes, since allocating page-locked memory or moving paused state can take longer.
+Memory queries and settings changes wait up to 30 seconds for a reply. A paged
+request yields prefill at a chunk boundary when settings are queued; Python
+resumes its request identity after the engine applies the change.
 
 Blocks may append an identity group and comma-separated unsigned member IDs:
 `MEMORY_BLOCK <memory> <bytes> <category> <pool> <label> <identity-group> <ids>`.

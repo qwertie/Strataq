@@ -267,17 +267,6 @@ def test_timed_out_command_reply_cannot_be_mistaken_for_the_next_reply(start_eng
     assert report["settings"]["rows"] == 3
 
 
-def test_settings_allow_a_slower_reply_than_memory_queries(start_engine):
-    engine = start_engine("slow")
-    engine.MEMORY_QUERY_TIMEOUT_S = 0.02
-    engine.SETTINGS_REPLY_TIMEOUT_S = 1.0
-    with pytest.raises(EngineDied, match="did not answer"):
-        engine.memory()
-    report = engine.change_settings({"rows": 2})
-    assert report["settings"]["rows"] == 2
-    assert engine.alive()
-
-
 def test_inspection_during_prefill_preserves_generation_and_defers_settings(start_engine):
     engine = start_engine("prefill")
     first = threading.Event()
@@ -310,6 +299,28 @@ def test_context_read_waits_for_a_chunk_longer_than_the_ordinary_query_budget(st
         assert engine.progress is not None
         assert engine.context_windows(["conversation0"])["conversation0"].tolist() == [31, 32]
         assert generation.result(timeout=5)[0] == [31] * 5
+
+
+def test_settings_interrupt_prefill_and_resume_the_same_request(start_engine):
+    engine = start_engine("settings-prefill")
+    first = threading.Event()
+    sent, send = [], engine._send
+    engine._send = lambda line, **kwargs: (sent.append(line), send(line, **kwargs))[-1]
+    with ThreadPoolExecutor() as pool:
+        generation = pool.submit(collect, engine, 31, 5, first)
+        deadline = time.monotonic() + 5
+        while engine.progress is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert engine.progress is not None
+        assert engine.change_settings({"rows": 3})["settings"]["rows"] == 3
+        assert not first.is_set()
+        output, last = generation.result(timeout=5)
+        assert output == [31] * 5
+        assert last["generated"] == 5
+        assert last["prompt_ms"] == 2
+        assert last["prompt_read"] == 2
+        runs = [line.split()[1] for line in sent if line.startswith("RUN ")]
+        assert len(runs) == 2 and runs[0] == runs[1]
 
 
 @pytest.mark.parametrize("mode", ["native", "legacy", "serial"])

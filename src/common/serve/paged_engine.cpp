@@ -30,6 +30,7 @@
 #include <numeric>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -971,11 +972,12 @@ bool PagedEngine::serve_request(const std::string& line, bool admit) {
         const bool ok = read_prompt(h, ids, resume, n - 1, t0, read_to, fatal, err);
         if (fatal)
             return false;
-        if (!ok && err != "cancelled") {
+        if (!ok && err != "cancelled" && err != "settings pending") {
             print_response("ERR %s\n", err.c_str());
             return false;
         }
-        if (!ok) finish = "cancel";
+        if (!ok)
+            finish = err == "settings pending" ? "preempted" : "cancel";
     }
     h.live.assign(ids.begin(), ids.begin() + read_to);
     if (h.gpu_tokens.get_used() > (uint64_t) read_to)
@@ -986,7 +988,7 @@ bool PagedEngine::serve_request(const std::string& line, bool admit) {
     print_response("REUSED %lld\n", (long long) resume);
     const Clock::time_point d0 = Clock::now();
     h.t0 = d0;
-    if (read_to == n - 1) {
+    if (read_to == n - 1 && std::string_view(finish) == "length") {
         h.dec.session = session;
         h.dec.next = (int32_t) ids[(size_t) (n - 1)];
         h.dec.pos = n - 1;
@@ -1077,8 +1079,12 @@ bool PagedEngine::read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t 
         strata::core::progress_beat();
         if (command_loop_)
             command_loop_->poll_inspections();
-        if (!input_.is_stop_requested()) return true;
-        e = "cancelled";
+        if (input_.is_stop_requested())
+            e = "cancelled";
+        else if (input_.has_pending_settings())
+            e = "settings pending";
+        else
+            return true;
         return false;
     };
     // beside conversations that decode, a chunk at a time, and they decode between two chunks

@@ -1193,7 +1193,6 @@ class StrataEngine:
 
     MEMORY_QUERY_TIMEOUT_S = 30.0
     CONTEXT_QUERY_TIMEOUT_S = 300.0  # A single large prompt chunk may exceed the ordinary query deadline.
-    SETTINGS_REPLY_TIMEOUT_S = 300.0  # Page-locked allocation and paused-state moves can outlast a query.
 
     def memory(self) -> dict:
         """GET /v1/memory: `GET_MEMORY_USE` (an engine whose READY says "memory";
@@ -1222,7 +1221,7 @@ class StrataEngine:
         memories, settings, held, shortfall, pause_directory = [], {}, [], None, None
         details = {}
         for f in self._ask(command, "MEMORY", end="END_MEMORY",
-                           timeout=self.SETTINGS_REPLY_TIMEOUT_S if refused else self.MEMORY_QUERY_TIMEOUT_S,
+                           timeout=self.MEMORY_QUERY_TIMEOUT_S,
                            also=("SETTINGS", "CONVERSATION", "SHORTFALL", "MEMORY_BLOCK",
                                  "PAUSE_DIRECTORY", "MEMORY_DETAIL"),
                            refused=refused):
@@ -1779,6 +1778,7 @@ class StrataEngine:
 
         complete, sent, stopped, admitted = False, False, False, False
         output, carry = [], {}
+        prompt_ms, prompt_read = 0.0, None
         initial_reused = None
         self.last = {}
         silence = self.silence_s or 0.0
@@ -1853,6 +1853,9 @@ class StrataEngine:
                     complete = True
                     raise ValueError(" ".join(fields[1:]))
                 if fields[0] == "DONE":
+                    prompt_ms += float(self.last.get("prompt_ms") or 0.0)
+                    if self.last.get("prompt_read") is not None:
+                        prompt_read = (prompt_read or 0) + int(self.last["prompt_read"])
                     finish = self.last.get("finish")
                     if finish == "preempted" and not cancel.is_set() and len(output) < max_new:
                         if initial_reused is None:
@@ -1866,7 +1869,9 @@ class StrataEngine:
                         continue
                     complete = True
                     if carry:
-                        self.last = {**add_carry(carry, self.last), "prompt_tokens": len(ids)}
+                        self.last = {**add_carry(carry, self.last), "prompt_tokens": len(ids), "prompt_ms": prompt_ms}
+                        if prompt_read is not None:
+                            self.last["prompt_read"] = prompt_read
                         if initial_reused is not None:
                             self.last = {**self.last, "reused": initial_reused}
                     if finish == "nonfinite":
