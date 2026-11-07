@@ -1,3 +1,4 @@
+#include "strata/common/serve/request_output.hpp"
 #include "strata/common/sample/logit_bias.hpp"
 // src/program/generate.cpp - P2.S6: `strata generate`.
 //
@@ -142,6 +143,7 @@ namespace strata::metal_engine { void set_model_shard(const char* shard1); }   /
 #include <vector>
 
 namespace {
+using strata::serve::print_response;
 using namespace strata::qwen38;   // the model loader and the helpers it shares with the loops here
 // STRATA_PIPE_BYIELD_NODRAIN=1 (read once; off by default): with the pipelined groups, a BYIELD that reaches the main
 // loop is dropped without draining the groups first.  A pipelined read never gives way (batch_read_piece), so the
@@ -3657,7 +3659,7 @@ int main(int argc, char** argv) {
             const int64_t done = p0 + T;
             pp_reached = done;
             const double ms = std::chrono::duration<double, std::milli>(Clock::now() - pp_t0).count();
-            std::printf("PP %lld %lld %.0f %.1f\n", (long long) done, (long long) pp_total, ms,
+            print_response("PP %lld %lld %.0f %.1f\n", (long long) done, (long long) pp_total, ms,
                         ms > 0.0 ? 1000.0 * (double) (done - pp_from) / ms : 0.0);
             strata::core::progress_at("reading the prompt (batched), done up to token", done);
             strata::core::progress_beat();
@@ -4734,7 +4736,8 @@ int main(int argc, char** argv) {
                     slots_all += remote_experts[(size_t) r].resident();
                     mib_all += (int64_t) (remote_experts[(size_t) r].gib() * 1024.0);
                 }
-            std::printf("INFO logit_bias=1 context=%lld kv=%s kv_resident=%lld expert_slots=%lld expert_cache_mib=%lld "
+            print_response(
+                "INFO logit_bias=1 context=%lld kv=%s kv_resident=%lld expert_slots=%lld expert_cache_mib=%lld "
                         "expert_slots_primary=%lld expert_cache_primary_mib=%lld spec=%d "
                         "mtp_max=%d lookup=%d vram_free_mib=%lld cvec=%s arena_mib=%lld pool_workers=%d pcie_frac=%.2f "
                         "spec_min_p=%.2f conversation_cache_mib=%lld conversation_cache_slots=%d "
@@ -4826,7 +4829,9 @@ int main(int argc, char** argv) {
         strata::core::pin_reserve_release_hard();   // the load is over: nothing else needs the headroom
         // "stop": this engine honours STOP; "conversations": it answers LIST_CONVERSATIONS and GET_CONTEXT_WINDOWS;
         // "memory": GET_MEMORY_USE
-        std::printf("READY %lld stop conversations memory\n", (long long) o.max_context);
+        strata::serve::configure_legacy_requests(o.batch);
+        print_response("INFO request_capacity=%d\n", std::max(1, o.batch));
+        print_response("READY %lld stop conversations memory requests\n", (long long) o.max_context);
         std::fflush(stdout);
         std::string line;
         int64_t rounds = 0;
@@ -4960,7 +4965,7 @@ int main(int argc, char** argv) {
                          (double) xcache.mapped_bytes() / 1073741824.0, (double) xcache.full_bytes() / 1073741824.0,
                          (long long) (free_b >> 20), (long long) o.prefill_chunk,
                          std::chrono::duration<double, std::milli>(Clock::now() - t0).count(), note.c_str());
-            std::printf("VRAM reserve_mib=%lld expert_slots=%lld expert_slots_full=%lld expert_cache_mib=%lld "
+            print_response("VRAM reserve_mib=%lld expert_slots=%lld expert_slots_full=%lld expert_cache_mib=%lld "
                         "expert_cache_full_mib=%lld vram_free_mib=%lld prompt_chunk=%lld\n", reserve,
                         (long long) xcache.slots(), (long long) xcache.full_slots(),
                         (long long) (xcache.mapped_bytes() >> 20), (long long) (xcache.full_bytes() >> 20),
@@ -5022,7 +5027,7 @@ int main(int argc, char** argv) {
             if (!batch_telemetry_enabled) return;
             const auto sample = batch_telemetry.complete(processed_rows, active_rows, idle, started, Clock::now());
             if (!sample) return;
-            std::printf("BSTAT %lld %lld %lld %lld\n", (long long) sample->windows,
+            print_response("BSTAT %lld %lld %lld %lld\n", (long long) sample->windows,
                         (long long) sample->processed_rows, (long long) sample->active_rows,
                         (long long) sample->elapsed_ms);
             std::fflush(stdout);
@@ -5170,7 +5175,7 @@ int main(int argc, char** argv) {
             if (ajob && !in_prompt_read) {
                 const Clock::time_point ta = Clock::now();
                 if (!adapt_tick(false)) {
-                    std::printf("ERR an adaptive refill failed\n");
+                    print_response("ERR an adaptive refill failed\n");
                     return false;
                 }
                 bt_adapt_wait += std::chrono::duration<double, std::milli>(Clock::now() - ta).count();
@@ -5190,7 +5195,7 @@ int main(int argc, char** argv) {
             }
             const Clock::time_point w0 = Clock::now();
             if (!ver.run_slot_rows(rows, S, tok, pos, win_pool_fn, win_pool_user, outb, err) || drive.d.failed) {
-                std::printf("ERR %s\n", drive.d.failed && drive.d.fail ? drive.d.fail : err.c_str());
+                print_response("ERR %s\n", drive.d.failed && drive.d.fail ? drive.d.fail : err.c_str());
                 return false;
             }
             const Clock::time_point w1 = Clock::now();
@@ -5217,7 +5222,7 @@ int main(int argc, char** argv) {
                           sl.produced + 2 <= sl.max_new && sl.p + 3 <= o.max_context ? 2 : 1;
             }
             if (!(batch_mtp ? ver.commit_slot_prefixes(keep.data(), err) : ver.commit_slots(err))) {
-                std::printf("ERR %s\n", err.c_str());
+                print_response("ERR %s\n", err.c_str());
                 return false;
             }
             const Clock::time_point w2 = Clock::now();
@@ -5239,7 +5244,7 @@ int main(int argc, char** argv) {
                                          "(BDONE nonfinite) and the next request reads its prompt from token 0\n", b,
                                  (long long) pos[first[t]]);
                     const double ms = std::chrono::duration<double, std::milli>(Clock::now() - sl.t0).count();
-                    std::printf("BDONE %d %lld nonfinite %.1f\n", b, (long long) sl.produced, ms);
+                    print_response("BDONE %d %lld nonfinite %.1f\n", b, (long long) sl.produced, ms);
                     sl.active = false;
                     sl.cached = false;
                     sl.checks.clear();
@@ -5249,14 +5254,14 @@ int main(int argc, char** argv) {
                 for (int j = 0; j < keep[b]; ++j) {
                     const int32_t y = outb[first[t] + j];
                     sl.ids.push_back(tok[first[t] + j]);
-                    std::printf("BT %d %d\n", b, (int) y);
+                    print_response("BT %d %d\n", b, (int) y);
                     ++sl.produced;
                     const bool eos = std::find(o.eos_ids.begin(), o.eos_ids.end(), (int64_t) y) != o.eos_ids.end();
                     const char* fin = eos ? "stop" : sl.stop ? "cancel" : sl.produced >= sl.max_new ? "length"
                                     : sl.p + 2 > o.max_context ? "length" : nullptr;
                     if (fin != nullptr) {
                         const double ms = std::chrono::duration<double, std::milli>(Clock::now() - sl.t0).count();
-                        std::printf("BDONE %d %lld %s %.1f\n", b, (long long) sl.produced, fin, ms);
+                        print_response("BDONE %d %lld %s %.1f\n", b, (long long) sl.produced, fin, ms);
                         sl.active = false;
                         sl.cached = o.prompt_cache > 0 && !sl.img && !sl.tainted;
                         break;
@@ -5276,7 +5281,7 @@ int main(int argc, char** argv) {
                                         slot_mtp[(size_t) b]->stream()) != cudaSuccess ||
                         !slot_mtp[(size_t) b]->draft(2, outb + first[t], pos[first[t]], keep[b] - 1,
                                                     sl.draft.data(), err)) {
-                        std::printf("ERR batch MTP slot %d: %s\n", b, err.c_str());
+                        print_response("ERR batch MTP slot %d: %s\n", b, err.c_str());
                         return false;
                     }
                     sl.draft_ready = true;
@@ -5288,7 +5293,7 @@ int main(int argc, char** argv) {
                 const Clock::time_point wa = Clock::now();
                 adapt_run.th.join();
                 if (!adapt_run.ok) {
-                    std::printf("ERR an adaptive refill failed\n");
+                    print_response("ERR an adaptive refill failed\n");
                     return false;
                 }
                 ++bt_adapt_rounds;
@@ -5405,7 +5410,7 @@ int main(int argc, char** argv) {
                 if (gi < 0) continue;
                 strata::core::Verifier& vk = stage_verifier(k);
                 const int r = vk.batch_poll(win_pool_fn, win_pool_user, err);
-                if (r < 0) { std::printf("ERR %s\n", err.c_str()); return false; }
+                if (r < 0) { print_response("ERR %s\n", err.c_str()); return false; }
                 if (r == 0) continue;
                 if (batch_telemetry_enabled) stage_in_flight.complete(k, Clock::now());
                 stage_group[(size_t) k] = -1;
@@ -5421,7 +5426,7 @@ int main(int argc, char** argv) {
                                              "ends (BDONE nonfinite) and the next request reads its prompt from token 0\n",
                                      gi * GS + t, (long long) sl.p);
                         const double ms = std::chrono::duration<double, std::milli>(Clock::now() - sl.t0).count();
-                        std::printf("BDONE %d %lld nonfinite %.1f\n", gi * GS + t, (long long) sl.produced, ms);
+                        print_response("BDONE %d %lld nonfinite %.1f\n", gi * GS + t, (long long) sl.produced, ms);
                         sl.active = false;
                         sl.cached = false;
                         sl.checks.clear();
@@ -5429,7 +5434,7 @@ int main(int argc, char** argv) {
                         continue;
                     }
                     const int32_t y = outb[t];
-                    std::printf("BT %d %d\n", gi * GS + t, (int) y);
+                    print_response("BT %d %d\n", gi * GS + t, (int) y);
                     ++sl.produced;
                     ++bt_rows;
                     ++pipe_rows;
@@ -5439,7 +5444,7 @@ int main(int argc, char** argv) {
                     sl.ids.push_back(sl.x);
                     if (fin != nullptr) {
                         const double ms = std::chrono::duration<double, std::milli>(Clock::now() - sl.t0).count();
-                        std::printf("BDONE %d %lld %s %.1f\n", gi * GS + t, (long long) sl.produced, fin, ms);
+                        print_response("BDONE %d %lld %s %.1f\n", gi * GS + t, (long long) sl.produced, fin, ms);
                         sl.active = false;
                         // a pipelined slot is a cache again (#857: a request left alone in its slot goes back to the solo path with its
                         // drafts): its state is final once its last window has left the last stage.  A later group window whose pad
@@ -5497,7 +5502,7 @@ int main(int argc, char** argv) {
                     // (with the doorbells on their own thread, a failure it set for a window that left this stage is
                     // not cleared unseen)
                     if (conc_serving && drive.d.failed) {
-                        std::printf("ERR %s\n", drive.d.fail ? drive.d.fail : "the expert pool failed");
+                        print_response("ERR %s\n", drive.d.fail ? drive.d.fail : "the expert pool failed");
                         return false;
                     }
                     drive.d.failed = false;
@@ -5507,7 +5512,7 @@ int main(int argc, char** argv) {
                 strata::core::progress().busy.store(true);
                 if (batch_telemetry_enabled) stage_in_flight.launch(k, Clock::now());
                 if (!stage_verifier(k).batch_launch(pick * GS, G.S, G.tok, G.pos, err)) {
-                    std::printf("ERR %s\n", err.c_str());
+                    print_response("ERR %s\n", err.c_str());
                     return false;
                 }
                 stage_group[(size_t) k] = pick;
@@ -5519,13 +5524,16 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            if (drive.d.failed) { std::printf("ERR %s\n", drive.d.fail ? drive.d.fail : "the expert pool failed"); return false; }
+            if (drive.d.failed) {
+                print_response("ERR %s\n", drive.d.fail ? drive.d.fail : "the expert pool failed");
+                return false;
+            }
             if (batch_telemetry_enabled) {
                 const auto sample = stage_in_flight.sample(Clock::now(), !pipe_inflight() && !batch_on());
                 if (sample) {
-                    std::printf("PSTAT %zu %lld", sample->in_flight_us.size(), (long long) sample->elapsed_us);
-                    for (const int64_t busy : sample->in_flight_us) std::printf(" %lld", (long long) busy);
-                    std::printf("\n");
+                    print_response("PSTAT %zu %lld", sample->in_flight_us.size(), (long long) sample->elapsed_us);
+                    for (const int64_t busy : sample->in_flight_us) print_response(" %lld", (long long) busy);
+                    print_response("\n");
                     std::fflush(stdout);
                 }
             }
@@ -5654,14 +5662,14 @@ int main(int argc, char** argv) {
                 std::string verr;
                 if (batch_on()) verr = "VRAM: not while batch slots are decoding";
                 else vram_command(line, verr);
-                if (!verr.empty()) std::printf("ERR %s\n", verr.c_str());
+                if (!verr.empty()) print_response("ERR %s\n", verr.c_str());
                 std::fflush(stdout);
                 continue;
             }
             // a command may touch the expert cache (a request lends slots, a K/V growth moves them, a session restore
             // quiesces it): a round of the asynchronous tier that the batch windows left in flight lands first
             if (!adapt_tick(true)) {
-                std::printf("ERR an adaptive refill failed\n");
+                print_response("ERR an adaptive refill failed\n");
                 return 1;
             }
             admit_slot = -1;
@@ -5672,7 +5680,7 @@ int main(int argc, char** argv) {
             if (is_request && req.batch) {
                 if (bs.empty() || req.slot < 0 || req.slot >= (long) bs.size() || bs[(size_t) req.slot].active ||
                     req.max_new < 1) {
-                    std::printf("ERR BGEN: no such free slot (--batch %d) or a bad max_new\n", o.batch);
+                    print_response("ERR BGEN: no such free slot (--batch %d) or a bad max_new\n", o.batch);
                     std::fflush(stdout);
                     continue;
                 }
@@ -5740,7 +5748,8 @@ int main(int argc, char** argv) {
                                  why.c_str());
                     std::string one = why;   // one protocol line
                     for (char& c : one) if (c == '\n' || c == '\r') c = ' ';
-                    std::printf("SERR %s %d %s\n", strata::core::session_error_name(kind), published ? 1 : 0, one.c_str());
+                    print_response(
+                        "SERR %s %d %s\n", strata::core::session_error_name(kind), published ? 1 : 0, one.c_str());
                     std::fflush(stdout);
                     err.clear();
                 };
@@ -5748,7 +5757,7 @@ int main(int argc, char** argv) {
                     strata::core::progress_at(save ? "writing a session file, MiB" : "reading a session file, MiB",
                                               (int64_t) (done >> 20));
                     strata::core::progress_allow(0);   // a block moved: the ordinary watchdog limit again, and a beat
-                    std::printf("SESSION %llu %llu\n", (unsigned long long) done, (unsigned long long) total);
+                    print_response("SESSION %llu %llu\n", (unsigned long long) done, (unsigned long long) total);
                     std::fflush(stdout);
                 };
                 // a step that blocks in one call: its explicit allowance, on both sides, announced before it starts
@@ -5756,7 +5765,7 @@ int main(int argc, char** argv) {
                     const int64_t s = strata::core::session_phase_limit_s(bytes);
                     strata::core::progress_at(phase);
                     strata::core::progress_allow(s);
-                    std::printf("SWAIT %s %lld\n", phase, (long long) s);
+                    print_response("SWAIT %s %lld\n", phase, (long long) s);
                     std::fflush(stdout);
                 };
                 strata::core::progress_at(save ? "saving a session" : "restoring a session");
@@ -5766,7 +5775,7 @@ int main(int argc, char** argv) {
                 if (o.batch > 0) { refuse("session files do not support --batch (parallel requests)"); continue; }
                 if (o.prompt_cache <= 0) { refuse("session files need --prompt-cache > 0"); continue; }
                 if (!ver.wait_commit(err)) {
-                    std::printf("ERR %s\n", err.c_str());
+                    print_response("ERR %s\n", err.c_str());
                     return 1;
                 }
                 strata::core::SessionFileIdentity id;
@@ -5869,7 +5878,7 @@ int main(int argc, char** argv) {
                     std::fprintf(stderr, "strata serve: session saved %zu tokens, %zu of %zu checkpoints, %zu bytes to %s "
                                  "in %.1f ms (state %.1f ms)\n", live.size(), kept, checks.size(), bytes,
                                  path.c_str(), ms(), capture_ms);
-                    std::printf("SAVED %zu %zu %.1f\n", live.size(), bytes, ms());
+                    print_response("SAVED %zu %zu %.1f\n", live.size(), bytes, ms());
                 } else {
                     strata::core::SavedConversation image;
                     size_t bytes = 0;
@@ -5926,7 +5935,8 @@ int main(int argc, char** argv) {
                         // decode from a partial state; the server starts the engine again
                         std::fprintf(stderr, "strata serve: session restore %s: transfer failed: %s\n", path.c_str(),
                                      err.c_str());
-                        std::printf("FATAL restoring the session file failed after the device state was changed: %s\n",
+                        print_response(
+                            "FATAL restoring the session file failed after the device state was changed: %s\n",
                                     err.c_str());
                         std::fflush(stdout);
                         return 1;
@@ -5947,13 +5957,13 @@ int main(int argc, char** argv) {
                     std::fprintf(stderr, "strata serve: session restored %zu tokens, %zu checkpoints, %zu bytes from %s "
                                  "in %.1f ms (read+check %.1f ms)\n", live.size(), checks.size(), bytes, path.c_str(),
                                  ms(), read_ms);
-                    std::printf("RESTORED %zu %zu %.1f\n", live.size(), bytes, ms());
+                    print_response("RESTORED %zu %zu %.1f\n", live.size(), bytes, ms());
                 }
                 std::fflush(stdout);
                 continue;
             }
             if (!is_request) {
-                std::printf("ERR expected: GEN <max_new> <id,id,...> or GENI <max_new> <file> <id,id,...>\n");
+                print_response("ERR expected: GEN <max_new> <id,id,...> or GENI <max_new> <file> <id,id,...>\n");
                 continue;
             }
             const bool geni = req.pictures;
@@ -6003,19 +6013,20 @@ int main(int argc, char** argv) {
             std::string bias_error;
             if (req_bias_present && (o.batch > 0 ||
                 !strata::core::parse_logit_bias(req_bias_text, (int) n_vocab, req_bias, bias_error))) {
-                std::printf("ERR logit_bias: %s\n", o.batch > 0 ? "continuous batching is not supported" : bias_error.c_str());
+                print_response(
+                    "ERR logit_bias: %s\n", o.batch > 0 ? "continuous batching is not supported" : bias_error.c_str());
                 continue;
             }
             const std::string& emb_path = req.file;
             std::vector<int64_t> ids;
             std::string pe;
             if (max_new < 1 || (geni && emb_path.empty()) || !parse_i64_list(req.ids.c_str(), ids, pe)) {
-                std::printf("ERR bad request: %s\n", pe.empty() ? "max_new" : pe.c_str());
+                print_response("ERR bad request: %s\n", pe.empty() ? "max_new" : pe.c_str());
                 continue;
             }
             const int64_t n = (int64_t) ids.size();
             req_imgs.clear();
-            if (geni && !o.vision) { std::printf("ERR this engine was started without --vision\n"); continue; }
+            if (geni && !o.vision) { print_response("ERR this engine was started without --vision\n"); continue; }
             if (geni || !mrope_identity) {
                 // positions for every cell this request can reach; the identity again for a text request
                 std::string ve;
@@ -6053,7 +6064,7 @@ int main(int argc, char** argv) {
                     for (int64_t c = 0; c < cells; ++c) put(c, c, c, c);
                     upload_mrope();
                     mrope_identity = true;
-                    std::printf("ERR %s\n", ve.c_str());
+                    print_response("ERR %s\n", ve.c_str());
                     std::fflush(stdout);
                     continue;
                 }
@@ -6061,13 +6072,13 @@ int main(int argc, char** argv) {
             }
             sp.embd_rows = geni ? row_ptr.data() : nullptr;
             if (n + max_new + 8 > o.max_context) {
-                std::printf("ERR prompt (%lld tokens) + max_new (%lld) exceeds the context (%lld)\n", (long long) n,
+                print_response("ERR prompt (%lld tokens) + max_new (%lld) exceeds the context (%lld)\n", (long long) n,
                             (long long) max_new, (long long) o.max_context);
                 continue;
             }
             bool bad = false;
             for (int64_t t : ids) bad = bad || t < 0 || t >= n_vocab;
-            if (bad) { std::printf("ERR a token id is outside the vocabulary\n"); continue; }
+            if (bad) { print_response("ERR a token id is outside the vocabulary\n"); continue; }
             std::array<int64_t, 3> remote_before{};
             std::array<int64_t, 3> launches_before{};
             std::array<uint64_t, 3> compact_before{}, full_before{};
@@ -6100,7 +6111,7 @@ int main(int argc, char** argv) {
             // everything below reads, restores or zeroes the session from other streams and the host (the end of the
             // last request waited already; this covers a request that ended on an error path)
             if (!ver.wait_commit(err)) {
-                std::printf("ERR %s\n", err.c_str());
+                print_response("ERR %s\n", err.c_str());
                 return 1;
             }
             if (o.prefill_head_alias && native_head.loaded()) {
@@ -6108,7 +6119,7 @@ int main(int argc, char** argv) {
                 native_head.unload();
                 sp.reset();
                 if (init_prompt_paths() != 0) {
-                    std::printf("ERR rebuilding the head-alias prompt path failed: %s\n", err.c_str());
+                    print_response("ERR rebuilding the head-alias prompt path failed: %s\n", err.c_str());
                     return 1;
                 }
                 std::fprintf(stderr, "strata serve: --prefill-head-alias: prompt workspace rebuilt in %.1f ms\n",
@@ -6118,7 +6129,7 @@ int main(int argc, char** argv) {
             if (kvg.on) {   // the elastic K/V: this prompt's cells (it gives back what it does not need below)
                 // a failed growth may leave the tier half-changed: the engine stops (as for any CUDA failure)
                 if (!kvg_ensure(n + 256, kv_quiesce)) {
-                    std::printf("ERR the K/V cannot grow to this prompt: no VRAM is left\n");
+                    print_response("ERR the K/V cannot grow to this prompt: no VRAM is left\n");
                     std::fflush(stdout);
                     return 1;
                 }
@@ -6330,7 +6341,7 @@ int main(int argc, char** argv) {
                 const bool blocked = conversations.guard_blocked();
                 conversations.unguard();
                 if (!parked_ok) {
-                    std::printf("ERR %s\n", err.c_str());
+                    print_response("ERR %s\n", err.c_str());
                     return 1;
                 }
                 if (blocked) {
@@ -6342,13 +6353,13 @@ int main(int argc, char** argv) {
                     if (const size_t at = conversations.index_of(parked.serial); at != SIZE_MAX)
                         incoming.emplace(conversations.take(at));
                     if (!park_current(incoming ? incoming->bytes() : 0)) {
-                        std::printf("ERR %s\n", err.c_str());
+                        print_response("ERR %s\n", err.c_str());
                         return 1;
                     }
                 }
             } else if ((!from_live || incoming || slot_source >= 0) && !pin_sibling && park_worth &&
                        !park_current(incoming ? incoming->bytes() : 0)) {
-                std::printf("ERR %s\n", err.c_str());
+                print_response("ERR %s\n", err.c_str());
                 return 1;
             }
             if (slot_source >= 0) {
@@ -6406,7 +6417,7 @@ int main(int argc, char** argv) {
             }
             // the elastic K/V: a parked conversation is restored whole, and it may be longer than this prompt
             if (incoming && !kvg_ensure((int64_t) incoming->live.ids.size() + 256, kv_quiesce)) {
-                std::printf("ERR the K/V cannot grow to the parked conversation: no VRAM is left\n");
+                print_response("ERR the K/V cannot grow to the parked conversation: no VRAM is left\n");
                 return 1;
             }
             if (borrow) {
@@ -6417,7 +6428,7 @@ int main(int argc, char** argv) {
                                                                        use_mtp ? &mtp.kv_state() : nullptr, err) !=
                         strata::core::ConversationRestore::restored) {
                     // validated above and guarded while parking: a failure here is fatal, as for a whole restore
-                    std::printf("ERR restoring a borrowed conversation prefix: %s\n",
+                    print_response("ERR restoring a borrowed conversation prefix: %s\n",
                                 err.empty() ? "gone" : err.c_str());
                     return 1;
                 }
@@ -6444,7 +6455,7 @@ int main(int argc, char** argv) {
                     strata::core::ConversationRestore::restored) {
                     // Already prevalidated above: a failure here is fatal, never
                     // permission to decode from a partially restored session.
-                    std::printf("ERR restoring parked conversation: %s\n", err.c_str());
+                    print_response("ERR restoring parked conversation: %s\n", err.c_str());
                     return 1;
                 }
                 for (size_t i = 0; i < stages.size(); ++i) {   // the later stages' parts
@@ -6452,11 +6463,11 @@ int main(int argc, char** argv) {
                     if (strata::core::conversation_snapshot_restore(incoming->stage_images[i], stages[i]->ss, g,
                             use_mtp && !mtp_first && i + 1 == stages.size() ? &mtp.kv_state() : nullptr, err) !=
                         strata::core::ConversationRestore::restored) {
-                        std::printf("ERR restoring parked conversation (stage CUDA%d): %s\n", stages[i]->dev,
+                        print_response("ERR restoring parked conversation (stage CUDA%d): %s\n", stages[i]->dev,
                                     err.c_str());
                         return 1;
                     }
-                    if (cudaDeviceSynchronize() != cudaSuccess) { std::printf("ERR stage sync\n"); return 1; }
+                    if (cudaDeviceSynchronize() != cudaSuccess) { print_response("ERR stage sync\n"); return 1; }
                 }
                 if (use_mtp && std::getenv("STRATA_SNAPSHOT_VERIFY") != nullptr) {
                     uint64_t draft_hash = 0;
@@ -6464,7 +6475,7 @@ int main(int argc, char** argv) {
                     const strata::core::OnDevice on_d(stages.empty() || mtp_first ? 0 : stages.back()->dev);
                     if (!strata::core::conversation_kv_verify(draft_kv, mtp.kv_state(), g,
                             int64_t(incoming->live.ids.size()), false, draft_hash, err)) {
-                        std::printf("ERR verifying restored draft KV: %s\n", err.c_str());
+                        print_response("ERR verifying restored draft KV: %s\n", err.c_str());
                         return 1;
                     }
                     std::fprintf(stderr, "strata serve: SNAPSHOT_VERIFY draft=%016llx cells=%lld mode=%d source=%s resident=%lld\n",
@@ -6520,7 +6531,7 @@ int main(int argc, char** argv) {
                 // STRATA_KV_GROW_HOLD=1 (opt-in): keep the K/V as long as the longest parked conversation; default: trim to this request alone, as 0.1.40
                 static const bool hold_on = [] { const char* v = std::getenv("STRATA_KV_GROW_HOLD"); return v != nullptr && std::atoi(v) != 0; }();
                 if (!kvg_trim(n + 256, hold_on ? conversations.longest_tokens() + 256 : 0)) {
-                    std::printf("ERR the K/V could not give its VRAM back to the expert cache\n");
+                    print_response("ERR the K/V could not give its VRAM back to the expert cache\n");
                     std::fflush(stdout);
                     return 1;
                 }
@@ -6569,7 +6580,7 @@ int main(int argc, char** argv) {
                                }
                                return false;
                            }()) {
-                    std::printf("ERR restoring a conversation checkpoint failed\n");
+                    print_response("ERR restoring a conversation checkpoint failed\n");
                     return 1;
                 }
                 if (lent && lent_slot == admit_slot) {
@@ -6629,7 +6640,7 @@ int main(int argc, char** argv) {
                 part_at.clear();
                 std::fill(part_next.begin(), part_next.end(), pp_next_check);
             }
-            std::printf("RESUME %lld\n", (long long) resume);   // before reading: this many prompt tokens are reused
+            print_response("RESUME %lld\n", (long long) resume);   // before reading: this many prompt tokens are reused
             strata::core::progress_at("reading the prompt, from token", read_from);
             std::fflush(stdout);
             // A SHORT PART OF THE PROMPT - the new message of a chat that continues from a checkpoint, the assistant
@@ -6763,7 +6774,7 @@ int main(int argc, char** argv) {
                 pl_drain();   // nothing in flight: both stages' commits and the drafter's rows have landed
                 pl_mtp_live[0] = pl_mtp_live[1] = false;
                 const double ms = std::chrono::duration<double, std::milli>(Clock::now() - pp_t0).count();
-                std::printf("PP %lld %lld %.0f %.1f\n", (long long) b, (long long) pp_total, ms,
+                print_response("PP %lld %lld %.0f %.1f\n", (long long) b, (long long) pp_total, ms,
                             ms > 0.0 ? 1000.0 * (double) (b - pp_from) / ms : 0.0);
                 strata::core::progress_beat();
                 std::fflush(stdout);
@@ -6824,7 +6835,7 @@ int main(int argc, char** argv) {
                 // the batched prompt path (other streams), checkpoints and snapshots may follow: the last commit first
                 if (!ver.wait_commit(e)) return false;
                 const double ms = std::chrono::duration<double, std::milli>(Clock::now() - pp_t0).count();
-                std::printf("PP %lld %lld %.0f %.1f\n", (long long) b, (long long) pp_total, ms,
+                print_response("PP %lld %lld %.0f %.1f\n", (long long) b, (long long) pp_total, ms,
                             ms > 0.0 ? 1000.0 * (double) (b - pp_from) / ms : 0.0);
                 strata::core::progress_beat();
                 std::fflush(stdout);
@@ -7450,13 +7461,13 @@ int main(int argc, char** argv) {
             // 149: how long the request waited for the adaptive round still in flight (in the prompt's time)
             serve_adapt_drain_ms = std::chrono::duration<double, std::milli>(Clock::now() - drain_t0).count();
             if (!drained_ok) {   // --adapt-async: the round in flight lands before the prompt lends any slot
-                std::printf("ERR an adaptive refill failed\n");
+                print_response("ERR an adaptive refill failed\n");
                 return 1;
             }
             // per-request sampling for the verify window's head (greedy when temperature is absent)
             const strata::kernels::SamplerParams req_sp = get_sampler_params(smp);
             if (!ver.set_logit_bias(req_bias, err) || (pipe && !ver_b.set_logit_bias(req_bias, err))) {
-                std::printf("ERR %s\n", err.c_str());
+                print_response("ERR %s\n", err.c_str());
                 return 1;
             }
             ver.set_sampling(req_sp);
@@ -7562,7 +7573,7 @@ int main(int argc, char** argv) {
                 err.clear();
                 const bool win = windows_ok(at, to);
                 if (win && !refill(err)) {
-                    std::printf("ERR refilling a lent slot failed: %s\n", err.c_str());
+                    print_response("ERR refilling a lent slot failed: %s\n", err.c_str());
                     return 1;
                 }
                 // a read going on in a planned segment gets the loan it was read with (what is left would size
@@ -7570,7 +7581,7 @@ int main(int argc, char** argv) {
                 const int64_t plan_lend = resume_plan.chunk > 0 && at == resume_plan_at && to == resume_plan_end
                                               ? resume_plan.lend : 0;
                 if (!win && !lend(to - at, err, plan_lend)) {
-                    std::printf("ERR lending the prompt path its slots failed: %s\n", err.c_str());
+                    print_response("ERR lending the prompt path its slots failed: %s\n", err.c_str());
                     return 1;
                 }
                 if (win) merge_at = merge_from(at, to);   // (after the refill: the loans are back)
@@ -7595,14 +7606,14 @@ int main(int argc, char** argv) {
                 }
                 if (sp_ok && merge_at >= 0) {   // the server's progress reaches the prompt's end, as after its last window
                     const double ms = std::chrono::duration<double, std::milli>(Clock::now() - pp_t0).count();
-                    std::printf("PP %lld %lld %.0f %.1f\n", (long long) to, (long long) pp_total, ms,
+                    print_response("PP %lld %lld %.0f %.1f\n", (long long) to, (long long) pp_total, ms,
                                 ms > 0.0 ? 1000.0 * (double) (to - pp_from) / ms : 0.0);
                     std::fflush(stdout);
                 }
                 if (!sp_ok) {
                     if (yielded_at < 0 && (batch_fatal || !input.is_stop_requested())) {
                         std::fprintf(stderr, "strata serve: %s\n", err.c_str());
-                        std::printf("ERR %s\n", err.c_str());
+                        print_response("ERR %s\n", err.c_str());
                         // #224: a CUDA fault (an illegal address) poisons the context for the whole process, and
                         // unwinding the destructors on it could hang until the 60 s watchdog: leave at once
                         if (cudaPeekAtLastError() != cudaSuccess) {
@@ -7618,7 +7629,7 @@ int main(int argc, char** argv) {
                 at = to;
                 if ((to == turn_at || to == root_at || to == message_at || to == pin_at) &&
                     !checkpoint_at(to, nullptr, to == message_at && to != turn_at && to != root_at && to != pin_at)) {   // the tail kind leaves first
-                    std::printf("ERR saving a conversation checkpoint failed%s\n", ckpt_why.c_str());
+                    print_response("ERR saving a conversation checkpoint failed%s\n", ckpt_why.c_str());
                     return 1;
                 }
                 if (to == pin_at && !pin_checkpoint(pin_at))
@@ -7628,20 +7639,20 @@ int main(int argc, char** argv) {
                                  (long long) message_at, (long long) (turn_at - message_at));
             }
             if (!refill(err)) {
-                std::printf("ERR refilling a lent slot failed: %s\n", err.c_str());
+                print_response("ERR refilling a lent slot failed: %s\n", err.c_str());
                 return 1;
             }
             if (o.prefill_head_alias) {
                 sp.reset();
                 const auto head_t0 = Clock::now();
                 if (!native_head.load(o.native_head_shards, g.n_embd, n_vocab, err)) {
-                    std::printf("ERR restoring the native output head failed: %s\n", err.c_str());
+                    print_response("ERR restoring the native output head failed: %s\n", err.c_str());
                     return 1;
                 }
                 // the verify windows' captured graphs read the head at the address of their capture
                 if (prefill_head_alias_at == nullptr) prefill_head_alias_at = native_head.weights();
                 if (native_head.weights() != prefill_head_alias_at) {
-                    std::printf("ERR --prefill-head-alias: the output head was reloaded at another address, so the "
+                    print_response("ERR --prefill-head-alias: the output head was reloaded at another address, so the "
                                 "captured verify graphs would read freed memory\n");
                     return 1;
                 }
@@ -7653,7 +7664,7 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "strata batch: the prompt was read in %lld parts, the slots decoding %.0f ms between "
                                      "them\n", (long long) il_parts + 1, il_ms);
             const double prompt_ms = std::chrono::duration<double, std::milli>(Clock::now() - r0).count();
-            std::printf("REUSED %lld\n", (long long) resume);   // the prompt is read; the first window comes next
+            print_response("REUSED %lld\n", (long long) resume);   // the prompt is read; the first window comes next
             std::fflush(stdout);
             // the verify windows: the first holds the last prompt token alone (STRATA_ADMIT_MERGE_FIRST: the prompt
             // tokens from merge_at on, the last one's output its first token)
@@ -7723,7 +7734,7 @@ int main(int argc, char** argv) {
             if (pl_want && pl_serial == nullptr && !cancelled && produced_n < max_new) {
                 pl_ran = true;
                 if (!pl_prepare(err)) {
-                    std::printf("ERR %s\n", err.c_str());
+                    print_response("ERR %s\n", err.c_str());
                     return 1;
                 }
                 struct PW {
@@ -7800,7 +7811,7 @@ int main(int argc, char** argv) {
                         ajob->wait();
                         a_pl_idle = nullptr;
                     }
-                    std::printf("ERR %s\n", m.c_str());
+                    print_response("ERR %s\n", m.c_str());
                     std::fflush(stdout);
                     return 1;
                 };
@@ -8213,7 +8224,7 @@ int main(int argc, char** argv) {
                     const bool nf = nonfinite_hit(V1(A), "decode");   // #879: none of its tokens goes out
                     bool eos = false;
                     for (int i = 0; !nf && i <= a && produced_n < max_new && !eos; ++i) {
-                        std::printf("T %d\n", (int) outp[(size_t) i]);
+                        print_response("T %d\n", (int) outp[(size_t) i]);
                         strata::core::progress_beat();
                         ++produced_n;
                         if (o.suffix_draft > 0) wplan.sfx.append(outp[(size_t) i]);
@@ -8326,7 +8337,7 @@ int main(int argc, char** argv) {
                 // the odd windows' counters and GPU profiles into the verifiers that report them
                 for (int st = 0; st < n_stages; ++st) stage_ver_p(st, 0).absorb_stats(stage_ver_p(st, 1));
                 if (!pl_adapt_ok) {
-                    std::printf("ERR an adaptive refill failed\n");
+                    print_response("ERR an adaptive refill failed\n");
                     return 1;
                 }
                 while (mtp.chain_live() && mtp.chain_poll(err) == 0) {}
@@ -8510,7 +8521,7 @@ int main(int argc, char** argv) {
                     for (const RamSwap& x : swaps) src.replace_resident(x.layer, x.in, x.out);
                 }
                 if (!adapt_tick(false)) {   // --adapt-async: the round in flight moves on a step when it can
-                    std::printf("ERR an adaptive refill failed\n");
+                    print_response("ERR an adaptive refill failed\n");
                     return 1;
                 }
                 asw_wait_ms = std::chrono::duration<double, std::milli>(Clock::now() - taw0).count();
@@ -8529,7 +8540,7 @@ int main(int argc, char** argv) {
                 // the elastic K/V: the window's cells and the drafter's beyond them
                 if (kvg.on && p + T + 64 > kvg.cells &&
                     !kvg_ensure(p + T + 64, adapt_quiesce)) {
-                    std::printf("ERR the K/V cannot grow: no VRAM is left\n");
+                    print_response("ERR the K/V cannot grow: no VRAM is left\n");
                     return 1;
                 }
                 tr("window", p, T);
@@ -8540,7 +8551,7 @@ int main(int argc, char** argv) {
                 if (use_mtp && mtp.prob() && !w.lookup && !first_window && T_mtp > 1)
                     ver.set_spec_q(mtp.spec_q(), T_mtp - 1);
                 if (!ver.run(T, window.data(), p, win_pool_fn, win_pool_user, outv.data(), err) || drive.d.failed) {
-                    std::printf("ERR %s\n", drive.d.failed && drive.d.fail ? drive.d.fail : err.c_str());
+                    print_response("ERR %s\n", drive.d.failed && drive.d.fail ? drive.d.fail : err.c_str());
                     return 1;
                 }
                 if (aflipped) apply_pending(true);   // 0.1.43: every layer's copies were waited for in the window; the bookkeeping now
@@ -8574,13 +8585,13 @@ int main(int argc, char** argv) {
                     adapt_thr = std::thread([&] { strata::platform::name_this_thread("strata-adapt"); strata::aux_cpus::pin_current_thread(); adapt_ok = adapt(); });
                 if (!ver.commit(a + 1, err)) {
                     if (adapt_thr.joinable()) adapt_thr.join();
-                    std::printf("ERR %s\n", err.c_str());
+                    print_response("ERR %s\n", err.c_str());
                     return 1;
                 }
                 if (nonfinite_hit(ver, first_window ? "first decode" : "decode")) {   // #879: none of its tokens goes out
                     if (adapt_thr.joinable()) adapt_thr.join();
                     if (!adapt_ok) {
-                        std::printf("ERR an adaptive refill failed\n");
+                        print_response("ERR an adaptive refill failed\n");
                         return 1;
                     }
                     finish = "nonfinite";
@@ -8589,7 +8600,7 @@ int main(int argc, char** argv) {
                 // a merged window: the drafter's rows of the prompt tokens in it, as the prompt windows give them
                 if (merged && use_mtp && !mtp.prefill(ver.final_R_all(), window.data() + 1, T - 1, p, err)) {
                     if (adapt_thr.joinable()) adapt_thr.join();
-                    std::printf("ERR %s\n", err.c_str());
+                    print_response("ERR %s\n", err.c_str());
                     return 1;
                 }
                 // the window's first a + 1 tokens are in the session now (the last output is not: it is next x)
@@ -8601,7 +8612,7 @@ int main(int argc, char** argv) {
                 first_window = false;
                 bool eos = false;
                 for (int i = merged ? a : 0; i <= a && produced_n < max_new && !eos; ++i) {   // (merged: row T-1 only)
-                    std::printf("T %d\n", (int) outv[(size_t) i]);
+                    print_response("T %d\n", (int) outv[(size_t) i]);
                     strata::core::progress_beat();
                     ++produced_n;
                     wplan.append(outv[(size_t) i]);
@@ -8632,7 +8643,7 @@ int main(int argc, char** argv) {
                     asw_wait_ms += asw_join;
                 }
                 if (!adapt_ok) {
-                    std::printf("ERR an adaptive refill failed\n");
+                    print_response("ERR an adaptive refill failed\n");
                     return 1;
                 }
                 // the session's choice of the adaptive tier (adapt_async_default.hpp): ~64 windows on the blocking tier, then
@@ -8658,7 +8669,7 @@ int main(int argc, char** argv) {
                     }
                 }
                 if (!drafted) {
-                    std::printf("ERR %s\n", err.c_str());
+                    print_response("ERR %s\n", err.c_str());
                     return 1;
                 }
                 wplan.observe(w, a, std::chrono::duration<double, std::milli>(Clock::now() - round0).count(), eos);
@@ -8670,7 +8681,7 @@ int main(int argc, char** argv) {
             const double decode_ms = std::chrono::duration<double, std::milli>(Clock::now() - d0).count();
             // the last commit (set_commit_async): the session is complete before anything reads or copies it
             if (!ver.wait_commit(err)) {
-                std::printf("ERR %s\n", err.c_str());
+                print_response("ERR %s\n", err.c_str());
                 return 1;
             }
             if (dec_timing && dec_windows > 0) {
@@ -8720,7 +8731,7 @@ int main(int argc, char** argv) {
                 // DEBUG: a fingerprint of every part of the session over the positions it holds ([0, L)), and
                 // separately of what lies past them in the last KV page (stale cells, fine unless something reads them)
                 if (cudaDeviceSynchronize() != cudaSuccess) {
-                    std::printf("ERR synchronizing state fingerprint\n");
+                    print_response("ERR synchronizing state fingerprint\n");
                     return 1;
                 }
                 const int64_t L = (int64_t) live.size();
@@ -8813,7 +8824,7 @@ int main(int argc, char** argv) {
                         if (pool != nullptr) h_mtp = hash_cells(pool, w, 0, mL, h_mtp);
                 }
                 if (!hash_ok) {
-                    std::printf("ERR reading state fingerprint\n");
+                    print_response("ERR reading state fingerprint\n");
                     return 1;
                 }
                 std::fprintf(stderr, "strata serve: STATE_HASH L=%lld gdn=%016llx ple=%016llx tail=%016llx pooled=%016llx "
@@ -8845,8 +8856,8 @@ int main(int argc, char** argv) {
                 std::snprintf(chain_txt, sizeof(chain_txt), " %lld %lld %lld %lld %lld",
                               (long long) wplan.chained.ok, (long long) wplan.chained.drafts,
                               (long long) wplan.lookup.ok, (long long) wplan.lookup.drafts, (long long) dec_windows);
-            if (yielded_at >= 0) std::printf("YIELDED %d %lld\n", yielded_slot, (long long) yielded_at);
-            std::printf("DONE %lld %lld %.1f %.1f %s %lld %lld %lld %lld %lld %lld %lld %.1f %lld %lld%s chunk=%lld "
+            if (yielded_at >= 0) print_response("YIELDED %d %lld\n", yielded_slot, (long long) yielded_at);
+            print_response("DONE %lld %lld %.1f %.1f %s %lld %lld %lld %lld %lld %lld %lld %.1f %lld %lld%s chunk=%lld "
                         "experts_streamed=%lld\n",
                         (long long) produced_n,
                         (long long) n, prompt_ms, decode_ms, finish, (long long) draft_accepted, (long long) draft_offered,
@@ -8946,7 +8957,7 @@ int main(int argc, char** argv) {
                                      span(tc1, tc2), span(tc3, tc4), move_best ? " (moved)" : "");
                     }
                 }
-                std::printf("BADM %d %d\n", admit_slot, cont ? 1 : 0);
+                print_response("BADM %d %d\n", admit_slot, cont ? 1 : 0);
                 if (trace && piped && cont) {
                     rows_wait = "the admission";
                     rows_wait_t = Clock::now();

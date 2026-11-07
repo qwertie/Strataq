@@ -420,6 +420,16 @@ class Slots(unittest.TestCase):
             self.svc.slot_save_path = saved
         self.assertEqual(s, 501, b)
 
+    def test_request_protocol_capacity_one_keeps_session_save_available(self):
+        self.engine.batch = 1
+        self.engine.request_protocol = True
+        try:
+            status, body = self.post("/slots/0?action=save", {"filename": "request-protocol.bin"})
+        finally:
+            self.engine.batch = 0
+            self.engine.request_protocol = False
+        self.assertEqual(status, 200, body)
+
     def test_refused_with_parallel_requests(self):
         """#465: batch slots do not hold the FIFO, so a session file is refused before anything reaches the engine."""
         self.engine.batch = 2

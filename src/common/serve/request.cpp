@@ -14,11 +14,26 @@ void read_keys(const char*& p, std::vector<std::pair<std::string, std::string>>&
 
 bool parse_request_line(const std::string& line, RequestLine& out, bool keys_after_file) {
     out = RequestLine{};
-    out.batch = line.rfind("BGEN", 0) == 0;
+    const bool run = line.rfind("RUN ", 0) == 0 || line.rfind("RUNI ", 0) == 0;
+    out.batch = !run && line.rfind("BGEN", 0) == 0;
     const char* p = line.c_str() + (out.batch ? 1 : 0);
-    if (std::strncmp(p, "GENI ", 5) == 0) out.pictures = true;
-    else if (std::strncmp(p, "GEN ", 4) != 0) return false;
-    p += out.pictures ? 5 : 4;
+    if (run) {
+        out.pictures = line.rfind("RUNI ", 0) == 0;
+        p += out.pictures ? 5 : 4;
+        const char* end = std::strchr(p, ' ');
+        if (!end || end == p)
+            return false;
+        out.request_id.assign(p, (size_t) (end - p));
+        if (!is_protocol_identity(out.request_id))
+            return false;
+        p = end + 1;
+    } else {
+        if (std::strncmp(p, "GENI ", 5) == 0)
+            out.pictures = true;
+        else if (std::strncmp(p, "GEN ", 4) != 0)
+            return false;
+        p += out.pictures ? 5 : 4;
+    }
     char* e = nullptr;
     if (out.batch) {
         out.slot = std::strtol(p, &e, 10);
@@ -38,6 +53,16 @@ bool parse_request_line(const std::string& line, RequestLine& out, bool keys_aft
         }
     }
     out.ids = p;
+    return true;
+}
+
+bool is_protocol_identity(const std::string& id) {
+    if (id.empty())
+        return false;
+    for (char c : id)
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+              (c >= 'A' && c <= 'Z') || c == '_' || c == '-'))
+            return false;
     return true;
 }
 

@@ -1,3 +1,4 @@
+#include "strata/common/serve/request_output.hpp"
 #include "strata/base/gpu/managed_memory.hpp"
 // src/models/qwen38/paged_model.cpp - strata-q38: Qwen3.8 on the shared paged engine (paged_model.hpp): its start
 // and its side of the engine's model interface (strata/common/serve/paged_model.hpp).
@@ -41,6 +42,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+using strata::serve::print_response;
 
 namespace strata::qwen38 {
 namespace {
@@ -170,7 +173,7 @@ public:
         lead.image_positions = std::move(pending_positions_);
         lead.image_table_ready = false;
     }
-    PagedParts make_parts(PagedCard& card, size_t count, std::string& err) override;
+    PagedParts make_parts(PagedCard& card, size_t first, size_t count, std::string& err) override;
     bool get_card_layout(const PagedCard& card, int64_t lb, int64_t le, strata::core::StateLayout& layout,
                          std::string& err) const override;
     uint64_t get_gpu_keep(const PagedCard& card) const override;
@@ -439,7 +442,7 @@ int run_paged_engine(int argc, char** argv) {
     const int handoff_rows = strata::kernels::kVerifyMaxT *
                              (settings.batch_groups == "1" ? 1 : strata::kernels::kVerifyMaxT);
     if (!init_card_paths(m, conv, cards, model_cards, split, handoff_rows, err) ||
-        (drafting && !drafter.init(m, slots + 1, err))) {
+        (drafting && !drafter.init(m, slots, err))) {
         std::fprintf(stderr, "strata-q38: %s\n", err.c_str());
         return 1;
     }
@@ -449,7 +452,7 @@ int run_paged_engine(int argc, char** argv) {
             mc.ver->set_batch_graph_limit(kWindowGraphs);
     if (drafting && !settings.drafter)   // loaded for the pool's layout of the drafter's K/V, switched on later
         m.unload_drafter();
-    PagedQwen model(m, conv, cards, model_cards, split, ram, drafting ? &drafter : nullptr, slots + 1,
+    PagedQwen model(m, conv, cards, model_cards, split, ram, drafting ? &drafter : nullptr, slots,
                     window_rows.total);
     return strata::serve::serve_paged_model(model, cards, ram, copy_back, settings);
 }
@@ -486,7 +489,7 @@ PagedQwen::PagedQwen(Model& m, Conversation& conv, const PagedCards& cards, Mode
     facts.cpu_expert_ms = kCpuExpertMs;
 }
 
-PagedParts PagedQwen::make_parts(PagedCard& card, size_t count, std::string& err) {
+PagedParts PagedQwen::make_parts(PagedCard& card, size_t first, size_t count, std::string& err) {
     using namespace strata::core;
     ModelCard& mc = cards_[card.index];
     const OnDevice on(card.dev);
@@ -494,8 +497,10 @@ PagedParts PagedQwen::make_parts(PagedCard& card, size_t count, std::string& err
     const QsaState* rope = &mc.own->qsa_states[mc.own->qsa_primary()];
     // (carved for every layer, as the card's own session: a moved cut changes the layers they are for)
     const uint64_t bytes = session_bytes(m_.g, m_.o.max_context, m_.K, 0, -1, false);
-    std::vector<SessionState*> sessions;
-    std::vector<int32_t*> image_tables;
+    if (first == 0 && !mc.ver->init_slots(std::vector<SessionState*>((size_t) sessions_, mc.own), err))
+        return {};
+    image_tables_.resize(cards_.size());
+    auto& image_tables = image_tables_[card.index];
     PagedParts parts;
     for (size_t i = 0; i < count; ++i) {
         auto part = std::make_unique<Part>(m_, mc, card.dev);
@@ -523,17 +528,16 @@ PagedParts PagedQwen::make_parts(PagedCard& card, size_t count, std::string& err
         ple.prev = part->ss.ple_prev;
         ple.hist = part->ss.ple_hist;
         session_zero(part->ss, m_.g, nullptr, mc.cs);
-        sessions.push_back(&part->ss);
+        mc.ver->bind_slot((int) (first + i), &part->ss);
         if (card.index == 0)
             leads_.push_back(part.get());
         parts.push_back(std::move(part));
     }
-    if (cudaStreamSynchronize((cudaStream_t) mc.cs) != cudaSuccess || !mc.ver->init_slots(sessions, err)) {
+    if (cudaStreamSynchronize((cudaStream_t) mc.cs) != cudaSuccess) {
         err = "the conversations' sessions on " + card.id + ": " + err;
         return {};
     }
     mc.ver->set_slot_image_tables({image_tables.begin(), image_tables.end()});
-    image_tables_.push_back(std::move(image_tables));
     return parts;
 }
 
@@ -1337,7 +1341,7 @@ void PagedQwen::print_info(int slots, int spec) const {
 
 void PagedQwen::print_done(const strata::serve::RequestDone& d) const {
     // the fields of the old engine's DONE that this one has (no expert counts)
-    std::printf("DONE %lld %lld %.1f %.1f %s %lld %lld %lld 0 0 0 0 0.0 %lld 0 chunk=%lld experts_streamed=0\n",
+    print_response("DONE %lld %lld %.1f %.1f %s %lld %lld %lld 0 0 0 0 0.0 %lld 0 chunk=%lld experts_streamed=0\n",
                 (long long) d.produced, (long long) d.prompt, d.prompt_ms, d.decode_ms, d.finish,
                 (long long) d.guessed_right, (long long) d.guessed, (long long) d.resumed, (long long) d.read,
                 (long long) m_.o.prefill_chunk);

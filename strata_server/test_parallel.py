@@ -544,8 +544,8 @@ class ContextView(FakeEngineCase):
         self.assertEqual(self.chat("hello")["choices"][0]["message"]["content"], "ok, done.")
         self.assertEqual(self.chat("another conversation")["choices"][0]["message"]["content"], "ok, done.")
         v = self.view()
-        self.assertEqual(list(v), ["Solo session", "Slot 0", "Slot 1", "Parked conversation 1 of 1"])
-        solo, parked = v["Solo session"], v["Parked conversation 1 of 1"]
+        self.assertEqual(list(v), ["Conversation 1", "Parked conversation 1 of 1"])
+        solo, parked = v["Conversation 1"], v["Parked conversation 1 of 1"]
         self.assertEqual((solo["id"], solo["where"], solo["state"], solo["kind"]), ("main", "vram", "holding", "session"))
         self.assertEqual((solo["capacity"], solo["bytes"], solo["used"]), (4096, 409600, 100 * solo["count"]))
         self.assertEqual((parked["id"], parked["where"], parked["kind"]), ("parked1", "ram", "parked"))
@@ -563,7 +563,7 @@ class ContextView(FakeEngineCase):
 
         def watch():
             while not out:
-                seen.extend(e["state"] for name, e in self.view().items() if name.startswith("Slot"))
+                seen.extend(e["state"] for name, e in self.view().items() if e["kind"] == "session")
                 time.sleep(0.02)
         t = threading.Thread(target=watch)
         t.start()
@@ -575,7 +575,7 @@ class ContextView(FakeEngineCase):
         self.assertEqual((out["a"][0], out["b"][0]), ("ok", "ok"), out)
         self.assertIn("decoding", seen)
         time.sleep(0.3)                                 # (a slot is freed at its BDONE, in the background)
-        held = [self.text(e["id"]) for name, e in self.view().items() if name.startswith("Slot") and e["count"]]
+        held = [self.text(e["id"]) for name, e in self.view().items() if e["kind"] == "session" and e["count"]]
         self.assertTrue(any(h.endswith("ok, done.") for h in held), held)
 
     def test_an_engine_without_the_commands(self):

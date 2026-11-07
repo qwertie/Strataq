@@ -131,16 +131,16 @@ Paged engines report `has_drafter`, `suffix_draft` and `lookup_chain` alongside
 values in `CHANGE_SETTINGS`. The UI selects suffix drafting with a minimum
 three-token match and no lookup chain. It requires greedy sampling. Planner
 changes apply to the next request; an existing request retains its planner.
-Unused protocol addresses are omitted from conversation reports. The `main`
-address remains for compatibility with solo requests; it is not a separate
-conversation category in the UI. Empty scheduling records allocate no KV pages.
+The paged engine creates conversation state on admission and reports occupied
+`conversation<N>` addresses. Execution placement and request identity are separate;
+there is no reserved `main` conversation.
 
 The Memory form stages edits until Apply settings, or Apply and save as default.
 Memory dividers still apply when released. Context fill counts GPU-resident tokens
 across conversations against `tokens_max`, including idle contexts still held.
 The API monitor's Context in VRAM table selects the context to inspect.
 
-The server serializes settings commands with engine protocol operations. A solo
-request holds the command channel until generation ends, so Apply can wait for
-that boundary. Batch commands may run between engine steps when the control
-channel is available. HTTP itself does not require waiting for a generation.
+Settings use the [request-ID protocol](requests.md). Generation streams do not
+hold a command lock. The paged engine applies commands between decode steps;
+commands can still wait for an in-progress prompt admission or GPU operation.
+Command reply IDs prevent late answers from being read by a later caller.

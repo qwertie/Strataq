@@ -208,6 +208,8 @@ public:
     // Greedy only, no drafts (MTP) in a batch window.  `init_slots` once after `init` (S <= max_t); a layer
     // split's stages each get their own sessions, and run_slots/commit_slots continue into the next stage.
     bool init_slots(const std::vector<SessionState*>& slots, std::string& err);
+    /// Installs a lazily created paged conversation before its first row is captured.
+    void bind_slot(int index, SessionState* session) { slots_.at((size_t) index) = session; }
     int n_slots() const { return (int) slots_.size(); }
     /// One batch window over slots [0, S): tokens[s] at positions pos[s]; out[s] = the greedy pick after it.
     bool run_slots(int S, const int32_t* tokens, const int64_t* pos, PoolMultiFn pool, void* user, int32_t* out,

@@ -1,3 +1,4 @@
+#include "strata/common/serve/request_output.hpp"
 #include "ds4_images.hpp"
 // Copyright (c) 2026 Peasant Smith and the Project Maya contributors (MIT; https://github.com/mw00/project-maya, v1.1.17).
 // Ported into Strata (third_party/project-maya/NOTICE.md, LICENSE); changes are in the git history of this file.
@@ -44,6 +45,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+using strata::serve::print_response;
 
 namespace {
 
@@ -176,10 +179,12 @@ bool parse_gen(const std::string& line, Req& r) {
 
 int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float conf_min, const std::string& pack) {
     std::vector<int> eos = parse_ids(eos_list);
-    for (const std::string& l : m.info_lines()) std::printf("%s\n", l.c_str());
+    for (const std::string& l : m.info_lines()) print_response("%s\n", l.c_str());
     // "stop": STOP ends a request; "conversations": LIST_CONVERSATIONS and GET_CONTEXT_WINDOWS;
     // "memory": GET_MEMORY_USE
-    std::printf("READY %lld stop conversations memory\n", (long long) m.max_context());
+    strata::serve::configure_legacy_requests(0);
+    print_response("INFO request_capacity=%d\n", std::max(1, 0));
+    print_response("READY %lld stop conversations memory requests\n", (long long) m.max_context());
     std::fflush(stdout);
     std::fprintf(stderr, "maya ds4 serve: GEN <max_new> [keys] <ids>; GENI <max_new> [keys] <pictures> <ids>; STOP, QUIT, LIST_CONVERSATIONS, GET_CONTEXT_WINDOWS\n");
     unsigned long long counter = 0;
@@ -224,7 +229,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
     const std::string slot_identity = m.slot_identity();
     const auto note = [&](const std::string& msg) {
         std::fprintf(stderr, "ds4 slots: %s\n", msg.c_str());
-        std::printf("NOTE sessions: %s\n", msg.c_str());
+        print_response("NOTE sessions: %s\n", msg.c_str());
         std::fflush(stdout);
     };
     const auto gb = [](uint64_t b) {
@@ -533,14 +538,17 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
         if (line == "QUIT") break;
         const bool geni = line.rfind("GENI ", 0) == 0;
         if (!geni && line.rfind("GEN ", 0) != 0) {
-            std::printf("ERR unsupported command '%s' (GEN, GENI, STOP, QUIT, LIST_CONVERSATIONS and GET_CONTEXT_WINDOWS)\n", line.substr(0, line.find(' ')).c_str());
+            print_response(
+                "ERR unsupported command '%s' (GEN, GENI, STOP, QUIT, LIST_CONVERSATIONS and GET_CONTEXT_WINDOWS)\n",
+                line.substr(0, line.find(' ')).c_str());
             std::fflush(stdout);
             continue;
         }
         in.clear_stop();
         Req r;
         if (!parse_gen(line, r)) {
-            std::printf("ERR expected: GEN <max_new> [keys] <id,id,...> or GENI <max_new> [keys] <file> <id,id,...>\n");
+            print_response(
+                "ERR expected: GEN <max_new> [keys] <id,id,...> or GENI <max_new> [keys] <file> <id,id,...>\n");
             std::fflush(stdout);
             continue;
         }
@@ -554,8 +562,8 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
                     if (q.start < 0 || (size_t) q.start >= r.ids.size() || r.ids[(size_t) q.start] != img_tok)
                         e = "a picture's span does not start at an image token of the prompt";
             if (!e.empty()) {
-                std::printf("ERR %s\n", e.c_str());
-                std::printf("DONE 0 %zu 0.0 0.0 cancel 0 0 0 0 0\n", r.ids.size());
+                print_response("ERR %s\n", e.c_str());
+                print_response("DONE 0 %zu 0.0 0.0 cancel 0 0 0 0 0\n", r.ids.size());
                 std::fflush(stdout);
                 continue;
             }
@@ -606,7 +614,8 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
         }
         if (took || from == 0) held.clear();   // (a slot is text only: the state that comes back holds no pictures)
         if ((int64_t) r.ids.size() + std::max(0LL, r.max_new) > m.max_context()) {
-            std::printf("ERR the prompt (%zu tokens) and max_new %lld are more than the context %lld\n", r.ids.size(),
+            print_response(
+                "ERR the prompt (%zu tokens) and max_new %lld are more than the context %lld\n", r.ids.size(),
                         r.max_new, (long long) m.max_context());
             std::fflush(stdout);
             continue;
@@ -652,7 +661,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
         size_t done = from, next_pp = from + 64;
         m.set_progress([&](int64_t d) {   // (a run of chunks: each one through every layer)
             const double ms = now_ms() - t0;
-            std::printf("PP %zu %zu %.1f %.1f %zu\n", done + (size_t) d, r.ids.size(), ms,
+            print_response("PP %zu %zu %.1f %.1f %zu\n", done + (size_t) d, r.ids.size(), ms,
                         ms > 0 ? 1000.0 * (double) (done + (size_t) d - from) / ms : 0.0, from);
             std::fflush(stdout);
         });
@@ -687,7 +696,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
             if (ok && pin_at != 0 && done == pin_at) m.checkpoint(3);
             if (ok && (done >= next_pp || done == total)) {
                 const double ms = now_ms() - t0;
-                std::printf("PP %zu %zu %.1f %.1f %zu\n", done, r.ids.size(), ms,
+                print_response("PP %zu %zu %.1f %.1f %zu\n", done, r.ids.size(), ms,
                             ms > 0 ? 1000.0 * (double) (done - from) / ms : 0.0, from);
                 std::fflush(stdout);
                 next_pp = done + 64;
@@ -703,14 +712,15 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
             }
             std::fprintf(stderr, "ds4 serve: stopped while reading the prompt of %zu tokens, after %.0f ms%s\n",
                          total, now_ms() - t0, back ? "; the conversation before it is kept" : "");
-            std::printf("DONE 0 %zu %.1f 0.0 cancel 0 0 %zu 0 0\n", r.ids.size(), now_ms() - t0, back ? from : (size_t) 0);
+            print_response(
+                "DONE 0 %zu %.1f 0.0 cancel 0 0 %zu 0 0\n", r.ids.size(), now_ms() - t0, back ? from : (size_t) 0);
             std::fflush(stdout);
             continue;
         }
         if (!ok) {
             std::fprintf(stderr, "ds4: %s\n", err.c_str());
-            std::printf("ERR %s\n", err.c_str());
-            std::printf("DONE 0 %zu 0.0 0.0 cancel 0 0 0 0 0\n", r.ids.size());
+            print_response("ERR %s\n", err.c_str());
+            print_response("DONE 0 %zu 0.0 0.0 cancel 0 0 0 0 0\n", r.ids.size());
             std::fflush(stdout);
             m.reset();
             held.clear();
@@ -757,14 +767,14 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
                 std::snprintf(b, sizeof b, " skipped=%.3f", (double) (s.skipped - s_dec.skipped) / fed);
                 out += b;
             }
-            std::printf("%s\n", out.c_str());
+            print_response("%s\n", out.c_str());
         };
         for (;;) {
             if (in.is_stop_requested()) {
                 finish = "cancel";
                 break;
             }
-            std::printf("T %d\n", tok);
+            print_response("T %d\n", tok);
             ++produced;
             if (produced % 8 == 0) stat_line();
             std::fflush(stdout);
@@ -799,7 +809,8 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
         //  the checkpoint at this prompt's end)
         stat_line();
         const double t2 = now_ms();
-        std::printf("DONE %lld %zu %.1f %.1f %s %lld %lld %zu 0 0\n", produced, r.ids.size(), t1 - t0, t2 - t1, finish,
+        print_response(
+            "DONE %lld %zu %.1f %.1f %s %lld %lld %zu 0 0\n", produced, r.ids.size(), t1 - t0, t2 - t1, finish,
                     d_acc, d_off, from);
         std::fflush(stdout);
         const auto& s = m.stats();

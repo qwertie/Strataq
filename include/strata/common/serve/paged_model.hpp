@@ -163,10 +163,9 @@ public:
 
     // ---- per card
 
-    /// Makes the state of `count` conversations on `card` (the i-th is session i's) and readies the card's step for
-    /// them; empty (and `err`) when it does not fit.  The engine calls it once per card as it starts, `count` its
-    /// batch slots and "main".
-    virtual PagedParts make_parts(PagedCard& card, size_t count, std::string& err) = 0;
+    /// Creates state for sessions [first, first + count) on one card during admission.
+    /// Returns empty with `err` when the card cannot allocate its working buffers.
+    virtual PagedParts make_parts(PagedCard& card, size_t first, size_t count, std::string& err) = 0;
     /// Gets the regions a conversation keeps in `card`'s pool when the card runs layers [lb, le).
     virtual bool get_card_layout(const PagedCard& card, int64_t lb, int64_t le, strata::core::StateLayout& layout,
                                  std::string& err) const = 0;

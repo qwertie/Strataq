@@ -81,8 +81,10 @@ inline std::string format_conversation_line(const HeldConversation& c) {
            (c.last_tokens_at ? " last_tokens_at=" + std::to_string(c.last_tokens_at) : "");
 }
 
-/// Answers `line` (is_conversation_command) from `held`.  A malformed command answers `ERR <why>`.
-inline void answer_conversation_command(const std::string& line, const std::vector<HeldConversation>& held) {
+/// Answers `line` (is_conversation_command) from `held`. A malformed command answers `ERR <why>`.
+/// The optional sink lets a transport frame each complete reply line.
+inline void answer_conversation_command(const std::string& line, const std::vector<HeldConversation>& held,
+                                        void (*put)(const std::string&) = token_listing_detail::put) {
     namespace d = token_listing_detail;
     std::istringstream in(line);
     std::string command, field;
@@ -94,7 +96,7 @@ inline void answer_conversation_command(const std::string& line, const std::vect
             std::string count;
             if (!d::parse_ids(field, marker) || !(in >> count) ||
                 std::from_chars(count.data(), count.data() + count.size(), want).ec != std::errc()) {
-                d::put("ERR LIST_CONVERSATIONS [<marker ids> <preview tokens>]\n");
+                put("ERR LIST_CONVERSATIONS [<marker ids> <preview tokens>]\n");
                 std::fflush(stdout);
                 return;
             }
@@ -109,9 +111,9 @@ inline void answer_conversation_command(const std::string& line, const std::vect
                 }
             }
             s += '\n';
-            d::put(s);
+            put(s);
         }
-        d::put("END_CONVERSATIONS\n");
+        put("END_CONVERSATIONS\n");
     } else if (command == "GET_CONTEXT_WINDOWS") {
         while (in >> field) {
             const auto c = std::find_if(held.begin(), held.end(), [&](const HeldConversation& h) { return h.id == field; });
@@ -123,11 +125,11 @@ inline void answer_conversation_command(const std::string& line, const std::vect
                 d::append_ids(s, c->ids, c->n);
             }
             s += '\n';
-            d::put(s);
+            put(s);
         }
-        d::put("END_CONTEXT_WINDOWS\n");
+        put("END_CONTEXT_WINDOWS\n");
     } else {
-        d::put("ERR unknown command\n");
+        put("ERR unknown command\n");
     }
     std::fflush(stdout);
 }

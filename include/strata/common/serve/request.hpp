@@ -1,5 +1,9 @@
 // strata/common/serve/request.hpp - a request line of the server's protocol, split into its parts:
 //
+//     RUN    <request-id> <max_new> [key=value ...] <id,id,...>
+//     RUNI   <request-id> <max_new> [key=value ...] <file> <id,id,...>
+//
+// Legacy handler forms, internal to the shared adapter or clients of older releases:
 //     GEN    <max_new> [key=value ...] <id,id,...>
 //     GENI   <max_new> [key=value ...] <file> <id,id,...>         (the prompt's pictures are in <file>)
 //     BGEN   <slot> <max_new> [key=value ...] <id,id,...>         (--batch: continue the request in a batch slot)
@@ -18,6 +22,7 @@ namespace strata::serve {
 
 /// One request line's parts, as the line gives them: whether they make sense is the engine's to check.
 struct RequestLine {
+    std::string request_id;    ///< RUN / RUNI identity, independent of execution placement.
     bool batch = false;         ///< BGEN / BGENI
     bool pictures = false;      ///< GENI / BGENI
     long slot = 0;              ///< BGEN's batch slot
@@ -27,6 +32,9 @@ struct RequestLine {
     std::string file;           ///< GENI's picture file; empty when no space and ids follow it
     std::string ids;            ///< the rest of the line: the prompt's token ids, comma-separated
 };
+
+/// Checks the single-word identities used by generation and command envelopes.
+bool is_protocol_identity(const std::string& id);
 
 /// Splits `line` into `out`; false when it is not a request line.  The options end at the first word without '=';
 /// with `keys_after_file` (DeepSeek's lines), more of them may follow GENI's picture file.

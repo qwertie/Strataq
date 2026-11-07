@@ -102,6 +102,7 @@ set(STRATA_METAL_HOST_SOURCES
   ${S}/models/qwen38/prefill/prefill.cpp
   ${S}/common/spec/suffix_drafter.cpp ${S}/common/spec/controller.cpp ${S}/common/spec/draft_policy.cpp
   ${S}/common/spec/draft_source.cpp ${S}/common/serve/loop.cpp ${S}/common/serve/request.cpp
+  ${S}/common/serve/request_output.cpp
   ${S}/common/kernels/cpu/pool.cpp ${S}/common/kernels/cpu/expert_layout.cpp ${S}/common/kernels/cpu/native_expert.cpp
   ${S}/common/kernels/cpu/hadamard.cpp   # Gyro: the Hadamard rotation
   ${S}/common/kernels/cpu/tq_cpu.cpp)    # Gyro: the scalar trellis rows

@@ -1,3 +1,4 @@
+#include "strata/common/serve/request_output.hpp"
 // src/models/qwen36/q36_engine.cu - strata-q36: the engine path for Qwen3.6-35B-A3B (GGUF architecture qwen35moe),
 // NEW-MODELS-PLAN.md T1.  A driver of its own beside Flash-Next's (generate/verify/prefill stay untouched, so the
 // Flash-Next identity gate cannot move), built from Strata's kernels:
@@ -58,6 +59,8 @@
 #include <tuple>
 #include <type_traits>
 #include <vector>
+
+using strata::serve::print_response;
 
 namespace {
 
@@ -3281,13 +3284,13 @@ struct Serve {
             for (int j = 0; j < rows_kept; ++j) {
                 if (j == 1) y = E.rows_pick[r0 + 1];
                 ss.live.push_back(fed[j]);
-                std::printf("BT %d %d\n", b, y);
+                print_response("BT %d %d\n", b, y);
                 ++sl.produced;
                 sl.hist.push_back(y);
                 const char* fin = is_eos(y) ? "stop" : sl.stop ? "cancel" : sl.produced >= sl.max_new ? "length"
                                   : ss.pos + j + 2 > E.ctx ? "length" : nullptr;
                 if (fin) {
-                    std::printf("BDONE %d %lld %s %.1f\n", b, (long long) sl.produced, fin, ms_since(sl.t0));
+                    print_response("BDONE %d %lld %s %.1f\n", b, (long long) sl.produced, fin, ms_since(sl.t0));
                     if (sl.offered > 0)
                         std::fprintf(stderr, "strata batch: slot %d: %lld of %lld MTP proposals accepted\n", b, sl.accepted,
                                      sl.offered);
@@ -3378,13 +3381,13 @@ struct Serve {
             } else {
                 y = E.rows_pick[r];
             }
-            std::printf("BT %d %d\n", b, y);
+            print_response("BT %d %d\n", b, y);
             ++sl.produced;
             sl.hist.push_back(y);
             const char* fin = is_eos(y) ? "stop" : sl.stop ? "cancel" : sl.produced >= sl.max_new ? "length"
                               : ss.pos + 1 > E.ctx ? "length" : nullptr;
             if (fin) {
-                std::printf("BDONE %d %lld %s %.1f\n", b, (long long) sl.produced, fin, ms_since(sl.t0));
+                print_response("BDONE %d %lld %s %.1f\n", b, (long long) sl.produced, fin, ms_since(sl.t0));
                 sl.active = false;
                 ss.active = false;
                 --n_active;
@@ -3426,14 +3429,16 @@ struct Serve {
     void request(const std::string& line) {
         strata::serve::RequestLine req;
         if (!strata::serve::parse_request_line(line, req)) {
-            std::printf("ERR expected: GEN <max_new> [key=value ...] <id,id,...> or GENI <max_new> [keys] <file> <id,id,...>\n");
+            print_response(
+                "ERR expected: GEN <max_new> [key=value ...] <id,id,...> or "
+                "GENI <max_new> [keys] <file> <id,id,...>\n");
             std::fflush(stdout);
             return;
         }
         const bool adm = req.batch, geni = req.pictures;
         const int slot = (int) req.slot;
         if (adm && (req.slot < 0 || req.slot >= (long) slots.size() || slots[(size_t) slot].active || E.n_sess < 2)) {
-            std::printf("ERR BGEN: no such free slot (--batch %d) or a bad max_new\n", E.n_sess < 2 ? 0 : E.n_sess);
+            print_response("ERR BGEN: no such free slot (--batch %d) or a bad max_new\n", E.n_sess < 2 ? 0 : E.n_sess);
             std::fflush(stdout);
             return;
         }
@@ -3447,27 +3452,28 @@ struct Serve {
         const std::string& emb = req.file;
         const std::vector<int32_t> ids = parse_ids(req.ids.c_str());
         if (max_new < 1 || ids.empty() || (geni && emb.empty())) {
-            std::printf("ERR bad request: max_new or the ids\n");
+            print_response("ERR bad request: max_new or the ids\n");
             std::fflush(stdout);
             return;
         }
         if (geni && !E.vision) {
-            std::printf("ERR this engine was started without --vision\n");
+            print_response("ERR this engine was started without --vision\n");
             std::fflush(stdout);
             return;
         }
         if ((int64_t) ids.size() + max_new > E.ctx) {
-            std::printf("ERR prompt (%zu tokens) + max_new (%lld) exceeds the context (%d)\n", ids.size(), max_new, E.ctx);
+            print_response(
+                "ERR prompt (%zu tokens) + max_new (%lld) exceeds the context (%d)\n", ids.size(), max_new, E.ctx);
             std::fflush(stdout);
             return;
         }
         bool bad = false;
         for (int32_t t : ids) bad |= t < 0 || t >= (int32_t) E.m->g.n_vocab;
-        if (bad) { std::printf("ERR a token id is outside the vocabulary\n"); std::fflush(stdout); return; }
+        if (bad) { print_response("ERR a token id is outside the vocabulary\n"); std::fflush(stdout); return; }
         ImgReq ir;
         if (geni) {
             const std::string ve = build_images(emb, ids, E.m->g.n_embd, img_keys, ir);
-            if (!ve.empty()) { std::printf("ERR %s\n", ve.c_str()); std::fflush(stdout); return; }
+            if (!ve.empty()) { print_response("ERR %s\n", ve.c_str()); std::fflush(stdout); return; }
         }
         in.clear_stop();
         // ---- the session: the held state continues when the request extends it (the recurrent state cannot step back)
@@ -3499,7 +3505,7 @@ struct Serve {
         const int64_t fresh = (int64_t) (ids.size() - reuse);
         bool cancelled = false;
         const int64_t got = E.process(ids.data() + reuse, fresh, [&](int64_t done) -> bool {
-            std::printf("PP %lld %lld %.0f %.1f\n", (long long) done, (long long) fresh, ms_since(t0),
+            print_response("PP %lld %lld %.0f %.1f\n", (long long) done, (long long) fresh, ms_since(t0),
                         (double) done / std::max(1e-9, ms_since(t0) / 1000.0));
             std::fflush(stdout);
             if (n_active > 0 && done < fresh) {
@@ -3526,8 +3532,10 @@ struct Serve {
         E.sess[(size_t) E.cur].pos = E.pos;
         const double prompt_ms = ms_since(t0);
         if (cancelled) {
-            std::printf("DONE 0 %zu %.1f 0.0 cancel 0 0 %zu 0 0 0 0 0.0 %lld 0\n", ids.size(), prompt_ms, reuse, (long long) got);
-            if (adm) std::printf("BADM %d 0\n", slot);
+            print_response(
+                "DONE 0 %zu %.1f 0.0 cancel 0 0 %zu 0 0 0 0 0.0 %lld 0\n",
+                ids.size(), prompt_ms, reuse, (long long) got);
+            if (adm) print_response("BADM %d 0\n", slot);
             std::fflush(stdout);
             return;
         }
@@ -3547,13 +3555,13 @@ struct Serve {
                 E.host_logits(lg);
                 nx = sample(lg, smp, hist, rng);
             }
-            std::printf("T %d\n", nx);
+            print_response("T %d\n", nx);
             ++produced;
             hist.push_back(nx);
             const char* fin = is_eos(nx) ? "stop" : in.is_stop_requested() ? "cancel" : max_new <= 1 ? "length"
                               : E.pos + 1 > E.ctx ? "length" : nullptr;
             const bool cont = fin == nullptr;
-            std::printf("DONE %lld %zu %.1f %.1f %s 0 0 %zu 0 0 0 0 0.0 %lld 0\n", produced, ids.size(), prompt_ms,
+            print_response("DONE %lld %zu %.1f %.1f %s 0 0 %zu 0 0 0 0 0.0 %lld 0\n", produced, ids.size(), prompt_ms,
                         ms_since(d0), cont ? "length" : fin, reuse, (long long) fresh);
             if (cont) {
                 Slot& sl = slots[(size_t) slot];
@@ -3569,7 +3577,7 @@ struct Serve {
                 ss.active = true;
                 ++n_active;
             }
-            std::printf("BADM %d %d\n", slot, cont ? 1 : 0);
+            print_response("BADM %d %d\n", slot, cont ? 1 : 0);
             std::fflush(stdout);
             std::fprintf(stderr, "strata batch: slot %d takes a prompt of %zu tokens = %zu reused + %lld read in %.0f ms (%.1f "
                          "tok/s)%s\n", slot, ids.size(), reuse, (long long) fresh, prompt_ms,
@@ -3582,7 +3590,7 @@ struct Serve {
                 nx = sample(lg, smp, hist, rng);
             }
             auto emit = [&](int t) {   // false: the answer ends here
-                std::printf("T %d\n", t);
+                print_response("T %d\n", t);
                 std::fflush(stdout);
                 ++produced;
                 hist.push_back(t);
@@ -3620,7 +3628,7 @@ struct Serve {
         }
         E.sess[(size_t) E.cur].pos = E.pos;
         const double decode_ms = ms_since(d0);
-        std::printf("DONE %lld %zu %.1f %.1f %s %lld %lld %zu 0 0 0 0 0.0 %lld 0\n", produced, ids.size(), prompt_ms,
+        print_response("DONE %lld %zu %.1f %.1f %s %lld %lld %zu 0 0 0 0 0.0 %lld 0\n", produced, ids.size(), prompt_ms,
                     decode_ms, finish, accepted, offered, reuse, (long long) fresh);
         std::fflush(stdout);
         std::fprintf(stderr, "strata serve: session %d: prompt %zu tokens = %zu reused + %lld read in %.0f ms (%.1f tok/s), "
@@ -3630,10 +3638,12 @@ struct Serve {
     }
 
     int run() {
-        if (E.n_sess > 1) std::printf("INFO batch_slots=%d slot_cache=1\n", E.n_sess);
+        if (E.n_sess > 1) print_response("INFO batch_slots=%d slot_cache=1\n", E.n_sess);
         // "stop": STOP ends the request on the control lines; "conversations": LIST_CONVERSATIONS and
         // GET_CONTEXT_WINDOWS; "memory": GET_MEMORY_USE
-        std::printf("READY %d stop conversations memory\n", E.ctx);
+        strata::serve::configure_legacy_requests(E.n_sess > 1 ? E.n_sess : 0);
+        print_response("INFO request_capacity=%d\n", std::max(1, E.n_sess > 1 ? E.n_sess : 0));
+        print_response("READY %d stop conversations memory requests\n", E.ctx);
         std::fflush(stdout);
         strata::serve::EngineHooks hooks;
         hooks.is_busy = [this] { return n_active > 0; };
@@ -3686,7 +3696,7 @@ struct Serve {
             if (line.rfind("GEN", 0) == 0 || line.rfind("BGEN", 0) == 0) {
                 request(line);
             } else {
-                std::printf("ERR expected: GEN <max_new> [key=value ...] <id,id,...>\n");
+                print_response("ERR expected: GEN <max_new> [key=value ...] <id,id,...>\n");
                 std::fflush(stdout);
             }
         }

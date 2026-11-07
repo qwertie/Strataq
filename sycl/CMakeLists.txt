@@ -297,8 +297,11 @@ target_link_options(strata_prefill PUBLIC -qmkl=sequential)
 target_link_libraries(strata_prefill PUBLIC strata_engine)
 
 strata_resolve(_main src/program/generate.cpp)
+add_library(strata_serve STATIC ${STRATA_ROOT}/src/common/serve/loop.cpp
+  ${STRATA_ROOT}/src/common/serve/request.cpp ${STRATA_ROOT}/src/common/serve/request_output.cpp)
+target_link_libraries(strata_serve PUBLIC strata_includes)
 add_executable(strata ${_main})
-target_link_libraries(strata PRIVATE strata_engine strata_prefill strata_spec)
+target_link_libraries(strata PRIVATE strata_engine strata_prefill strata_spec strata_serve)
 
 # --- the kernel parity self-tests (each runs on the card and compares against a CPU reference) ---------------------
 option(STRATA_SYCL_PARITY "Build the kernel parity tests" ON)

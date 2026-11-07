@@ -55,6 +55,10 @@ protocol (`contracts/`), so the server does not have to know which one it starte
   (`--batch`); the paged engine counts rows instead, and its `slots` is that capacity, not an allocation. It is still
   what the installers ship, and what most of [DETAILS.md](DETAILS.md) describes.
 
+Both expose the same [request-ID protocol](../contracts/requests.md). The paged engine owns placement and creates
+conversation state when it is needed. Older engines retain their execution structures behind a shared adapter.
+The Python client does not choose a solo path or an execution slot for an updated engine.
+
 `src/common/serve/README.md` lists which parts each one uses. When a doc says "session", "slot" or "`--batch`", check
 which loop it means.
 

@@ -1,6 +1,7 @@
 // src/common/serve/paged_engine.cpp - the paged engine: conversations in page pools, several decoding at once, over
 // any PagedModel (paged_engine.hpp).
 #include "strata/common/serve/paged_engine.hpp"
+#include "strata/common/serve/request_output.hpp"
 
 #include "strata/base/gpu/memory_info.hpp"
 #include "strata/base/gpu/on_device.hpp"
@@ -34,6 +35,8 @@
 #include <utility>
 #include <vector>
 
+using strata::serve::print_response;
+
 namespace strata::serve {
 namespace {
 
@@ -66,8 +69,10 @@ struct Held {
     std::vector<int32_t> live;          ///< the tokens its state holds: the prompt, then the fed outputs
     strata::spec::Decoding dec;         ///< its decoding, while `decoding`
     bool decoding = false;
-    int slot = -1;                      ///< while decoding: its batch slot (BT lines), or -1: it is the request on the
-                                        ///< control lines (T lines)
+    std::string request_id;            ///< The current RUN identity; cached state survives its completion.
+    int64_t prompt_tokens = 0, resumed = 0, prompt_read = 0;
+    double prompt_ms = 0;
+    int position = -1;                  ///< Scheduler position while active; never part of the wire protocol.
     Clock::time_point t0;               ///< when it started decoding
     /// the request count when it last served a request: the oldest goes first, as an idle one to pause and among
     /// decoding ones of the same priority
@@ -128,6 +133,12 @@ struct Paused {
     std::string file;                 ///< on the SSD: its pause file (get_pause_file); empty: in the RAM's pool
 };
 
+/// Keeps admission metadata without allocating conversation state while capacity is occupied.
+struct PendingRequest {
+    std::string line, id;
+    int64_t priority = 0, prompt_tokens = 0;
+};
+
 /// The engine once its model is up: its conversations, the pages they share with the experts, the step that decodes
 /// them, and the requests' protocol.
 class PagedEngine {
@@ -138,7 +149,7 @@ public:
     /// Drains state writes and deletes the paused conversations' files.
     ~PagedEngine();
 
-    /// Makes each conversation's state on each card; false (said on stderr) when one does not fit.
+    /// Opens the shared memory pools and runtime resources; conversations are created on admission.
     bool init();
     /// Answers the server's commands until QUIT or the end of stdin; returns the exit status.
     int serve();
@@ -200,8 +211,14 @@ private:
     /// Gets the least and the most the RAM's pool and its staging ring may hold now.
     uint64_t get_smallest_ram() const;
     uint64_t get_largest_ram() const;
-    /// Runs one GEN or BGEN line; false on a failure that ends the engine (its ERR has been printed).
-    bool serve_request(const std::string& line);
+    /// Validates RUN, then queues it or admits a queued request at a model boundary.
+    bool serve_request(const std::string& line, bool admit = false);
+    /// Admits the highest-priority waiting request when capacity permits; cancellations take precedence.
+    bool admit_pending_request();
+    /// Allocates state only when admission needs another conversation.
+    bool create_conversation(std::string& err);
+    /// Emits one terminal record and releases request transport state.
+    void finish_request(Held& h, const char* finish);
     /// Runs one `SAVE <path>` or `RESTORE <path>` line (the path runs to the line's end) between requests, and answers
     /// with SAVED or RESTORED, or SERR when it refused or failed with nothing changed.  The server's /slots/0 sends
     /// them; the "session" is the conversation most recently used, on the GPUs or paused.
@@ -256,11 +273,6 @@ private:
                                 std::optional<int64_t> priority = std::nullopt);
     /// Reports failures while draining state before commands or completed requests expose it.
     bool wait_model_state();
-    /// Ends the request that batch slot `slot` decodes, so that one of priority `priority` takes the slot, when that is
-    /// higher than its own: prints its BDONE with the finish "preempted".  The server sends it again later, its prompt
-    /// and the tokens it got so far, which resumes its conversation (take_conversation pauses it).  False when the
-    /// request's priority is as high.
-    bool preempt(size_t slot, int64_t priority);
     /// Puts the conversation that holds the longest start of `ids` (an idle one on the GPU, or a paused one, which
     /// comes back) in place `target` of `at_`, pausing the one there unless that is it.  A conversation whose tokens
     /// `ids` leave before their end comes back at the latest point it can go back to (get_resume_tokens), and stays
@@ -277,8 +289,8 @@ private:
     void pause_for_capacity(Held& h);
     /// Pauses `h`'s conversation, or forgets it when that fails (said on stderr).
     void pause_or_forget(Held& h);
-    /// Ends the request that batch slot `slot` decodes, its finish "preempted" (preempt).
-    void end_preempted(size_t slot);
+    /// Ends the request at a scheduler position so its cached prefix can resume later.
+    void end_preempted(size_t position);
     /// Finds idle GPU state to release: empty first, then the lowest priority and oldest use, among those `can_go`
     /// accepts besides `keep` and the one whose prompt is read; null when none.
     Held* find_idle(const Held* keep, const std::function<bool(const Held&)>& can_go = nullptr) const;
@@ -332,10 +344,8 @@ private:
     bool is_refill_wanted() const;
     /// Uploads the cards' residency tables when experts came or left since the last upload.
     bool publish_residency(std::string& err);
-    /// Ends batch slot `slot`'s decoding at its next step (BSTOP).
-    void stop_slot(int slot);
-    /// Takes the BSTOP lines that came while a request runs (BYIELD lines are not taken: a read here never gives way).
-    void take_slot_controls();
+    /// Carries targeted cancellations into the scheduler before its next model step.
+    void poll_cancellations();
     /// Tells whether any conversation decodes.
     bool is_decoding() const;
     /// Tells whether the drafter is switched on (the model has one and settings_.drafter).
@@ -379,8 +389,9 @@ private:
     strata::spec::Step step_;
     strata::serve::TokenBudget gpu_token_budget_; ///< Outlives the reservations owned by held_.
     std::vector<std::unique_ptr<Held>> held_;   ///< by session index
-    /// held_'s index of the conversation in each batch slot, then of the one a GEN uses ("main")
+    /// Maps scheduler positions to lazily created conversation state.
     std::vector<size_t> at_;
+    std::vector<PendingRequest> pending_; ///< Requests waiting for scheduler or GPU capacity.
     std::vector<Paused> paused_;       ///< the conversations paused out of the GPU's pool
     uint64_t serial_ = 0;              ///< the last paused conversation's Paused::serial
     std::string pause_prefix_;         ///< a paused conversation's file is this, its serial and ".bin"
@@ -504,11 +515,6 @@ PagedEngine::PagedEngine(PagedModel& model, PagedCards& cards, strata::core::Ram
     if (settings_.conversation_context < 0)
         settings_.conversation_context = std::min(facts_.context, settings_.tokens_max);
     (void) gpu_token_budget_.try_set_limit((uint64_t) settings_.tokens_max);
-    for (int i = 0; i <= get_most_concurrent(); ++i) {
-        held_.push_back(std::make_unique<Held>(gpu_token_budget_));
-        held_.back()->session = i;
-        at_.push_back((size_t) i);
-    }
     std::error_code ec;   // a folder that cannot be found or made fails each pause's save, which says so
     const std::filesystem::path dir = settings.pause_dir.empty()
                                           ? std::filesystem::temp_directory_path(ec) / facts_.name
@@ -559,16 +565,6 @@ bool PagedEngine::init() {
         say("%s\n", why.c_str());
         return false;
     }
-    for (PagedCard& card : cards_) {
-        std::string err;
-        PagedParts parts = model_.make_parts(card, held_.size(), err);
-        if (parts.empty()) {
-            say("%s\n", err.c_str());
-            return false;
-        }
-        for (size_t i = 0; i < held_.size(); ++i)
-            held_[i]->parts.push_back(std::move(parts[i]));
-    }
     if (cards_.size() < 2 || settings_.remote_experts == "off")
         return true;
     std::vector<int> devices;
@@ -607,27 +603,29 @@ int PagedEngine::serve() {
     }
     refilling_ = is_refill_wanted();
     say("GPU expert pools filled before READY in %.0f ms\n", get_ms_since(fill_start));
-    model_.print_info((int) at_.size() - 1, step_.settings.lookahead > 0 ?
+    model_.print_info(get_most_concurrent(), step_.settings.lookahead > 0 ?
                          std::min(step_.settings.rows, step_.settings.lookahead + 1) : 0);
-    std::printf("INFO concurrent=%d\n", settings_.step.concurrent);
-    std::printf("INFO vram_conversations=%lld\n", (long long) settings_.vram_conversations);
-    std::printf("INFO conversation_idle_seconds=%lld\n", (long long) settings_.conversation_idle_seconds);
-    std::printf("INFO tokens_max=%lld\n", (long long) settings_.tokens_max);
-    std::printf("INFO context_capacity=%lld\n", (long long) facts_.context);
+    print_response("INFO concurrent=%d\n", settings_.step.concurrent);
+    print_response("INFO vram_conversations=%lld\n", (long long) settings_.vram_conversations);
+    print_response("INFO conversation_idle_seconds=%lld\n", (long long) settings_.conversation_idle_seconds);
+    print_response("INFO tokens_max=%lld\n", (long long) settings_.tokens_max);
+    print_response("INFO context_capacity=%lld\n", (long long) facts_.context);
     if (settings_.batch_groups != "1") {
-        std::printf("INFO batch_groups=%d\n", step_.settings.groups);
+        print_response("INFO batch_groups=%d\n", step_.settings.groups);
         if (step_.settings.groups == 1)
             say("--batch-groups %s: one group (needs stage launch/poll support and a divisor of live concurrency)\n",
                 settings_.batch_groups.c_str());
     }
-    std::printf("READY %lld stop conversations memory preempt settings\n", (long long) settings_.conversation_context);
+    print_response("INFO request_capacity=%d request_queue=1\n", get_most_concurrent());
+    print_response(
+        "READY %lld stop conversations memory preempt settings requests\n", (long long) settings_.conversation_context);
     strata::serve::EngineHooks hooks;
     hooks.before_line = [this](const std::string&) { return wait_model_state(); };
-    hooks.is_busy = [this] { return is_decoding() || is_refill_wanted(); };
+    hooks.is_busy = [this] { return !pending_.empty() || is_decoding() || is_refill_wanted(); };
     hooks.step = [this] {
-        return fatal_error_.empty() && (is_decoding() ? decode_step() : refill_experts());
+        return fatal_error_.empty() && admit_pending_request() &&
+               (is_decoding() ? decode_step() : !is_refill_wanted() || refill_experts());
     };
-    hooks.stop_slot = [this](int slot) { stop_slot(slot); };
     hooks.list_conversations = [this] { return list_conversations(); };
     hooks.describe_memory = [this] { return describe_memory(); };
     hooks.change_settings = [this](const SettingValues& values, std::string& shortfall) {
@@ -637,7 +635,7 @@ int PagedEngine::serve() {
     std::string line;
     while (loop.next(line)) {
         if (line == "QUIT") break;
-        if (line.rfind("GEN", 0) == 0 || line.rfind("BGEN", 0) == 0) {
+        if (line.rfind("RUN ", 0) == 0 || line.rfind("RUNI ", 0) == 0) {
             if (!serve_request(line)) return 1;
             continue;
         }
@@ -645,7 +643,7 @@ int PagedEngine::serve() {
             run_session_command(line);
             continue;
         }
-        std::printf("ERR %s does not take %s\n", facts_.name.c_str(), line.substr(0, line.find(' ')).c_str());
+        print_response("ERR %s does not take %s\n", facts_.name.c_str(), line.substr(0, line.find(' ')).c_str());
     }
     return loop.is_failed() ? 1 : 0;
 }
@@ -719,7 +717,7 @@ void PagedEngine::save_session(const std::string& path) {
     const uint64_t bytes = std::filesystem::file_size(std::filesystem::u8path(path), ec);
     say("session saved: %zu tokens, %llu bytes to %s in %.1f ms\n", tokens, (unsigned long long) bytes, path.c_str(),
         get_ms_since(t0));
-    std::printf("SAVED %zu %llu %.1f\n", tokens, (unsigned long long) bytes, get_ms_since(t0));
+    print_response("SAVED %zu %llu %.1f\n", tokens, (unsigned long long) bytes, get_ms_since(t0));
     std::fflush(stdout);
 }
 
@@ -769,7 +767,7 @@ void PagedEngine::restore_session(const std::string& path) {
         return refuse(SessionError::storage, "the paused conversations of higher priority take the room");
     say("session restored: %zu tokens, %llu bytes from %s in %.1f ms\n", tokens, (unsigned long long) bytes, path.c_str(),
         get_ms_since(t0));
-    std::printf("RESTORED %zu %llu %.1f\n", tokens, (unsigned long long) bytes, get_ms_since(t0));
+    print_response("RESTORED %zu %llu %.1f\n", tokens, (unsigned long long) bytes, get_ms_since(t0));
     std::fflush(stdout);
 }
 
@@ -811,12 +809,12 @@ void PagedEngine::refuse_session(const char* action, const std::string& path, st
                                  std::string why) const {
     say("session %s %s: %s\n", action, path.c_str(), why.c_str());
     std::replace_if(why.begin(), why.end(), [](char c) { return c == '\n' || c == '\r'; }, ' ');
-    std::printf("SERR %s 0 %s\n", strata::core::session_error_name(kind), why.c_str());
+    print_response("SERR %s 0 %s\n", strata::core::session_error_name(kind), why.c_str());
     std::fflush(stdout);
 }
 
 void PagedEngine::announce_wait(const char* phase, uint64_t bytes) const {
-    std::printf("SWAIT %s %lld\n", phase, (long long) strata::core::session_phase_limit_s(bytes));
+    print_response("SWAIT %s %lld\n", phase, (long long) strata::core::session_phase_limit_s(bytes));
     std::fflush(stdout);
 }
 
@@ -842,24 +840,36 @@ bool PagedEngine::find_identity(std::string& err) {
     return true;
 }
 
-bool PagedEngine::serve_request(const std::string& line) {
+bool PagedEngine::serve_request(const std::string& line, bool admit) {
     strata::serve::RequestLine req;
     strata::serve::Sampling smp = facts_.sampling;
     std::vector<int64_t> ids;
     std::string err;
-    const size_t slots = at_.size() - 1;
-    if (!strata::serve::parse_request_line(line, req) || req.max_new < 1 ||
-        !parse_i64_list(req.ids.c_str(), ids, err)) {
-        std::printf("ERR %s\n", err.empty() ? "malformed request (or max_new < 1)" : err.c_str());
+    if (!strata::serve::parse_request_line(line, req) || req.request_id.empty()) {
+        print_response("ERR malformed RUN request\n");
         return true;
     }
-    if (req.batch && (req.slot < 0 || (size_t) req.slot >= slots)) {
-        std::printf("ERR BGEN: no such slot (capacity %zu)\n", slots);
+    const strata::serve::RequestOutput output(req.request_id);
+    if (std::any_of(held_.begin(), held_.end(), [&](const auto& h) {
+            return h->decoding && h->request_id == req.request_id;
+        }) || std::any_of(pending_.begin(), pending_.end(), [&](const PendingRequest& request) {
+            return request.id == req.request_id;
+        })) {
+        input_.finish_request(req.request_id);
+        print_response("ERR duplicate request identity\n");
         return true;
     }
-    if (!req.batch && slots > 0 &&
-        (size_t) std::count_if(held_.begin(), held_.end(), [](const auto& h) { return h->decoding; }) >= slots) {
-        std::printf("ERR %s decodes %zu conversations at once, and they all are\n", facts_.name.c_str(), slots);
+    struct Admission {
+        Input& input;
+        const std::string& id;
+        bool retained = false;
+        ~Admission() {
+            if (!retained)
+                input.finish_request(id);
+        }
+    } admission{input_, req.request_id};
+    if (req.max_new < 1 || !parse_i64_list(req.ids.c_str(), ids, err)) {
+        print_response("ERR malformed RUN request\n");
         return true;
     }
     int64_t priority = 0;
@@ -869,36 +879,54 @@ bool PagedEngine::serve_request(const std::string& line) {
         else
             (void) strata::serve::read_sampling_key(key, value, smp);   // the other engines' keys are not this one's
     const int64_t n = (int64_t) ids.size();
+    if (input_.is_cancel_requested(req.request_id)) {
+        print_response("DONE 0 %lld 0 0 cancel\n", (long long) n);
+        return true;
+    }
     if (n >= settings_.conversation_context) {
-        std::printf("ERR the prompt (%lld tokens) does not fit the per-conversation limit (%lld)\n", (long long) n,
-                    (long long) settings_.conversation_context);
+        print_response("ERR the prompt (%lld tokens) does not fit the per-conversation limit (%lld)\n",
+                                      (long long) n, (long long) settings_.conversation_context);
         return true;
     }
     if (n >= settings_.tokens_max) {
-        std::printf("ERR the prompt (%lld tokens) does not fit the shared GPU token budget (%lld)\n",
+        print_response("ERR the prompt (%lld tokens) does not fit the shared GPU token budget (%lld)\n",
                     (long long) n, (long long) settings_.tokens_max);
         return true;
     }
-    if (req.batch && !can_admit_conversation(n, priority)) {
-        std::printf("ERR BGEN: active requests occupy the GPU conversation or token allowance\n");
+    if (!admit || !can_admit_conversation(n, priority)) {
+        pending_.push_back({line, req.request_id, priority, n});
+        admission.retained = true;
         return true;
     }
-    if (req.batch && get_held((size_t) req.slot).decoding && !preempt((size_t) req.slot, priority)) {
-        std::printf("ERR BGEN: slot %ld decodes a request of priority %lld, as high as this one's\n", req.slot,
-                    (long long) get_held((size_t) req.slot).dec.priority);
-        return true;
+    size_t target = 0;
+    while (target < at_.size() && get_held(target).decoding)
+        ++target;
+    if (target == at_.size() && at_.size() >= (size_t) get_most_concurrent()) {
+        Held* victim = find_decoding_victim(nullptr, priority);
+        if (!victim) {
+            pending_.push_back({line, req.request_id, priority, n});
+            admission.retained = true;
+            return true;
+        }
+        target = (size_t) victim->position;
+        end_preempted(target);
     }
+    if (target == at_.size() && !create_conversation(err)) {
+        print_response("ERR %s\n", err.c_str());
+        return false;
+    }
+    print_response("STARTED\n");
     uint64_t image_key = 0;
     if (!model_.prepare_images(req, ids, image_key, err)) {
-        std::printf("ERR %s\n", err.c_str());
+        print_response("ERR %s\n", err.c_str());
         return true;
     }
     input_.clear_stop();   // a STOP between requests is stale
     const Clock::time_point t0 = Clock::now();
-    const size_t target = req.batch ? (size_t) req.slot : slots;
     const auto policy = find_draft_policy(ids, image_key);
     const int64_t resume = take_conversation(target, ids, image_key, priority);
     Held& h = get_held(target);
+    h.request_id = req.request_id;
     const int session = h.session;
     h.used = ++requests_;
     h.dec = strata::spec::Decoding{};
@@ -916,7 +944,7 @@ bool PagedEngine::serve_request(const std::string& line) {
     if (facts_.has_drafter)
         model_.forget_drafts(session);
     if (!h.has_pages() && !init_pages(h, err, priority)) {
-        std::printf("ERR %s\n", err.c_str());
+        print_response("ERR %s\n", err.c_str());
         return true;
     }
     if (resume == 0) {
@@ -925,14 +953,14 @@ bool PagedEngine::serve_request(const std::string& line) {
             part->clear_state();
     }
     h.policy = policy;
-    std::printf("RESUME %lld\n", (long long) resume);
+    print_response("RESUME %lld\n", (long long) resume);
     h.image_key = image_key;
     model_.attach_images(h.parts);
     model_.start_request(session, {smp, req.keys});
     const char* finish = "length";
     int64_t read_to = resume;   // the prompt tokens the session holds
     if (!make_room(h, n - 1, err, priority)) {   // refused: the engine stays up
-        std::printf("ERR %s\n", err.c_str());
+        print_response("ERR %s\n", err.c_str());
         return true;
     }
     if (n - 1 > resume) {
@@ -941,7 +969,7 @@ bool PagedEngine::serve_request(const std::string& line) {
         if (fatal)
             return false;
         if (!ok && err != "cancelled") {
-            std::printf("ERR %s\n", err.c_str());
+            print_response("ERR %s\n", err.c_str());
             return false;
         }
         if (!ok) finish = "cancel";
@@ -952,8 +980,9 @@ bool PagedEngine::serve_request(const std::string& line) {
             part->truncate(read_to);
     h.gpu_tokens.shrink_to((uint64_t) read_to);
     const double prompt_ms = get_ms_since(t0);
-    std::printf("REUSED %lld\n", (long long) resume);
+    print_response("REUSED %lld\n", (long long) resume);
     const Clock::time_point d0 = Clock::now();
+    h.t0 = d0;
     if (read_to == n - 1) {
         h.dec.session = session;
         h.dec.next = (int32_t) ids[(size_t) (n - 1)];
@@ -974,31 +1003,61 @@ bool PagedEngine::serve_request(const std::string& line) {
         }
 
         h.decoding = true;
-        h.slot = -1;
-        h.t0 = d0;
-        // BGEN hands off after its first token, or before decoding when higher-ranked requests occupy the step.
-        while (h.decoding && !(req.batch && h.dec.produced > 0)) {
-            h.dec.stop |= input_.is_stop_requested();
-            take_slot_controls();
-            if (req.batch && !h.dec.stop) {
-                const auto selected = get_decoding_conversations();
-                if (std::find(selected.begin(), selected.end(), &h) == selected.end() || !can_decode_while_reading())
-                    break;
-            }
-            if (!decode_step())
-                return false;
-        }
-        finish = h.decoding ? "length" : h.dec.finish;
+        h.position = (int) target;
     }
-    model_.print_done({h.dec.produced, n, resume, read_to - resume, prompt_ms, get_ms_since(d0), finish,
-                       h.dec.guessed, h.dec.guessed_right});
-    model_.end_request();
-    if (req.batch) {
-        if (h.decoding)
-            h.slot = (int) req.slot;
-        std::printf("BADM %ld %d\n", req.slot, h.decoding ? 1 : 0);
-    }
+    h.prompt_tokens = n;
+    h.resumed = resume;
+    h.prompt_read = read_to - resume;
+    h.prompt_ms = prompt_ms;
+    if (!h.decoding)
+        finish_request(h, finish);
+    admission.retained = h.decoding;
     return true;
+}
+
+bool PagedEngine::admit_pending_request() {
+    if (pending_.empty())
+        return true;
+    auto request = std::find_if(pending_.begin(), pending_.end(), [&](const PendingRequest& pending) {
+        return input_.is_cancel_requested(pending.id);
+    });
+    if (request == pending_.end())
+        request = std::max_element(pending_.begin(), pending_.end(), [](const auto& a, const auto& b) {
+            return a.priority < b.priority;
+        });
+    const bool invalid = request->prompt_tokens >= settings_.conversation_context ||
+                         request->prompt_tokens >= settings_.tokens_max;
+    if (!input_.is_cancel_requested(request->id) && !invalid &&
+        !can_admit_conversation(request->prompt_tokens, request->priority))
+        return true;
+    if (!wait_model_state())
+        return false;
+    std::string line = std::move(request->line);
+    pending_.erase(request);
+    return serve_request(line, true);
+}
+
+bool PagedEngine::create_conversation(std::string& err) {
+    auto h = std::make_unique<Held>(gpu_token_budget_);
+    h->session = (int) held_.size();
+    for (PagedCard& card : cards_) {
+        PagedParts parts = model_.make_parts(card, held_.size(), 1, err);
+        if (parts.empty())
+            return false;
+        h->parts.push_back(std::move(parts.front()));
+    }
+    at_.push_back(held_.size());
+    held_.push_back(std::move(h));
+    return true;
+}
+
+void PagedEngine::finish_request(Held& h, const char* finish) {
+    const strata::serve::RequestOutput output(h.request_id);
+    input_.finish_request(h.request_id);
+    model_.print_done({h.dec.produced, h.prompt_tokens, h.resumed, h.prompt_read, h.prompt_ms,
+                       get_ms_since(h.t0), finish, h.dec.guessed, h.dec.guessed_right});
+    h.decoding = false;
+    model_.end_request();
 }
 
 bool PagedEngine::read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t from, int64_t to,
@@ -1008,7 +1067,7 @@ bool PagedEngine::read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t 
         read_to = pos0 + T;
         h.last_tokens_at = (uint64_t) std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         const double ms = get_ms_since(t0);
-        std::printf("PP %lld %lld %.0f %.1f\n", (long long) read_to, (long long) ids.size(), ms,
+        print_response("PP %lld %lld %.0f %.1f\n", (long long) read_to, (long long) ids.size(), ms,
                     ms > 0 ? 1000.0 * (double) (read_to - from) / ms : 0.0);
         strata::core::progress_beat();
         if (!input_.is_stop_requested()) return true;
@@ -1026,7 +1085,7 @@ bool PagedEngine::read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t 
         const Clock::time_point td = Clock::now();
         while (ok && q + piece < to && is_decoding() && can_decode_while_reading() &&
                get_ms_since(td) < budget_ms) {
-            take_slot_controls();
+            poll_cancellations();
             fatal = !decode_step();
             ok = !fatal;
         }
@@ -1038,13 +1097,14 @@ bool PagedEngine::read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t 
 bool PagedEngine::decode_step() {
     const Clock::time_point started = settings_.step_profile ? Clock::now() : Clock::time_point{};
     draft_ms_ = verify_ms_ = commit_ms_ = pages_ms_ = 0;
+    poll_cancellations();
     auto going = get_decoding_conversations();
     while (get_decode_growth(going) > gpu_token_budget_.get_available()) {
         Held* victim = find_idle(nullptr);
         if (!victim)
             victim = find_decoding_victim();
         if (!victim) {
-            std::printf("ERR the GPU conversation budget has no room for a decode step\n");
+            print_response("ERR the GPU conversation budget has no room for a decode step\n");
             return false;
         }
         pause_for_capacity(*victim);
@@ -1061,7 +1121,7 @@ bool PagedEngine::decode_step() {
     routed_before_.assign(usage.begin(), usage.end());
     std::string err;
     if (!step_.run(active, err)) {
-        std::printf("ERR %s\n", err.c_str());
+        print_response("ERR %s\n", err.c_str());
         return false;
     }
     if (const int64_t routed = std::inner_product(usage.begin(), usage.end(), routed_before_.begin(), (int64_t) 0,
@@ -1072,6 +1132,7 @@ bool PagedEngine::decode_step() {
         ++routed_steps_;
     }
     for (Held* h : going) {
+        const strata::serve::RequestOutput output(h->request_id);
         strata::spec::Decoding& d = h->dec;
         if (d.planner)
             h->policy = d.planner->policy;
@@ -1080,10 +1141,7 @@ bool PagedEngine::decode_step() {
         if (!d.fed.empty() || !d.emitted.empty())
             h->last_tokens_at = (uint64_t) std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         for (const int32_t t : d.emitted)
-            if (h->slot < 0)
-                std::printf("T %d\n", (int) t);
-            else
-                std::printf("BT %d %d\n", h->slot, (int) t);
+            print_response("T %d\n", (int) t);
         if (d.finish == nullptr)
             continue;
         if (!wait_model_state())
@@ -1112,10 +1170,7 @@ bool PagedEngine::decode_step() {
                 "token 0\n", (long long) d.pos);
             h->forget();
         }
-        if (h->slot >= 0) {
-            std::printf("BDONE %d %lld %s %.1f\n", h->slot, (long long) d.produced, d.finish, get_ms_since(h->t0));
-            model_.end_request();
-        }
+        finish_request(*h, d.finish);
     }
     strata::core::progress_beat();
     refilling_ = is_refill_wanted();
@@ -1156,7 +1211,7 @@ bool PagedEngine::can_admit_conversation(int64_t tokens, int64_t priority) const
     uint64_t available = gpu_token_budget_.get_available();
     int active = 0;
     for (const auto& h : held_)
-        if (!h->decoding || (h->slot >= 0 && h->dec.priority < priority))
+        if (!h->decoding || (h->position >= 0 && h->dec.priority < priority))
             available += h->gpu_tokens.get_used();
         else
             ++active;
@@ -1212,20 +1267,9 @@ bool PagedEngine::trim_gpu_conversations(int maximum, const Held* keep, std::opt
     return true;
 }
 
-bool PagedEngine::preempt(size_t slot, int64_t priority) {
-    Held& h = get_held(slot);
-    if (priority <= h.dec.priority)
-        return false;
-    say("a request of priority %lld preempts slot %zu's (priority %lld, %lld tokens)\n", (long long) priority, slot,
-        (long long) h.dec.priority, (long long) h.dec.produced);
-    end_preempted(slot);
-    return true;
-}
-
-void PagedEngine::end_preempted(size_t slot) {
-    Held& h = get_held(slot);
-    h.decoding = false;
-    std::printf("BDONE %zu %lld preempted %.1f\n", slot, (long long) h.dec.produced, get_ms_since(h.t0));
+void PagedEngine::end_preempted(size_t position) {
+    Held& h = get_held(position);
+    finish_request(h, "preempted");
 }
 
 int64_t PagedEngine::take_conversation(size_t target, const std::vector<int64_t>& ids, uint64_t image_key,
@@ -1356,7 +1400,7 @@ bool PagedEngine::make_room(Held& h, int64_t tokens, std::string& err, std::opti
 Held* PagedEngine::find_decoding_victim(const Held* keep, std::optional<int64_t> priority) {
     Held* victim = nullptr;
     for (const auto& h : held_)
-        if (h.get() != keep && h.get() != reading_ && h->decoding && h->slot >= 0 &&
+        if (h.get() != keep && h.get() != reading_ && h->decoding && h->position >= 0 &&
             (!priority || h->dec.priority < *priority) &&
             (!victim || h->dec.priority < victim->dec.priority ||
              (h->dec.priority == victim->dec.priority && h->used > victim->used)))
@@ -1366,7 +1410,7 @@ Held* PagedEngine::find_decoding_victim(const Held* keep, std::optional<int64_t>
 
 void PagedEngine::pause_for_capacity(Held& h) {
     if (h.decoding)
-        end_preempted((size_t) h.slot);
+        end_preempted((size_t) h.position);
     pause_or_forget(h);
 }
 
@@ -1639,14 +1683,14 @@ bool PagedEngine::adapt_experts() {
     std::string err;
     for (const strata::core::ExpertSwap& s : swaps)
         if (!get_card_of(s.layer).experts.replace(s.layer, s.out, s.in, err)) {
-            std::printf("ERR moving an expert into the GPU's pool: %s\n", err.c_str());
+            print_response("ERR moving an expert into the GPU's pool: %s\n", err.c_str());
             return false;
         }
     for (float& u : usage)
         u *= facts_.adapt_decay;
     seen_ = usage;
     if (!publish_residency(err)) {
-        std::printf("ERR %s\n", err.c_str());
+        print_response("ERR %s\n", err.c_str());
         return false;
     }
     swapped_ += (int64_t) swaps.size();
@@ -1707,16 +1751,10 @@ bool PagedEngine::publish_residency(std::string& err) {
     return true;
 }
 
-void PagedEngine::stop_slot(int slot) {
-    if (slot < 0 || slot + 1 >= (int) at_.size())
-        return;
-    Held& h = get_held((size_t) slot);
-    if (h.decoding && h.slot == slot)
-        h.dec.stop = true;
-}
-
-void PagedEngine::take_slot_controls() {
-    input_.take_slot_controls([this](int slot) { stop_slot(slot); }, [](int) { return false; });
+void PagedEngine::poll_cancellations() {
+    for (const auto& h : held_)
+        if (h->decoding)
+            h->dec.stop |= input_.is_cancel_requested(h->request_id);
 }
 
 bool PagedEngine::is_decoding() const {
@@ -1726,12 +1764,12 @@ bool PagedEngine::is_decoding() const {
 std::vector<strata::core::HeldConversation> PagedEngine::list_conversations() const {
     std::vector<strata::core::HeldConversation> list;
     for (size_t i = 0; i < at_.size(); ++i) {
-        const size_t place = (i + at_.size() - 1) % at_.size();   // "main" first, then the slots
+        const size_t place = i;
         const Held& h = get_held(place);
         if (h.live.empty() && !h.decoding)
             continue;
         strata::core::HeldConversation c;
-        c.id = place + 1 == at_.size() ? "main" : "slot" + std::to_string(place);
+        c.id = "conversation" + std::to_string(h.session);
         c.state = h.decoding ? "decoding" : h.live.empty() ? "empty" : "holding";
         c.ids = h.live.data();
         c.n = h.live.size();
@@ -1776,7 +1814,7 @@ strata::serve::MemoryReport PagedEngine::describe_memory() const {
     ram.add_blocks(strata::core::get_memory_manager().get_blocks("ram"));
     for (size_t i = 0; i < at_.size(); ++i) {
         const auto& h = get_held(i);
-        const std::string id = i + 1 == at_.size() ? "main" : "slot" + std::to_string(i);
+        const std::string id = "conversation" + std::to_string(h.session);
         ram.add_blocks({{{"Checkpoints", "Host checkpoints", "Conversation " + id},
                          model_.get_host_state_bytes(h.parts)}});
     }
@@ -2007,15 +2045,15 @@ std::string PagedEngine::resize_gpu(PagedCard& card, uint64_t bytes) {
             pause_or_forget(*h);
             continue;
         }
-        Held* slot = nullptr;   // a batch slot's decoding conversation, the lowest priority
-        for (size_t i = 0; i + 1 < at_.size(); ++i)
+        Held* victim = nullptr;
+        for (size_t i = 0; i < at_.size(); ++i)
             if (Held& h = get_held(i);
-                h.decoding && in_the_way(h) && (slot == nullptr || h.get_yield_order() < slot->get_yield_order()))
-                slot = &h;
-        if (slot == nullptr)
+                h.decoding && in_the_way(h) && (victim == nullptr || h.get_yield_order() < victim->get_yield_order()))
+                victim = &h;
+        if (victim == nullptr)
             return r.refusal;
-        end_preempted((size_t) slot->slot);
-        pause_or_forget(*slot);
+        end_preempted((size_t) victim->position);
+        pause_or_forget(*victim);
     }
     refilling_ = refilling_ || pool.report().total.pages > before.total.pages;
     std::string err;
@@ -2114,8 +2152,8 @@ bool PagedEngine::move_cut(const std::vector<int64_t>& cut, std::string& err) {
             say("a conversation could not come back after the layer cut moved, so it is forgotten: %s\n",
                 why.c_str());
             h->forget();
-            if (h->decoding)   // (a batch slot's: CHANGE_SETTINGS comes between a request's steps only there)
-                end_preempted((size_t) h->slot);
+            if (h->decoding)
+                end_preempted((size_t) h->position);
         }
     };
     for (const std::unique_ptr<Held>& h : held_) {
@@ -2558,7 +2596,7 @@ bool PagedEngine::wait_model_state() {
         return true;
     if (!fatal_error_.empty())
         err = fatal_error_;
-    std::printf("ERR %s\n", err.c_str());
+    print_response("ERR %s\n", err.c_str());
     return false;
 }
 

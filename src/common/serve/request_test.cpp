@@ -19,6 +19,11 @@ void check(bool value, const char* description) {
 
 int main() {
     RequestLine r;
+    check(parse_request_line("RUN chat_a 64 temperature=0.7 1,2,3", r), "RUN is a request");
+    check(r.request_id == "chat_a" && !r.batch && !r.pictures && r.max_new == 64, "RUN has no placement");
+    check(parse_request_line("RUNI r2 3 /tmp/p.bin 7,8", r) && r.pictures && r.request_id == "r2",
+          "RUNI keeps the same request identity");
+    check(!parse_request_line("RUN bad/id 4 1,2", r), "request identities are single protocol-safe words");
     check(parse_request_line("GEN 64 temperature=0.7 seed=5 1,2,3", r), "GEN is a request");
     check(!r.batch && !r.pictures && r.max_new == 64, "GEN's header");
     check(r.keys.size() == 2 && r.keys[0].first == "temperature" && r.keys[1].second == "5", "GEN's keys in order");

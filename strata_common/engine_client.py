@@ -635,12 +635,10 @@ def parse_conversation_line(f: list[str]) -> dict:
 
 
 class StrataEngine:
-    """The resident engine: `strata --serve` reads `GEN <max_new> <ids>` lines and streams `T <id>` lines, then
-    `DONE ...`.  Requests are serialized by the service's FIFO, so one pipe is enough.
+    """Starts a resident engine and routes generation events and command replies by identity.
 
-    Per-request sampling rides the same line as engine-side keys between max_new and the ids
-    (`temperature=F top_p=F top_k=N seed=N`, the engine's own spelling).  An absent temperature keeps the
-    engine's default, which is greedy; `temperature=0` means the same thing, so it is not forwarded.
+    Engines advertising `requests` use RUN/CANCEL and ASK envelopes. Released engines without that capability
+    retain the legacy client path so updating the Python server does not require replacing every installed engine.
     """
     silence_s = ENGINE_SILENCE_S         # #481: main() sets the config's engine_silence_s (survives restart())
     silent_note = None                   # #481: why the server ended a silent engine (death_note says it)
@@ -678,6 +676,7 @@ class StrataEngine:
         self.proc, self.pump, self.log = None, None, None
         self.ended, self.unloaded = True, True
         self.max_context = int(args[args.index("--max-context") + 1]) if "--max-context" in args else 4096
+        self.request_protocol = False
         self.can_stop = False            # the engine honours a STOP line mid-request (READY <ctx> stop)
         self.can_list = False            # it answers LIST_CONVERSATIONS and GET_CONTEXT_WINDOWS (... conversations)
         self.can_report_memory = False   # it answers GET_MEMORY_USE (... memory)
@@ -769,6 +768,7 @@ class StrataEngine:
                 self.can_report_memory = "memory" in f[2:]
                 self.can_preempt = "preempt" in f[2:]
                 self.can_change_settings = "settings" in f[2:]
+                self.request_protocol = "requests" in f[2:]
                 break
         loading.set()
         if self.max_context <= 0:
@@ -829,7 +829,8 @@ class StrataEngine:
         # --batch: concurrent requests in the engine's batch slots (see generate_batched).  The engine says how many
         # it admits (INFO batch_slots=N). Paged engines expose their full step capacity; --batch only seeds scheduling.
         asked = next((int(args[args.index(k) + 1]) for k in ("--batch", "--slots") if k in args), 0)
-        self.batch = int(self.info.get("batch_slots") or 0)
+        self.batch = int(self.info.get("request_capacity" if self.request_protocol else "batch_slots") or
+                         (1 if self.request_protocol else 0))
         if asked and self.batch != asked and not self.can_change_settings:
             print(f"[strata] parallel requests: {asked} asked, the engine runs {self.batch or 'one at a time'} "
                   "(its log says why)", flush=True)
@@ -879,14 +880,26 @@ class StrataEngine:
         self._ctl_erred = False                         # #1059: the control lines ended on an ERR
         self._yielded = None                            # (slot, tokens read): the last request on them gave way
         self.wlock = threading.Lock()                   # stdin writes from several request threads
+        self.request_queues = {}
+        self.request_lock = threading.Lock()
+        self.request_command_lock = threading.Lock()
+        self.request_activity = time.monotonic()
+        self.request_sequence = 0
+        self.request_permits = threading.BoundedSemaphore(max(1, self.batch))
+        if self.request_protocol:
+            self.slot_live = []
         self.pump = threading.Thread(target=self._pump, daemon=True)
         self.pump.start()
 
     def _pump(self):
         proc, lines = self.proc, self.lines             # this process's: a restart replaces both (#344)
         slot_q = self.slot_q
+        requests = getattr(self, "request_queues", {})
+        request_lock = getattr(self, "request_lock", threading.Lock())
         line = None
         for line in proc.stdout:
+            if self.proc is proc:
+                self.request_activity = time.monotonic()
             # checked before batch routing: a fatal line is never a slot's own
             if line.startswith(FATAL_PREFIXES):
                 # release_gpu_waits invalidates the verifier, even if the native
@@ -899,6 +912,23 @@ class StrataEngine:
                 except OSError:
                     pass
                 break                           # publish EOF, never the trailing DONE
+            if line.startswith(("R ", "C ")):
+                fields = line.split(" ", 2)
+                if len(fields) == 3:
+                    if fields[2].startswith(FATAL_PREFIXES):
+                        if self.proc is proc:
+                            self.silent_note = fields[2].strip()
+                            self.ended = True
+                        try:
+                            proc.terminate()
+                        except OSError:
+                            pass
+                        break
+                    with request_lock:
+                        target = requests.get(fields[1])
+                        if target is not None:
+                            target.put(fields[2])
+                    continue
             if line.startswith("BSTAT"):
                 sample = parse_batch_window_sample(line)
                 if sample is not None and self.proc is proc:
@@ -921,6 +951,9 @@ class StrataEngine:
             if line and line.startswith("ERR"):         # #997 #890: why it exited, though no request may read it
                 self.last_err = line[4:].strip()        # (a failed batch window: every request reads its slot)
         lines.put(None)
+        with request_lock:
+            for target in requests.values():
+                target.put(None)
         for q in slot_q:
             q.put(None)
 
@@ -1085,18 +1118,43 @@ class StrataEngine:
 
     def _ask(self, command: str, kind: str, timeout: float = 30.0, end: str | None = None,
              also: tuple[str, ...] = (), refused: type[Exception] | None = None) -> list[list[str]]:
+        """Serializes command replies independently of RUN event streams."""
+        if not getattr(self, "request_protocol", False):
+            return self._ask_command(command, kind, timeout, end, also, refused)
+        with self.request_command_lock:
+            process = self.proc
+            queues, lock = self.request_queues, self.request_lock
+            channel = queue.Queue()
+            with lock:
+                self.request_sequence += 1
+                identity = f"c{self.gen}_{self.request_sequence}"
+                queues[identity] = channel
+            try:
+                return self._ask_command(command, kind, timeout, end, also, refused,
+                                         channel=channel, identity=identity, process=process)
+            finally:
+                with lock:
+                    queues.pop(identity, None)
+
+    def _ask_command(self, command: str, kind: str, timeout: float = 30.0, end: str | None = None,
+                     also: tuple[str, ...] = (), refused: type[Exception] | None = None,
+                     *, channel=None, identity=None, process=None) -> list[list[str]]:
         """Send `command` and return the fields of each `kind` line (and `also` line) of its answer, up to its `end`
         line (default END_<kind>S; other lines on the way - a NOTE, BSTAT - are passed over).  Raises EngineDied when
         the engine ended, refused or said nothing; `refused`, when given, is raised with the engine's reason instead
         for a refusal (an `ERR` line)."""
         if not self.alive():
             raise EngineDied("the engine is not running")
-        self._send(command)
+        if identity is None:
+            self._send(command)
+        else:
+            self._send(f"ASK {identity} {command}", process=process)
+        replies = channel if channel is not None else self.lines
         name, end, out = command.split()[0], end or "END_" + kind + "S", []
         deadline = time.time() + timeout
         while True:
             try:
-                line = self.lines.get(timeout=max(0.1, deadline - time.time()))
+                line = replies.get(timeout=max(0.1, deadline - time.time()))
             except queue.Empty:
                 raise EngineDied(f"the engine did not answer {name}") from None
             if line is None:
@@ -1295,13 +1353,19 @@ class StrataEngine:
         on = sampling.get("experimental_speed_projection")
         return f" cvec={int(on)}" if isinstance(on, bool) else ""
 
-    def _send(self, text: str):
+    def _send(self, text: str, process=None):
+        """Writes to the expected process, refusing a replacement after a restart."""
         btrace("send>", text[:60])
         try:
             with self.wlock:
-                self.proc.stdin.write(text + "\n")
-                self.proc.stdin.flush()
-        except (OSError, AttributeError):                # the pipe is gone (or a restart's close() took the process):
+                destination = self.proc if process is None else process
+                if process is not None and self.proc is not process:
+                    raise EngineDied("the engine restarted before this command could be sent")
+                destination.stdin.write(text + "\n")
+                destination.stdin.flush()
+        except (OSError, AttributeError, ValueError):
+            if process is not None:
+                raise EngineDied("the request's engine process ended") from None
             raise EngineDied(f"the engine stopped unexpectedly (exit code {self.exit_code()})") from None
 
     def _control(self, cancel, on_token, stop_when=None, on_quiet=None):
@@ -1648,8 +1712,175 @@ class StrataEngine:
         with self.slot_cv:
             return any(e[0] * 2 <= plen for e in self.wait_lens)
 
+    def generate_request(self, ids, max_new, sampling, cancel, embeddings=None):
+        """Streams one stable RUN identity without occupying the command/reply channel."""
+        permits = None if self.info.get("request_queue") else self.request_permits
+        born, process = self.gen, self.proc
+        queues, lock, live_requests = self.request_queues, self.request_lock, self.slot_live
+        beat = time.monotonic()
+        while permits is not None and not permits.acquire(timeout=0.1):
+            if cancel.is_set():
+                return
+            deadline = getattr(cancel, "_strata_queue_deadline", None)
+            if deadline is not None and time.monotonic() >= deadline:
+                raise QueueWaitExpired("the inference queue wait deadline expired; retry later")
+            if self.proc is not process or self.gen != born or not self.alive():
+                raise EngineDied("the engine ended while this request waited")
+            if time.monotonic() - beat >= 10:
+                beat = time.monotonic()
+                yield None
+        if self.proc is not process or self.gen != born or not self.alive():
+            if permits is not None:
+                permits.release()
+            raise EngineDied("the engine ended while this request waited")
+        channel = queue.Queue()
+        live = {"request_id": getattr(cancel, "_strata_request_id", None), "_cancel": cancel,
+                "state": "queued", "prompt_tokens": len(ids), "prompt_read": 0, "generated": 0,
+                "started": time.time(), "first_token": None, "priority": get_request_priority(sampling or {})}
+        with lock:
+            if self.proc is not process or self.gen != born:
+                if permits is not None:
+                    permits.release()
+                raise EngineDied("the engine restarted before this request could be sent")
+            self.request_sequence += 1
+            identity = f"r{born}_{self.request_sequence}"
+            queues[identity] = channel
+            live_requests.append(live)
+        def release():
+            with lock:
+                queues.pop(identity, None)
+                if live in live_requests:
+                    live_requests.remove(live)
+            if permits is not None:
+                permits.release()
+
+        def release_when_finished():
+            deadline = time.monotonic() + 300
+            try:
+                while self.proc is process and self.gen == born and self.alive():
+                    if time.monotonic() >= deadline:
+                        self._silent("the engine did not finish a cancelled request")
+                        break
+                    try:
+                        line = channel.get(timeout=1)
+                    except queue.Empty:
+                        continue
+                    if line is None or line.startswith(("DONE ", "ERR ")):
+                        break
+            finally:
+                release()
+
+        complete, sent, stopped, admitted = False, False, False, False
+        output, carry = [], {}
+        initial_reused = None
+        self.last = {}
+        silence = self.silence_s or 0.0
+        allowance = max(silence, min(len(ids), PP_CHUNK_MAX) / PP_FLOOR_TOK_S) if silence > 0 else 0.0
+        heard = time.monotonic()
+        stall_state = {}
+        try:
+            if cancel.is_set():
+                return
+            deadline = getattr(cancel, "_strata_queue_deadline", None)
+            if deadline is not None and time.monotonic() >= deadline:
+                raise QueueWaitExpired("the inference queue wait deadline expired; retry later")
+            head = "RUNI" if embeddings else "RUN"
+            pictures = f" {embeddings}" if embeddings else ""
+            self._send(f"{head} {identity} {int(max_new)}{self.sampling_keys(sampling or {})}"
+                       f"{pictures} {','.join(str(int(t)) for t in ids)}", process=process)
+            sent = True
+            while True:
+                deadline = getattr(cancel, "_strata_queue_deadline", None)
+                if not admitted and deadline is not None and time.monotonic() >= deadline:
+                    raise QueueWaitExpired("the inference queue wait deadline expired; retry later")
+                if cancel.is_set() and not stopped:
+                    self._send(f"CANCEL {identity}", process=process)
+                    stopped = True
+                try:
+                    line = channel.get(timeout=0.1)
+                except queue.Empty:
+                    if self.proc is not process or self.gen != born or not self.alive():
+                        raise EngineDied("the engine ended during this request")
+                    activity = max(heard, getattr(self, "request_activity", heard))
+                    if allowance > 0 and time.monotonic() - activity >= allowance:
+                        raise self._silent("the engine stopped reporting request progress")
+                    if ENGINE_STALL_S:
+                        self._stall_check(activity, stall_state, ENGINE_STALL_S)
+                    if time.monotonic() - beat >= 10:
+                        beat = time.monotonic()
+                        yield None
+                    continue
+                if self.proc is not process or self.gen != born:
+                    raise EngineDied("the engine restarted during this request")
+                heard = beat = time.monotonic()
+                stall_state.clear()
+                if line is None:
+                    complete = True
+                    raise EngineDied("the engine ended during this request")
+                fields = line.split()
+                if not fields:
+                    continue
+                if fields[0] in ("STARTED", "PP", "T") and not admitted:
+                    admitted = True
+                    live["state"] = "reading"
+                    cancel._strata_queue_deadline = None
+                    started = getattr(cancel, "_strata_queue_started", None)
+                    if started is not None:
+                        started()
+                if fields[0] == "T":
+                    allowance = silence
+                    live["state"] = "generating"
+                    live["generated"] += 1
+                    live["first_token"] = live["first_token"] or time.time()
+                    output.append(int(fields[1]))
+                    yield output[-1]
+                elif fields[0] == "PP":
+                    live["prompt_read"] = int(fields[1])
+                    self.progress = (int(fields[1]), int(fields[2]))
+                    self.progress_ms = float(fields[3]) if len(fields) > 3 else 0
+                    self.prefill_tok_s_mean = float(fields[4]) if len(fields) > 4 else None
+                    yield None
+                elif fields[0] == "DONE":
+                    self._parse_done(line)
+                elif fields[0] == "ERR":
+                    complete = True
+                    raise ValueError(" ".join(fields[1:]))
+                if fields[0] == "DONE":
+                    finish = self.last.get("finish")
+                    if finish == "preempted" and not cancel.is_set() and len(output) < max_new:
+                        if initial_reused is None:
+                            initial_reused = self.last.get("reused")
+                        carry_leg(carry, self.last)
+                        prompt = [*ids, *output]
+                        live["state"] = "queued"
+                        self._send(f"{head} {identity} {int(max_new) - len(output)}"
+                                   f"{self.sampling_keys(sampling or {})}{pictures} " +
+                                   ",".join(str(int(token)) for token in prompt), process=process)
+                        continue
+                    complete = True
+                    if carry:
+                        self.last = {**add_carry(carry, self.last), "prompt_tokens": len(ids)}
+                        if initial_reused is not None:
+                            self.last = {**self.last, "reused": initial_reused}
+                    if finish == "nonfinite":
+                        raise EngineNonFinite("the engine's logits became non-finite")
+                    return
+        finally:
+            if sent and not complete and self.proc is process and self.gen == born and self.alive():
+                try:
+                    if not stopped:
+                        self._send(f"CANCEL {identity}", process=process)
+                except EngineDied:
+                    release()
+                else:
+                    threading.Thread(target=release_when_finished, daemon=True).start()
+            else:
+                release()
+
     def generate_batched(self, ids, max_new, sampling, cancel, embeddings=None):
-        """--batch.  Alone (no slot busy, nobody waiting): the solo path (GEN, with drafts: the fastest stream)
+        """Compatibility with released engines that do not advertise the request-ID protocol.
+
+        Alone (no slot busy, nobody waiting): the solo path (GEN, with drafts: the fastest stream)
         - and when another request arrives meanwhile, this one is STOPped and continues in a batch slot (BGEN with
         its prompt + what it generated: the engine reuses that prefix).  Otherwise: BGEN into a free slot, then the
         slot's own BT lines until BDONE.  Several requests run at once; the control lines (prompt reading, admission)
@@ -2171,6 +2402,9 @@ class StrataEngine:
         if not self.alive():
             raise EngineDied("the engine is unavailable; this request was not sent")
         bias_api.validate_request(sampling or {}, self, None)
+        if getattr(self, "request_protocol", False):
+            yield from self.generate_request(ids, max_new, sampling, cancel, embeddings)
+            return
         if getattr(self, "batch", 0):
             yield from self.generate_batched(ids, max_new, sampling, cancel, embeddings)
             return
@@ -3043,8 +3277,7 @@ def hip_env_guard(env: dict, cfg: dict) -> list[str]:
 
 
 def carry_leg(carry: dict, leg: dict) -> None:
-    """#1869: a request that decoded in a batch slot and went back to the solo path ends with the solo path's DONE, which
-    replaces the engine's figures: keep the slot leg's decode time, tokens and prompt figures to add to it."""
+    """Accumulates completed execution segments when a preempted request continues."""
     carry["decode_ms"] = carry.get("decode_ms", 0.0) + float(leg.get("decode_ms") or 0.0)
     carry["generated"] = carry.get("generated", 0) + int(leg.get("generated") or 0)
     carry.setdefault("prompt_ms", float(leg.get("prompt_ms") or 0.0))

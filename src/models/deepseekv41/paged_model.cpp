@@ -1,3 +1,4 @@
+#include "strata/common/serve/request_output.hpp"
 // src/models/deepseekv41/paged_model.cpp - strata-ds41: DeepSeek V4.1 on the shared paged engine (paged_model.hpp):
 // its start and its side of the engine's model interface (strata/common/serve/paged_model.hpp).
 #include "strata/models/deepseekv41/paged_model.hpp"
@@ -24,6 +25,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+using strata::serve::print_response;
 
 namespace strata::ds4 {
 namespace {
@@ -298,7 +301,7 @@ public:
     PagedDeepSeek(Model& m, const Options& o, const ProgramOptions& x, bool drafting,
                   const std::vector<int>& eos, ExpertFiles& files, strata::core::RamExperts& ram, PagedCards& cards);
 
-    PagedParts make_parts(PagedCard& card, size_t count, std::string& err) override;
+    PagedParts make_parts(PagedCard& card, size_t first, size_t count, std::string& err) override;
     bool get_card_layout(const PagedCard& card, int64_t lb, int64_t le, strata::core::StateLayout& layout,
                          std::string& err) const override {
         ConversationRegions at;
@@ -408,7 +411,7 @@ public:
             std::printf("INFO batch_slots=%d slot_cache=0\n", slots);
     }
     void print_done(const strata::serve::RequestDone& d) const override {
-        std::printf("DONE %lld %lld %.1f %.1f %s %lld %lld %lld 0 0\n", (long long) d.produced, (long long) d.prompt,
+        print_response("DONE %lld %lld %.1f %.1f %s %lld %lld %lld 0 0\n", (long long) d.produced, (long long) d.prompt,
                     d.prompt_ms, d.decode_ms, d.finish, (long long) d.guessed_right, (long long) d.guessed,
                     (long long) d.resumed);
     }
@@ -784,7 +787,7 @@ bool PagedDeepSeek::copy_expert(const PagedCard& card, strata::core::ExpertKey k
     return true;
 }
 
-PagedParts PagedDeepSeek::make_parts(PagedCard& card, size_t count, std::string& err) {
+PagedParts PagedDeepSeek::make_parts(PagedCard& card, size_t first, size_t count, std::string& err) {
     ConversationRegions at;
     strata::core::StateLayout layout;
     const bool drafter = facts.has_drafter && card.index + 1 == cards_.size();
@@ -796,7 +799,7 @@ PagedParts PagedDeepSeek::make_parts(PagedCard& card, size_t count, std::string&
         Part& part = get_part(*parts.back());
         if (card.index == 0)
             leads_.push_back(&part);
-        part.lead = leads_[i];
+        part.lead = leads_[first + i];
         part.lead->peers.push_back(&part);
     }
     return parts;

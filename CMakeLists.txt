@@ -1644,7 +1644,8 @@ add_library(strata_spec STATIC src/common/spec/suffix_drafter.cpp src/common/spe
             src/common/spec/draft_policy.cpp src/common/spec/draft_source.cpp src/common/spec/step.cpp)
 target_include_directories(strata_spec PUBLIC include)
 # The engine side of the server's line protocol (src/common/serve): no GPU.
-add_library(strata_serve STATIC src/common/serve/loop.cpp src/common/serve/request.cpp)
+add_library(strata_serve STATIC src/common/serve/loop.cpp src/common/serve/request.cpp
+  src/common/serve/request_output.cpp)
 target_include_directories(strata_serve PUBLIC include)
 target_link_libraries(strata_serve PUBLIC Threads::Threads)
 # The page pool (src/common/state): no GPU, the caller allocates its chunks.
@@ -1669,6 +1670,8 @@ if(STRATA_BUILD_TESTS)
   add_executable(prompt_images_test src/models/qwen38/prompt_images_test.cpp)
   target_include_directories(prompt_images_test PRIVATE include)
   add_test(NAME prompt_images_test COMMAND prompt_images_test)
+  add_executable(request_protocol_driver src/common/serve/request_protocol_driver.cpp)
+  target_link_libraries(request_protocol_driver PRIVATE strata_serve strata_kernels_cpu)
   add_executable(request_test src/common/serve/request_test.cpp)
   target_link_libraries(request_test PRIVATE strata_serve)
   add_test(NAME request_test COMMAND request_test)

@@ -1377,9 +1377,9 @@ class Service:
                                     "type": "invalid_request_error" if code < 500 else "server_error"}}
         if not self.slot_save_path or not hasattr(self.engine, "session_file"):
             return error(501, "slot save/restore is disabled (start the server with --slot-save-path DIR)")
-        if getattr(self.engine, "batch", 0):
-            # #465 parallel requests do not hold the FIFO and share the engine's control lines: a session file
-            # could interleave with a request being admitted, so the two are not combined (the engine refuses too)
+        capacity = int(getattr(self.engine, "batch", 0) or 0)
+        if capacity and (capacity > 1 or not getattr(self.engine, "request_protocol", False)):
+            # This API names one model state; it cannot select among concurrently executing contexts.
             return error(501, "slot save/restore is not available with parallel requests (\"parallel\" / --batch)")
         if slot != "0":
             return error(400, "this server has one slot: 0")
@@ -1904,9 +1904,8 @@ class Service:
 
     @contextlib.contextmanager
     def _engine_turn(self, wait: float | None = None):
-        """The engine's turn for a command between requests: True once this holds the FIFO and, with --batch, the
-        control lines (parallel requests do not hold the FIFO; a request alone or an admission holds the lines - the
-        slots may go on decoding); False when a request kept them `wait` seconds (default CONTEXT_WAIT_S)."""
+        """Serializes command replies and model lifecycle operations. RUN streams use independent queues, so a
+        generation never owns this turn. Older released engines may still hold it until generation ends."""
         wait = self.CONTEXT_WAIT_S if wait is None else wait
         if not self.fifo.acquire(timeout=wait):
             yield False
@@ -2817,8 +2816,11 @@ class Service:
                     elif not (self.loaded() and not self._vision_down()):
                         with self._inference_fifo(deadline, cancel):
                             self.ensure_loaded()
+                    if not par and getattr(self.engine, "request_protocol", False):
+                        turn.close()
+                        par = True
                     with self.status_lock:
-                        if par:
+                        if par and queued_counted:
                             self.status["queued"] -= 1
                             queued_counted = False
                             self.terminal_requests[request_id].update(state="waiting", admitted_at=time.time())

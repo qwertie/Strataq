@@ -1,12 +1,8 @@
 // strata/common/serve/loop.hpp - the engine's side of the server's line protocol: the lines it reads on stdin.
 //
-// The server writes one command per line: requests (GEN, GENI, BGEN, BGENI: request.hpp), STOP (end the running
-// request), BSTOP <slot> (end a batch slot), BYIELD <slot> (a prompt read gives way to a shorter one),
-// LIST_CONVERSATIONS and GET_CONTEXT_WINDOWS (token_listing.hpp), GET_MEMORY_USE and CHANGE_SETTINGS
-// (memory_report.hpp), SAVE / RESTORE, VRAM and QUIT.  `Input` reads them on a thread of its own, so that STOP, BSTOP
-// and BYIELD reach a request that is still running; `Loop` hands an engine the commands that are its own and answers
-// the others itself.  Each engine path (src/program/generate.cpp, src/models/qwen36/q36_engine.cu,
-// src/models/deepseekv41/ds4_main.cpp) says what it does through `EngineHooks`.
+// The server sends RUN/RUNI identities, targeted CANCEL and ASK command envelopes (contracts/requests.md).
+// Input reads independently of model work. Loop services commands between decode steps; older handler forms
+// are translated by request_output.hpp for engines that configure its compatibility adapter.
 #pragma once
 
 #include "strata/common/serve/memory_report.hpp"
@@ -39,6 +35,10 @@ public:
     bool is_stop_requested() const;
     /// Forgets an earlier STOP (one that came between requests is stale).
     void clear_stop();
+    /// Checks targeted cancellation independently of which request currently uses the model.
+    bool is_cancel_requested(const std::string& id) const;
+    /// Releases cancellation bookkeeping after a request's terminal event.
+    void finish_request(const std::string& id);
 
     /// Removes the queued `BSTOP <slot>` lines, giving each slot to `stop_slot`, and the queued `BYIELD <slot>` lines
     /// that `yield` accepts (it returns false to leave a line queued).  Used by a prompt read that batch slots

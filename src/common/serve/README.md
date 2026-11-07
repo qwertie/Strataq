@@ -1,6 +1,7 @@
 # src/common/serve/
 
-The engine side of the line protocol that the Python server speaks (`strata_common/engine_client.py`), and the paged
+The engine side of the [request-ID protocol](../../../contracts/requests.md) that the Python server speaks
+(`strata_common/engine_client.py`), and the paged
 engine. Headers: `include/strata/common/serve/`. Libraries: `strata_serve` (no GPU) and `strata_paged` (the paged
 engine).
 
@@ -11,7 +12,7 @@ engine).
 - `memory_report.hpp`: GET_MEMORY_USE's answer (what the engine holds in each memory, for the server's
   `GET /v1/memory`): each engine fills a `MemoryReport` (`EngineHooks::describe_memory`), and the loop adds the parked
   conversations and writes the lines.
-- `request.hpp`: a request line (`GEN`, `GENI`, `BGEN`, `BGENI`) split into its parts, its token ids, and the
+- `request.hpp`: a request line (`RUN`, `RUNI`, plus legacy handler forms) split into its parts, its token ids, and the
   sampling keys every engine reads.
 - `paged_engine.hpp`: the paged engine (docs/MEMORY_MANAGER_PLAN.md, "One shared paged engine"): conversations in
   page pools, several decoding at once, pausing to RAM and the SSD, priorities, `CHANGE_SETTINGS`, the pools' resizes
@@ -26,8 +27,8 @@ engine).
   request order until completion or preemption; requests waiting for a turn do not rotate into the selected set.
   Cancellations drain first without generating rows. `concurrent` limits this selected set, not admitted requests
   or conversations whose KV cache remains in VRAM.
-  A `BGEN` outside that set hands off with zero admission tokens, so it does not hold the command channel while
-  waiting for a decode turn. Selected requests keep the existing first-token handoff.
+  RUN admission does not generate a first token or hold the command channel through decoding.
+  Higher-priority pending requests may preempt active work; Python resumes the interrupted identity.
 - `token_budget.hpp`: accounts for each GPU-resident conversation once, independently of its physical page layout
   or the number of GPUs. Reservations cover prompt reads and decode windows; pausing or forgetting returns them.
   `tokens_max` caps their combined logical tokens. The separate live `context` limit cannot exceed that budget or
@@ -42,8 +43,11 @@ engine).
   in the shared pause file's host header. Disk-paused headers retain only lookup metadata in RAM; checkpoint
   payloads are read back from the file on resume.
 
-Each engine still handles its own requests, SAVE / RESTORE, VRAM and QUIT, and writes its own `T`, `PP`, `DONE`, `BT`
-and `BDONE` lines.
+Every updated engine accepts RUN/RUNI and targeted CANCEL. The paged engine queues and places requests itself;
+its command loop remains available between decode steps even with one request. Older handlers use the shared
+`request_output` adapter: their execution details stay internal, and all emit request-tagged T/PP/DONE events.
+ASK commands have separately tagged replies, including multiline memory/context reports. Python retains its
+legacy client only for previously released binaries without the `requests` capability.
 
 ## Which engine uses it
 
