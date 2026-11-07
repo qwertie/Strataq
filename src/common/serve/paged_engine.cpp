@@ -1728,6 +1728,8 @@ std::vector<strata::core::HeldConversation> PagedEngine::list_conversations() co
     for (size_t i = 0; i < at_.size(); ++i) {
         const size_t place = (i + at_.size() - 1) % at_.size();   // "main" first, then the slots
         const Held& h = get_held(place);
+        if (h.live.empty() && !h.decoding)
+            continue;
         strata::core::HeldConversation c;
         c.id = place + 1 == at_.size() ? "main" : "slot" + std::to_string(place);
         c.state = h.decoding ? "decoding" : h.live.empty() ? "empty" : "holding";
@@ -1824,8 +1826,20 @@ strata::serve::MemoryReport PagedEngine::describe_memory() const {
                            {{"memory_mib.ram", (int64_t) ((rr.total.bytes + ram_.ring_bytes()) >> 20)},
                             {"token_bytes", (int64_t) ((grown - fixed) / probe)},
                             {"conversation_bytes", (int64_t) fixed}});
-    if (facts_.has_drafter)
-        report.settings.emplace_back("drafter", settings_.drafter ? 1 : 0);
+    report.settings.emplace_back("drafter", settings_.drafter && facts_.has_drafter ? 1 : 0);
+    report.settings.emplace_back("suffix_draft", settings_.suffix_draft);
+    report.settings.emplace_back("lookup_chain", settings_.lookup_chain);
+    uint64_t drafter_bytes = facts_.drafter_expert_bytes;
+    for (const PagedCard& card : cards_)
+        drafter_bytes += model_.get_drafter_weight_bytes(card);
+    char cost[32];
+    std::snprintf(cost, sizeof cost, "%.1f GiB", (double) drafter_bytes / 1073741824.0);
+    report.details = {{"drafter_label", "Use " + facts_.drafter_label + " drafter (" + cost + ")"},
+                      {"drafter_details", facts_.has_drafter ? "Discovered drafter: " + facts_.drafter_label :
+                       "No model drafter was loaded on startup; restart with " + facts_.drafter_start},
+                      {"suffix_label", "Use suffix drafter (0 GiB)"},
+                      {"kv_quantization", facts_.kv_quantization}};
+    report.settings.emplace_back("has_drafter", facts_.has_drafter ? 1 : 0);
     report.per_conversation = true;
     return report;
 }
@@ -1854,6 +1868,10 @@ std::string PagedEngine::change_settings(const SettingValues& values, std::strin
                                                               ram_.ring_bytes()) + ram_.ring_bytes();
         else if (name == "context")
             s.conversation_context = v;
+        else if (name == "suffix_draft")
+            s.suffix_draft = v;
+        else if (name == "lookup_chain")
+            s.lookup_chain = v;
         else if (name == "tokens_min")
             s.tokens_min = v;
         else if (name == "tokens_max")
@@ -1926,6 +1944,8 @@ std::string PagedEngine::change_settings(const SettingValues& values, std::strin
     settings_.ssd_pause_mib = s.ssd_pause_mib;
     trim_ssd();
     settings_.step = s.step;
+    settings_.suffix_draft = s.suffix_draft;
+    settings_.lookup_chain = s.lookup_chain;
     const auto note = [&shortfall](const char* what, const std::string& why) {
         if (!why.empty())
             shortfall += (shortfall.empty() ? "" : "; ") + (what + why);

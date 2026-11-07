@@ -5,6 +5,7 @@
 <title>Strata API Monitor</title>
 <link rel="icon" href="/web/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/web/tokens.css">
+<link rel="stylesheet" href="/web/memory-panel.css">
 <style>
 *{box-sizing:border-box}body{margin:0;background:var(--st-bg);color:var(--st-ink);font:15px/1.5 var(--st-font)}
 button,input,select{font:inherit}button{cursor:pointer;color:inherit;background:var(--st-surface-2);border:1px solid var(--st-line);border-radius:9px;padding:8px 13px}button:hover{border-color:var(--st-accent)}button:disabled{opacity:.4;cursor:default}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--st-focus);outline-offset:3px}[hidden]{display:none!important}
@@ -37,7 +38,7 @@ header{height:70px;padding:0 32px;display:flex;align-items:center;justify-conten
 <section id="ctx" class="panel" style="margin-top:14px"><div class="panel-bar ctx-bar"><div class="ctx-title"><button id="ctx-refresh" class="primary">Refresh</button><div><h2>Context in VRAM</h2><div id="ctx-sum" class="small">Press Refresh to read the tokens the engine holds.</div></div></div>
 <div class="filters"><select id="ctx-slot" aria-label="Session or parked conversation" hidden></select><div class="tabs" role="tablist" aria-label="Context view" style="border:0;padding:0"><button role="tab" data-view="plain" aria-selected="true">Plain text</button><button role="tab" data-view="colored" aria-selected="false">Colored tokens</button></div>
 <span class="ctx-save" role="group" aria-label="Save"><button id="ctx-save" disabled>Save .txt</button><label title="Append the token ids to the file as 32-bit little-endian numbers"><input type="checkbox" id="ctx-binary"> with token ids</label></span></div></div>
-<div class="ctx-body"><div id="ctx-note" class="small" style="margin-top:10px"></div><div id="ctx-pager" class="ctx-pager" hidden><button id="ctx-prev">‹ Earlier</button><span id="ctx-range" class="small"></span><button id="ctx-next">Later ›</button></div><pre id="ctx-view" aria-label="Context tokens"></pre></div></section>
+<div class="ctx-body"><div id="ctx-conversations"></div><div id="ctx-note" class="small" style="margin-top:10px"></div><div id="ctx-pager" class="ctx-pager" hidden><button id="ctx-prev">‹ Earlier</button><span id="ctx-range" class="small"></span><button id="ctx-next">Later ›</button></div><pre id="ctx-view" aria-label="Context tokens"></pre></div></section>
 <footer><span>Last 100 requests kept in memory until restart. Inputs and outputs stay on this machine.</span><span id="updated">Connecting…</span></footer>
 </main>
 </body></html>

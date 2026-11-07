@@ -103,6 +103,8 @@ struct MemoryReport {
     std::string shortfall;
     /// Folder used by this engine for automatic SSD pause files.
     std::string pause_directory;
+    /// Supplies UI labels and discovery information without putting strings in numeric SETTINGS.
+    std::vector<std::pair<std::string, std::string>> details;
 
     /// Gets the memory named `id`, adding an empty one at the end when there is none.
     Memory& at(const std::string& id) {
@@ -194,6 +196,8 @@ inline std::string format_memory_report(MemoryReport report, const std::vector<c
             s += core::format_conversation_line(c) + '\n';
     if (!report.pause_directory.empty())
         s += "PAUSE_DIRECTORY " + report.pause_directory + "\n";
+    for (const auto& [key, value] : report.details)
+        s += "MEMORY_DETAIL " + key + " " + encode_memory_label(value) + "\n";
     s += "SETTINGS";
     for (const auto& [key, v] : report.settings)
         s += " " + key + "=" + std::to_string(v);

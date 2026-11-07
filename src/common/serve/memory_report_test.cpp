@@ -90,6 +90,10 @@ int main() {
     check(wire.find("pool_offset=10") != std::string::npos, "labelled pools declare their divider position");
     check(wire.find("MEMORY_BLOCK gpu0 200 arbitrary%20category Pool%20%2F%20one Drafter%20%26%20buffers") !=
               std::string::npos, "labels are aggregated and protocol-safe without a category list");
+    labelled.details = {{"drafter_label", "Use DSpark drafter (1.2 GiB)"}};
+    check(format_memory_report(labelled, {}).find(
+              "MEMORY_DETAIL drafter_label Use%20DSpark%20drafter%20%281%2E2%20GiB%29\n") != std::string::npos,
+          "UI discovery strings are encoded independently of numeric settings");
     labelled.pause_directory = "C:/pause files";
     auto recent = held[0];
     recent.last_tokens_at = 1700000000;

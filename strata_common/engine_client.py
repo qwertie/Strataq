@@ -1156,11 +1156,16 @@ class StrataEngine:
     def _ask_memory_report(self, command: str, refused: type[Exception] | None = None) -> dict:
         """Sends `command` and parses its GET_MEMORY_USE-style answer for memory() and change_settings()."""
         memories, settings, held, shortfall, pause_directory = [], {}, [], None, None
+        details = {}
         for f in self._ask(command, "MEMORY", end="END_MEMORY",
-                           also=("SETTINGS", "CONVERSATION", "SHORTFALL", "MEMORY_BLOCK", "PAUSE_DIRECTORY"),
+                           also=("SETTINGS", "CONVERSATION", "SHORTFALL", "MEMORY_BLOCK",
+                                 "PAUSE_DIRECTORY", "MEMORY_DETAIL"),
                            refused=refused):
             # MEMORY <id> [key=value ...] [name=<text to the end>]  /  CONVERSATION ...  /  SETTINGS [key=value ...]  /
             # SHORTFALL <text>
+            if f[0] == "MEMORY_DETAIL":
+                details[f[1]] = unquote(f[2])
+                continue
             if f[0] == "PAUSE_DIRECTORY":
                 pause_directory = " ".join(f[1:])
                 continue
@@ -1202,7 +1207,8 @@ class StrataEngine:
                 self.info[key] = settings[key]
         if "context_capacity" in self.info and "context" in settings:
             self.max_context = settings["context"]
-        return {"memories": memories, "settings": settings, **({"conversations": held} if held else {}),
+        return {"memories": memories, "settings": settings, **({"details": details} if details else {}),
+                **({"conversations": held} if held else {}),
                 **({"shortfall": shortfall} if shortfall else {}),
                 **({"pause_directory": pause_directory} if pause_directory else {})}
 

@@ -54,11 +54,12 @@ const CHANGED_KEY = "strata.memoryPanel.changed";
 const SETTINGS = {context: "Per-conversation token limit", concurrent: "Conversations at once", rows: "Rows per step",
                   vram_conversations: "Conversations held in VRAM",
                   conversation_idle_seconds: "Idle conversation eviction age (seconds)",
-                  lookahead: "Lookahead", tokens_min: "Conversation tokens, minimum",
-                  tokens_max: "Combined GPU token budget", ssd_pause_mib: "SSD for paused conversations (MiB)",
+                  lookahead: "Max lookahead", tokens_min: "Min conversation tokens",
+                  tokens_max: "Max conversation tokens", ssd_pause_mib: "SSD for paused conversations (MiB)",
                   drafter: "Drafter", slots: "Maximum conversations at once"};
 /** Settings the engine reports that the panel shows elsewhere (the bars) or not at all. */
-const UNLISTED = /^memory_mib\.|^token_bytes$|^conversation_bytes$|^context_capacity$/;
+const UNLISTED = new RegExp("^memory_mib\\.|^(token_bytes|conversation_bytes|context_capacity|" +
+  "has_drafter|suffix_draft|lookup_chain)$");
 /**
  * The number settings the panel's controls change, with the range each accepts given the reading's settings `s`
  * (the engine checks them again).
@@ -70,7 +71,7 @@ const CONTROLS = [["context", () => 1, (s) => s.context_capacity ?? s.context ??
                   ["vram_conversations", () => 1, (s) => s.slots ?? 8],
                   ["conversation_idle_seconds", () => 0, () => Infinity],
                   ["rows", (s) => s.concurrent ?? 1, () => 8],
-                  ["lookahead", () => 0, (s) => s.drafter ? (s.rows ?? 1) - 1 : 0],
+                  ["lookahead", () => 0, (s) => (s.rows ?? 1) - 1],
                   ["tokens_min", () => 0, (s) => s.tokens_max ?? Infinity],
                   ["tokens_max", (s) => s.tokens_min ?? 0, () => Infinity]];
 /** HTML entities for the characters esc replaces. @type {Record<string, string>} */
@@ -82,7 +83,7 @@ const panels = new WeakMap();
 
 /**
  * Draws a GET /v1/memory answer whose `available` is true into `element`, replacing what it held: a bar per memory
- * with its legend, a table of the conversations the engine holds, and the engine's settings with a line that says
+ * with its legend and the engine's settings with a line that says
  * whether the reading is an old one.  Called again with each new reading; while the reader drags a divider, types in
  * a control or waits for a change, the new reading is drawn afterwards.
  * @param {HTMLElement} element
@@ -92,7 +93,7 @@ const panels = new WeakMap();
 export function drawMemoryPanel(element, view, onChange) {
   let panel = panels.get(element);
   if (!panel) {
-    panel = {view, dividers: {}, drag: null, busy: false, save: "session", notice: null};
+    panel = {view, dividers: {}, drag: null, busy: false, notice: null, pending: {}};
     panels.set(element, panel);
     listen(element, panel);
   }
@@ -109,7 +110,7 @@ export function drawMemoryPanel(element, view, onChange) {
  * `can_change`: the engine changes its settings while it runs; `config`: a run config exists to save defaults to;
  * `shortfall` (POST /v1/memory's answer): what the change got less of than asked, in the engine's words.
  * @typedef {{available: boolean, reason?: string, busy?: boolean, error?: string | null, can_change?: boolean,
- *   config?: boolean, memories: MemoryUse[], settings: Record<string, number>,
+ *   config?: boolean, details?: Record<string, string>, memories: MemoryUse[], settings: Record<string, number>,
  *   conversations?: HeldConversation[], shortfall?: string, pause_directory?: string}} MemoryView
  * `setting`: the size of the engine's page pool there now, which `memory_mib.<id>` changes; `smallest`, `largest`:
  * the sizes it accepts now.  Bytes.
@@ -123,7 +124,7 @@ export function drawMemoryPanel(element, view, onChange) {
  * @typedef {{category: string, pool: string, label: string, bytes: number,
  *   identity_group?: string, ids?: number[]}} MemoryBlock
  * @typedef {{id: string, place: string, state: string, count: number, capacity: number, bytes: number,
- *   used: number, last_tokens_at?: number}} HeldConversation
+ *   used: number, last_tokens_at?: number, name?: string}} HeldConversation
  * @typedef {Record<string, number | boolean>} SettingsChange  POST /v1/memory's "set": MiB for the sizes.
  * @callback ChangeSettings  Sends a change to the engine's server (POST /v1/memory) and says how it went: `view` is
  *   the reading after it, `error` the server's reason for not changing anything (a refusal, 409).
@@ -134,9 +135,9 @@ export function drawMemoryPanel(element, view, onChange) {
 
 /**
  * What a drawn panel shows besides its reading.  `dividers`: by memory id, those drawn last; `busy`: a change is
- * on its way; `save`: the reader's choice where changes go.
+ * on its way; `pending`: edits retained until Apply succeeds.
  * @typedef {{view: MemoryView, onChange?: ChangeSettings, dividers: Record<string, Divider>, drag: Drag | null,
- *   busy: boolean, save: "session" | "default", notice: Notice | null}} Panel
+ *   busy: boolean, notice: Notice | null, pending: SettingsChange}} Panel
  * A boundary of a bar that can be dragged.  `key`: the setting it changes; `from`: the size now; `start`: where the
  * segment it ends begins on the bar; `scale`: drawn bytes per byte of the engine's; `total`: the drawn bytes the
  * bar's width stands for.  Bytes.
@@ -156,8 +157,6 @@ export function drawMemoryPanel(element, view, onChange) {
 function render(element, panel) {
   const {view, drag} = panel, editable = !!(view.can_change && panel.onChange);
   const memories = markRedundantExperts(view.memories);
-  if (!view.config)
-    panel.save = "session";
   panel.dividers = editable ? Object.fromEntries(memories.map((x) => [x.id, findDivider(x)]).filter(([, d]) => d))
     : {};
   const listed = Object.entries(view.settings).filter(([k]) => !UNLISTED.test(k) &&
@@ -172,7 +171,6 @@ function render(element, panel) {
     `<p class="mem-hint">Drag the dividers to change sizes</p>` : "";
   element.innerHTML = `<div class="mem-bars">${memories.map((x) =>
       drawBar(x, panel.dividers[x.id], drag?.id === x.id ? drag : null, view)).join("")}</div>` +
-    drawConversations(view.conversations || [], view.pause_directory, view.settings.tokens_max) +
     (editable ? drawControls(panel) : "") + hint +
     (notice ? `<p class="mem-notice${notice.error ? " mem-error" : ""}" role="status">${esc(notice.text)}` +
       (notice.undo && !panel.busy ? ` <button type="button" class="mem-undo" data-undo>Undo</button>` : "") + "</p>"
@@ -232,12 +230,13 @@ function listen(element, panel) {
   });
   element.addEventListener("change", (e) => {
     const target = /** @type {HTMLInputElement} */ (e.target);
-    if (target.matches("[data-save]"))
-      panel.save = target.value === "default" ? "default" : "session";
-    else if (target.matches("[data-setting]"))
+    if (target.matches("[data-setting]"))
       changeControl(element, panel, target);
   });
   element.addEventListener("click", (e) => {
+    const apply = /** @type {HTMLElement} */ (e.target).closest("[data-apply]");
+    if (apply && !panel.busy)
+      void applyControls(element, panel, apply.dataset.apply === "default" ? "default" : "session");
     const undo = panel.notice?.undo;
     if (undo && /** @type {HTMLElement} */ (e.target).closest("[data-undo]"))
       void change(element, panel, undo.set, null, undo.save);
@@ -266,35 +265,53 @@ function finishDrag(element, panel) {
     void change(element, panel, {[d.key]: mib(value)}, {[d.key]: mib(d.from)});
 }
 
-/** Sends a control's new value, or says why it is out of range.
+/** Retains a control's edit until the reader applies the form.
  * @param {HTMLElement} element
  * @param {Panel} panel
  * @param {HTMLInputElement} input */
 function changeControl(element, panel, input) {
-  const key = input.dataset.setting ?? "", s = panel.view.settings;
-  if (key === "drafter")
-    return void change(element, panel, {drafter: input.checked}, {drafter: !input.checked});
-  const [, smallest, largest] = /** @type {(typeof CONTROLS)[number]} */ (CONTROLS.find(([k]) => k === key));
-  const n = Number(input.value), lo = smallest(s), hi = largest(s);
-  const context = key === "context" ? n : s.context;
-  const budget = key === "tokens_max" ? n : s.tokens_max;
-  const concurrent = key === "concurrent" ? n : s.concurrent;
-  const resident = key === "vram_conversations" ? n : s.vram_conversations;
-  if ((key === "concurrent" || key === "vram_conversations") && resident != null && resident < concurrent) {
-    panel.notice = {text: "Conversations held in VRAM cannot be fewer than conversations at once. " +
-      "Neither value was changed.", error: true, until: Infinity};
+  const key = input.dataset.setting ?? "";
+  if (key === "drafter") {
+    panel.pending.drafter = input.value === "on";
+    if (panel.view.settings.suffix_draft != null) {
+      panel.pending.suffix_draft = input.value === "suffix" ? 3 : 0;
+      panel.pending.lookup_chain = 0;
+    }
+  } else
+    panel.pending[key] = input.value === "" ? NaN : Number(input.value);
+}
+
+/** Validates and submits the staged form as one settings change. */
+async function applyControls(element, panel, save) {
+  const s = {...panel.view.settings, ...panel.pending};
+  if (s.vram_conversations != null && s.vram_conversations < s.concurrent) {
+    panel.notice = {text: "Conversations held in VRAM cannot be fewer than conversations at once.",
+      error: true, until: Infinity};
     return render(element, panel);
   }
-  if ((key === "context" || key === "tokens_max") && s.context_capacity != null && context > budget) {
-    panel.notice = {text: "The per-conversation limit cannot exceed the combined GPU token budget. " +
-      "Neither value was changed.", error: true, until: Infinity};
+  for (const [key, smallest, largest] of getEditableControls(s)) {
+    const n = s[key], lo = smallest(s), hi = largest(s);
+    if (!Number.isInteger(n) || n < lo || n > hi) {
+      panel.notice = {text: `${SETTINGS[key]}: choose a whole number ` +
+        (hi === Infinity ? `of at least ${fmt(lo)}.` : `from ${fmt(lo)} to ${fmt(hi)}.`),
+        error: true, until: Infinity};
+      return render(element, panel);
+    }
+  }
+  if (s.context_capacity != null && s.context > s.tokens_max) {
+    panel.notice = {text: "The per-conversation limit cannot exceed the combined GPU token budget.",
+      error: true, until: Infinity};
     return render(element, panel);
   }
-  if (Number.isInteger(n) && n >= lo && n <= hi)
-    return void change(element, panel, {[key]: n}, {[key]: s[key]});
-  panel.notice = {text: `${SETTINGS[key]}: choose a whole number ` +
-    (hi === Infinity ? `of at least ${fmt(lo)}.` : `from ${fmt(lo)} to ${fmt(hi)}.`), error: true, until: Infinity};
-  render(element, panel);
+  const editable = new Set(getEditableControls(s).map(([key]) => key));
+  const set = save === "default" ? Object.fromEntries(Object.entries(s).filter(([key]) =>
+    editable.has(key) || key.startsWith("memory_mib.") ||
+    ["ssd_pause_mib", "drafter", "suffix_draft", "lookup_chain"].includes(key))) : {...panel.pending};
+  if (!Object.keys(set).length || (save === "default" && !panel.view.config))
+    return;
+  if ("drafter" in set)
+    set.drafter = Boolean(set.drafter);
+  await change(element, panel, set, null, save);
 }
 
 /** Sends a change through the caller's onChange and shows the answer: the new reading with an Undo for a while, or
@@ -304,7 +321,7 @@ function changeControl(element, panel, input) {
  * @param {SettingsChange} set
  * @param {SettingsChange | null} undo  the change back, offered as Undo; null for an Undo itself.
  * @param {"session" | "default"} save */
-async function change(element, panel, set, undo, save = panel.save) {
+async function change(element, panel, set, undo, save = "session") {
   panel.busy = true;
   panel.notice = {text: "Changing…", error: false, until: Infinity};
   render(element, panel);
@@ -312,6 +329,8 @@ async function change(element, panel, set, undo, save = panel.save) {
     .catch((/** @type {Error} */ e) => ({ok: false, error: e.message, view: undefined}));
   panel.busy = false;
   if (answer.ok) {
+    for (const key of Object.keys(set))
+      delete panel.pending[key];
     if (answer.view)
       panel.view = answer.view;
     try {
@@ -335,24 +354,47 @@ function hasChanged() {
   }
 }
 
-/** Gets the markup of the controls for the settings that are not sizes, and of the choice where changes go.
+/** Gets the staged settings form and its Apply buttons.
  * @param {Panel} panel */
 function drawControls(panel) {
-  const s = panel.view.settings, off = panel.busy ? " disabled" : "";
-  const fields = getEditableControls(s).map(([key, smallest, largest]) =>
-    `<label>${esc(SETTINGS[key])} <input class="st-input mem-input" type="number" step="1" data-setting="${key}" ` +
-    `value="${s[key]}" min="${smallest(s)}"${largest(s) < Infinity ? ` max="${largest(s)}"` : ""}` +
-    ` title="${esc(getControlHelp(key, s))}"${off}></label>`);
+  const s = {...panel.view.settings, ...panel.pending}, off = panel.busy ? " disabled" : "";
+  const fields = getEditableControls(s).map(([key, smallest, largest]) => {
+    const help = esc(getControlHelp(key, s, panel.view.details));
+    return `<label title="${help}">${esc(SETTINGS[key])} ` +
+      `<input class="st-input mem-input" type="number" step="1" data-setting="${key}" ` +
+      `value="${s[key]}" min="${smallest(s)}"${largest(s) < Infinity ? ` max="${largest(s)}"` : ""}` +
+      ` title="${help}"${off}></label>`;
+  });
   if (s.drafter != null)
-    fields.push(`<label><input type="checkbox" data-setting="drafter"${s.drafter ? " checked" : ""}${off}> ` +
-      `${SETTINGS.drafter}</label>`);
-  const option = (/** @type {string} */ value, /** @type {string} */ text) =>
-    `<option value="${value}"${panel.save === value ? " selected" : ""}>${text}</option>`;
-  return `<div class="mem-controls">${fields.join("")}<label>Changes apply <select class="st-input mem-input" ` +
-    `data-save${off}>${option("session", "This session")}` +
-    `${panel.view.config ? option("default", "Save as default") : ""}</select></label></div>` +
+    fields.push(drawDrafterControl(s, panel.view.details, off));
+  return `<div class="mem-controls">${fields.join("")}</div><div class="mem-actions">` +
+    `<button type="button" data-apply="session"${off}>Apply settings</button> ` +
+    `<button type="button" data-apply="default"${off}${panel.view.config ? "" : " disabled"}>` +
+    `Apply and save as default</button></div>` +
     (s.vram_conversations != null && s.conversation_bytes ? `<p class="mem-note">Each conversation held in VRAM ` +
       `uses ${size(s.conversation_bytes)} of fixed state before its KV cache.</p>` : "");
+}
+
+/** Gets the engine's supported prediction modes for the Memory settings form.
+ * @param {Record<string, number | boolean>} settings
+ * @param {Record<string, string> | undefined} details
+ * @param {string} disabled */
+function drawDrafterControl(settings, details = {}, disabled = "") {
+  const suffix = !settings.drafter && !!(settings.suffix_draft || settings.lookup_chain);
+  const help = getControlHelp("drafter", settings) + " " +
+    (details.drafter_details || "Drafter discovery details are not reported by this engine.") +
+    (settings.suffix_draft == null ? "" :
+      " Suffix drafting uses greedy sampling only. Mode changes take effect on the next request.");
+  const model = settings.has_drafter === 0 ? "" :
+    `<option value="on"${settings.drafter ? " selected" : ""}>` +
+    `${esc(details.drafter_label || "Use model drafter (VRAM cost not reported)")}</option>`;
+  const lookup = settings.suffix_draft == null ? "" :
+    `<option value="suffix"${suffix ? " selected" : ""}>` +
+    `${esc(details.suffix_label || "Use suffix drafter (0 GiB)")}</option>`;
+  return `<label title="${esc(help)}">Drafter ` +
+    `<select class="st-input mem-input" data-setting="drafter"${disabled}>` +
+    `<option value="off"${!settings.drafter && !suffix ? " selected" : ""}>No MTP</option>` +
+    `${model}${lookup}</select></label>`;
 }
 
 /** Gets controls supported by this engine; context_capacity advertises a live per-conversation limit.
@@ -363,8 +405,33 @@ function getEditableControls(settings) {
 
 /** Gets the meaning and memory cost of controls with limits that are easy to confuse.
  * @param {string} key
- * @param {Record<string, number>} settings */
-function getControlHelp(key, settings) {
+ * @param {Record<string, number | boolean>} settings
+ * @param {Record<string, string>} details */
+function getControlHelp(key, settings, details = {}) {
+  if (key === "rows")
+    return "Maximum number of tokens to compute during each pass through the model. More rows can increase " +
+      "throughput but also increases demand for experts, so the more VRAM and RAM you have, " +
+      "the more rows you can afford.";
+  if (key === "lookahead")
+    return 'Maximum number of tokens to predict for each conversation in the drafter. The drafter is also limited ' +
+      'by max rows; for example if "Max lookahead" is 3 and "Max rows" is 6, then 3 lookahead tokens are predicted ' +
+      'when one conversation is running, but only 2 are predicted when two conversations are running ' +
+      "(that's 2 rows for the two conversations plus 2×2 rows for lookahead).";
+  if (key === "tokens_min")
+    return "Minimum VRAM to allocate for KV cache (shared by all conversations), expressed in tokens.";
+  if (key === "tokens_max")
+    return "This dictates the shared GPU token budget. The per-conversation limit also bounds each context window. " +
+      (settings.token_bytes ? `Every token requires approximately ${fmt(settings.token_bytes)} bytes of memory, ` +
+        `so ${fmt(settings.tokens_max)} tokens requires ` +
+        `${gb(settings.tokens_max * settings.token_bytes, 2)} GiB. ` : "") +
+      `KV cache quantization: ${details.kv_quantization || "not reported by this engine"}. ` +
+      "Multiple conversations can share this space. " +
+      "If the largest two conversations don't fit, only one conversation can run at a time.";
+  if (key === "concurrent")
+    return "Maximum conversations decoding in one step. Each active conversation uses at least one row.";
+  if (key === "drafter")
+    return "This option controls the multi-token prediction (MTP) mode that can speed up generation using rows " +
+      "that aren't in use by active conversations.";
   if (key === "context")
     return `Loaded capacity: ${fmt(settings.context_capacity)} tokens. ` +
       "Increasing that capacity requires a model reload.";
@@ -451,11 +518,11 @@ function drawBar(x, divider, drag, view) {
     .filter(Boolean).join(" · ");
   const title = (/** @type {{use: string}} */ p) => esc(x.id === "ssd" && p.use === "experts" ?
     "Experts not cached" : Object.hasOwn(USES, p.use) ? USES[p.use] : p.use);
-  const blocks = [...(x.blocks || [])].sort((a, b) =>
-    a.category.localeCompare(b.category) || a.label.localeCompare(b.label, undefined, {numeric: true}));
+  const blocks = [...(x.blocks || [])].sort((a, b) => a.label.localeCompare(b.label, undefined, {numeric: true}));
   const pauseFolder = view.pause_directory ? `SSD pause folder: ${view.pause_directory}` : "";
   const paused = (view.conversations || []).filter((c) => c.state === "parked" &&
-    c.place === (x.id === "ssd" ? "disk" : x.id));
+    c.place === (x.id === "ssd" ? "disk" : x.id))
+    .sort((a, b) => a.id.localeCompare(b.id, undefined, {numeric: true}));
   const tip = (/** @type {{use: string, bytes: number}} */ p) =>
     `${title(p)}: ${size(p.bytes)}${x.id === "ssd" && p.use === "experts" ?
       ". Experts held in neither VRAM nor RAM. The complete model files remain on disk." :
@@ -507,11 +574,12 @@ function drawPreview(d, drag) {
     (refusal ? `: ${esc(refusal)}; releasing here changes nothing` : ": release to apply, Escape cancels") + "</p>";
 }
 
-/** Gets the conversation table, including engine-reported activity ages when available.
+/** Gets the API monitor's selectable contexts, including engine-reported activity ages when available.
  * @param {HeldConversation[]} list
  * @param {string} [pauseDirectory]
  * @param {number} [gpuBudget] the allowance shared by all GPU rows, independent of each request's context limit */
-function drawConversations(list, pauseDirectory, gpuBudget) {
+export function drawConversations(list, pauseDirectory, gpuBudget) {
+  list = list.filter((c) => c.count > 0 || c.state === "decoding" || c.state === "reading");
   if (!list.length)
     return "";
   const activity = list.some((c) => c.last_tokens_at || c.state === "parked");
@@ -521,8 +589,10 @@ function drawConversations(list, pauseDirectory, gpuBudget) {
     `<td class="mem-num${total > gpuBudget ? " mem-over-budget" : ""}">${fmt(total)} / ${fmt(gpuBudget)}</td>` +
     `<td class="mem-num">${size(gpu.reduce((n, c) => n + c.bytes, 0))}</td>` +
     (activity ? "<td></td>" : "") + "</tr></tfoot>";
-  const row = (/** @type {HeldConversation} */ c) => `<tr><td${c.state === "parked" && pauseDirectory ?
-    ` title="${esc(`SSD pause folder: ${pauseDirectory}`)}"` : ""}>${esc(c.id)}</td>` +
+  const row = (/** @type {HeldConversation} */ c, /** @type {number} */ i) =>
+    `<tr><td${c.state === "parked" && pauseDirectory ?
+    ` title="${esc(`SSD pause folder: ${pauseDirectory}`)}"` : ""}>` +
+    `<button type="button" data-context="${esc(c.id)}">${esc(c.name || `Conversation ${i + 1}`)}</button></td>` +
     `<td>${esc(c.state)} (${esc(PLACES[c.place] || c.place)})</td>` +
     `<td class="mem-num"${c.place === "vram" && gpuBudget != null ?
       ` title="Shared GPU budget: ${fmt(gpuBudget)} tokens; ` +

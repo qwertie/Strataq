@@ -117,6 +117,11 @@
         <!-- filled by app.js: Speed, GPU load, VRAM, GPU temp, Power, PCIe, CPU, Disk read -->
       </div>
 
+      <div class="st-card mem-card" id="mem-card" hidden>
+        <span class="card-title">Memory</span>
+        <div id="mem-panel"></div>
+      </div>
+
       <div class="monitor-row">
         <div class="st-card ctx-card">
           <span class="card-title">Context fill</span>
@@ -164,10 +169,7 @@
         <p class="muted small cc-note" id="cc-note"></p>
       </div>
 
-      <div class="st-card mem-card" id="mem-card" hidden>
-        <span class="card-title">Memory</span>
-        <div id="mem-panel"></div>
-      </div>
+
 
       <div class="st-card mcp-card" id="mcp-card" hidden>
         <div class="req-head"><span class="card-title">MCP servers</span><span class="muted small" id="mcp-sum"></span></div>

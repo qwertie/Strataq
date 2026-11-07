@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { drawMemoryPanel } from '../../../strata_server/web/memory-panel.js';
+import { drawMemoryPanel, drawConversations } from '../../../strata_server/web/memory-panel.js';
 
 const read = path => readFile(new URL(path, import.meta.url), 'utf8');
 const fixture = JSON.parse(await read('./fixtures/memory-strix-halo.json'));
@@ -25,6 +25,9 @@ const onDivider = id => ({ closest: selector => selector === '[data-divider]'
 /** Gets an event target that is one of the panel's controls, matching `selector`. */
 const control = (selector, fields) => ({ matches: s => s === selector, ...fields });
 const draw = view => mount(view).element.innerHTML;
+const drawHeld = view => drawConversations(view.conversations || [], view.pause_directory, view.settings?.tokens_max);
+const applyButton = save => ({closest: selector => selector === '[data-apply]' ? {dataset: {apply: save}} : null});
+const apply = (fire, save = 'session') => fire('click', {target: applyButton(save)});
 const rows = html => html.split('<div class="mem-row">').slice(1);
 const widths = row => [...row.matchAll(/class="mem-seg"[^>]*style="width:([\d.e-]+)%/g)].map(m => Number(m[1]));
 const barWidth = row => Number(/class="mem-bar" style="width:([\d.]+)%/.exec(row)[1]);
@@ -61,9 +64,9 @@ test('a page pool says how much of it is allocated and how much is free in runs 
 });
 
 test('the conversations the engine holds are listed with their state, tokens and memory', () => {
-  const html = draw(fixture), table = /<table class="mem-conversations">(.*)<\/table>/.exec(html)?.[1] ?? '';
-  assert.equal(table.match(/<tr>/g).length, 1 + fixture.conversations.length);
-  assert.match(table, /<td>slot2<\/td><td>holding \(GPU\)<\/td><td class="mem-num">8.401 \/ 32.768<\/td>/);
+  const html = drawHeld(fixture), table = /<table class="mem-conversations">(.*)<\/table>/.exec(html)?.[1] ?? '';
+  assert.equal(table.match(/<tr>/g).length, 1 + fixture.conversations.filter(c => c.count).length);
+  assert.match(table, /<td><button type="button" data-context="slot2">Conversation 3<\/button><\/td><td>holding \(GPU\)<\/td><td class="mem-num">8.401 \/ 32.768<\/td>/);
   assert.match(table, /8.401 \/ 32.768<\/td><td class="mem-num">230 MiB<\/td>/);
   // engines before strata-q38 list no conversations
   assert.doesNotMatch(draw({ ...fixture, conversations: undefined }), /mem-conversations/);
@@ -72,7 +75,7 @@ test('the conversations the engine holds are listed with their state, tokens and
 test('the settings line names the settings and says when the reading is an old one', () => {
   assert.match(draw(fixture), new RegExp('<p class="mem-note">Per-conversation token limit: 32.768 tokens · ' +
     'Conversations at once: 3 · ' +
-    'Rows per step: 8 · Lookahead: 0 · Conversation tokens, minimum: 8.192</p>'));
+    'Rows per step: 8 · Max lookahead: 0 · Min conversation tokens: 8.192</p>'));
   assert.match(draw({ ...fixture, busy: true }), /mem-note">[^<]* · a request has the engine: the last reading</);
 });
 
@@ -129,20 +132,27 @@ test('a change that got less than asked says what it lacked and still offers Und
     'But it got less than asked: the RAM&#39;s pool: out of memory\\. <button[^>]*data-undo>Undo'));
 });
 
-test('"Save as default" goes with the change, and Undo sends the size back the same way', async () => {
-  const { calls, onChange } = recorder(), { element, fire } = mount(live, onChange);
-  assert.match(element.innerHTML, /<option value="session" selected>This session<\/option><option value="default">/);
-  fire('change', { target: control('[data-save]', { value: 'default' }) });
-  fire('keydown', { target: onDivider('gpu0'), key: 'ArrowRight', shiftKey: true });
-  fire('keydown', { target: onDivider('gpu0'), key: 'Enter' });
+test('Apply and save as default persists current controls and live pool sizes', async () => {
+  const view = {available: true, can_change: true, config: true, memories: [],
+    settings: {rows: 4, concurrent: 1, 'memory_mib.gpu0': 8192}};
+  const {calls, onChange} = recorder(), {element, fire} = mount(view, onChange);
+  assert.doesNotMatch(element.innerHTML, /data-save|Changes apply/);
+  apply(fire, 'default');
   await settle();
-  fire('click', { target: undoButton });
+  assert.deepEqual(calls, [[{rows: 4, concurrent: 1, 'memory_mib.gpu0': 8192}, 'default']]);
+  assert.match(mount({...live, config: false}, onChange).element.innerHTML,
+    /data-apply="default" disabled>Apply and save as default/);
+});
+
+test('Undo sends a live size change back for the session', async () => {
+  const {calls, onChange} = recorder(), {fire} = mount(live, onChange);
+  fire('keydown', {target: onDivider('gpu0'), key: 'ArrowRight', shiftKey: true});
+  fire('keydown', {target: onDivider('gpu0'), key: 'Enter'});
   await settle();
-  assert.deepEqual(calls, [[{ 'memory_mib.gpu0': Math.round(pool / MIB) + 1024 }, 'default'],
-    [{ 'memory_mib.gpu0': Math.round(pool / MIB) }, 'default']]);
-  assert.doesNotMatch(element.innerHTML, /data-undo/);    // an Undo is not undone in turn
-  // a server without a run config offers no default to save to
-  assert.doesNotMatch(mount({ ...live, config: false }, onChange).element.innerHTML, /Save as default/);
+  fire('click', {target: undoButton});
+  await settle();
+  assert.deepEqual(calls, [[{'memory_mib.gpu0': Math.round(pool / MIB) + 1024}, 'session'],
+    [{'memory_mib.gpu0': Math.round(pool / MIB)}, 'session']]);
 });
 
 test('a size outside what the engine accepts shows red with the reason, and releasing there changes nothing', () => {
@@ -194,17 +204,19 @@ test('the controls change the other settings within their ranges', async () => {
   assert.match(element.innerHTML, /data-setting="concurrent" value="3" min="1" max="4"/);
   assert.match(element.innerHTML, /data-setting="rows" value="8" min="3" max="8"/);
   assert.match(element.innerHTML, /data-setting="lookahead" value="0" min="0" max="7"/);
-  assert.match(element.innerHTML, /<input type="checkbox" data-setting="drafter" checked> Drafter/);
+  assert.match(element.innerHTML, /<select[^>]*data-setting="drafter"/);
   const setting = (key, fields) => control('[data-setting]', { dataset: { setting: key }, ...fields });
   fire('change', { target: setting('concurrent', { value: '5' }) });
+  apply(fire);
   assert.equal(calls.length, 0);
   assert.match(element.innerHTML,
     /mem-error" role="status">Conversations at once: choose a whole number from 1 to 4\./);
   fire('change', { target: setting('concurrent', { value: '2' }) });
+  fire('change', { target: setting('drafter', { value: 'off' }) });
+  assert.deepEqual(calls, []);
+  apply(fire);
   await settle();
-  fire('change', { target: setting('drafter', { checked: false }) });
-  await settle();
-  assert.deepEqual(calls, [[{ concurrent: 2 }, 'session'], [{ drafter: false }, 'session']]);
+  assert.deepEqual(calls, [[{ concurrent: 2, drafter: false }, 'session']]);
   // the controls' settings are not listed again in the line under the panel
   assert.match(element.innerHTML,
     /<p class="mem-note">Per-conversation token limit:.*Maximum conversations at once: 4<\/p>/);
@@ -380,7 +392,9 @@ test('paused conversations show last-token ages and the SSD pause folder', () =>
   assert.match(html, /parked1: last tokens 2 h ago/);
   assert.match(html, /parked2: last tokens Unknown/);
   assert.match(html, /SSD pause folder: C:\/pause &lt;files&gt;/);
-  assert.match(html, /Last tokens<\/th>/);
+  assert.doesNotMatch(html, /mem-conversations/);
+  assert.match(drawHeld({settings: {}, conversations: [{id: "parked1", count: 5, capacity: 5, place: "disk",
+    state: "parked", bytes: GIB}]}), /Last tokens<\/th>/);
 });
 
 test('RAM uses the same 32 GiB bar scale as GPU and SSD memory', () => {
@@ -395,34 +409,29 @@ test('the GPU table shows the combined allowance, its total and each conversatio
   const view = {...live, settings: {...live.settings, context: 204800, context_capacity: 204800, tokens_max: 401000},
     conversations: [conversation('slot0', 'vram', 180000), conversation('slot1', 'vram', 190000),
       conversation('parked0', 'ram', 100000)]};
-  const html = draw(view);
+  const html = drawHeld(view);
   assert.match(html, /Shared GPU budget: 401.000 tokens; per-conversation context limit: 204.800 tokens/);
   assert.match(html, />180.000 \/ 401.000<\/td>/);
   assert.match(html, />100.000 \/ 204.800<\/td>/);
   assert.match(html, /GPU total \(shared budget\)[^]*>370.000 \/ 401.000<\/td>/);
   assert.doesNotMatch(html, /class="mem-num mem-over-budget"/);
   view.conversations[1].count = 230000;
-  assert.match(draw(view), /class="mem-num mem-over-budget">410.000 \/ 401.000/);
+  assert.match(drawHeld(view), /class="mem-num mem-over-budget">410.000 \/ 401.000/);
 });
 
-test('separate token controls reject conflicting edits without sending or changing either setting', async () => {
+test('token settings are staged together and validated against the complete draft', async () => {
   const view = {...live, settings: {...live.settings, context: 204800, context_capacity: 401000, tokens_max: 401000}};
   const {calls, onChange} = recorder(), {element, fire} = mount(view, onChange);
-  assert.match(element.innerHTML, /Per-conversation token limit <input[^>]*data-setting="context"/);
-  assert.match(element.innerHTML, /data-setting="context" value="204800" min="1" max="401000"/);
-  assert.match(element.innerHTML, /Combined GPU token budget <input[^>]*data-setting="tokens_max"/);
   const setting = (key, value) => control('[data-setting]', {dataset: {setting: key}, value});
-  for (const [key, value] of [['tokens_max', '200000'], ['context', '401001']]) {
-    fire('change', {target: setting(key, value)});
-    await settle();
-    assert.match(element.innerHTML, /cannot exceed the combined GPU token budget\. Neither value was changed/);
-    assert.match(element.innerHTML, /data-setting="context" value="204800"/);
-    assert.match(element.innerHTML, /data-setting="tokens_max" value="401000"/);
-  }
+  fire('change', {target: setting('tokens_max', '200000')});
   assert.deepEqual(calls, []);
-  fire('change', {target: setting('context', '300000')});
+  apply(fire);
+  assert.match(element.innerHTML, /cannot exceed the combined GPU token budget/);
+  assert.deepEqual(calls, []);
+  fire('change', {target: setting('context', '180000')});
+  apply(fire);
   await settle();
-  assert.deepEqual(calls, [[{context: 300000}, 'session']]);
+  assert.deepEqual(calls, [[{tokens_max: 200000, context: 180000}, 'session']]);
   assert.doesNotMatch(mount(live, onChange).element.innerHTML, /data-setting="context"/);
 });
 
@@ -430,6 +439,7 @@ test('the per-conversation widget respects the capacity loaded into the engine',
   const view = {...live, settings: {...live.settings, context: 204800, context_capacity: 204800, tokens_max: 401000}};
   const {calls, onChange} = recorder(), {element, fire} = mount(view, onChange);
   fire('change', {target: control('[data-setting]', {dataset: {setting: 'context'}, value: '300000'})});
+  apply(fire);
   assert.match(element.innerHTML, /Per-conversation token limit: choose a whole number from 1 to 204.800/);
   assert.deepEqual(calls, []);
 });
@@ -446,12 +456,15 @@ test('the VRAM conversation cap explains fixed overhead and rejects a count belo
   const setting = (key, value) => control('[data-setting]', {dataset: {setting: key}, value});
   for (const [key, value] of [['vram_conversations', '1'], ['concurrent', '3']]) {
     fire('change', {target: setting(key, value)});
-    assert.match(element.innerHTML, /cannot be fewer than conversations at once\. Neither value was changed/);
+    apply(fire);
+    assert.match(element.innerHTML, /cannot be fewer than conversations at once/);
   }
   assert.deepEqual(calls, []);
   fire('change', {target: setting('vram_conversations', '3')});
+  fire('change', {target: setting('concurrent', '2')});
+  apply(fire);
   await settle();
-  assert.deepEqual(calls, [[{vram_conversations: 3}, 'session']]);
+  assert.deepEqual(calls, [[{vram_conversations: 3, concurrent: 2}, 'session']]);
   assert.doesNotMatch(mount(live, onChange).element.innerHTML, /data-setting="vram_conversations"/);
 });
 
@@ -463,8 +476,68 @@ test('idle eviction age is configurable without implying that age alone evicts a
   assert.match(element.innerHTML, /age alone does not evict anything/);
   const target = value => control('[data-setting]', {dataset: {setting: 'conversation_idle_seconds'}, value});
   fire('change', {target: target('-1')});
+  apply(fire);
   assert.deepEqual(calls, []);
   fire('change', {target: target('90')});
+  apply(fire);
   await settle();
   assert.deepEqual(calls, [[{conversation_idle_seconds: 90}, 'session']]);
+});
+
+
+test('pending edits survive polling and a live memory resize', async () => {
+  const {calls, onChange} = recorder({ok: true, view: live});
+  const {element, fire} = mount(live, onChange);
+  fire('change', {target: control('[data-setting]', {dataset: {setting: 'rows'}, value: '6'})});
+  drawMemoryPanel(element, live, onChange);
+  assert.match(element.innerHTML, /data-setting="rows" value="6"/);
+  fire('keydown', {target: onDivider('gpu0'), key: 'ArrowRight'});
+  fire('keydown', {target: onDivider('gpu0'), key: 'Enter'});
+  await settle();
+  assert.match(element.innerHTML, /data-setting="rows" value="6"/);
+  apply(fire);
+  await settle();
+  assert.deepEqual(calls[1], [{rows: 6}, 'session']);
+});
+
+test('disabling MTP retains the configured maximum lookahead', async () => {
+  const {calls, onChange} = recorder(), {fire} = mount({...live,
+    settings: {...live.settings, lookahead: 3}}, onChange);
+  fire('change', {target: control('[data-setting]', {dataset: {setting: 'drafter'}, value: 'off'})});
+  apply(fire);
+  await settle();
+  assert.deepEqual(calls, [[{drafter: false}, 'session']]);
+});
+
+test('suffix mode uses engine labels and is submitted as one mutually exclusive mode', async () => {
+  const view = {...live, settings: {...live.settings, suffix_draft: 0, lookup_chain: 0, has_drafter: 1},
+    details: {drafter_label: 'Use DSpark drafter (1.5 GiB)', drafter_details: 'Discovered drafter: <DSpark>',
+      suffix_label: 'Use suffix drafter (0 GiB)', kv_quantization: 'FP8'}};
+  const {calls, onChange} = recorder(), {element, fire} = mount(view, onChange);
+  assert.match(element.innerHTML, /Use DSpark drafter \(1.5 GiB\)/);
+  assert.match(element.innerHTML, /Discovered drafter: &lt;DSpark&gt;/);
+  assert.match(element.innerHTML, /KV cache quantization: FP8/);
+  fire('change', {target: control('[data-setting]', {dataset: {setting: 'drafter'}, value: 'suffix'})});
+  assert.deepEqual(calls, []);
+  apply(fire);
+  await settle();
+  assert.deepEqual(calls, [[{drafter: false, suffix_draft: 3, lookup_chain: 0}, 'session']]);
+});
+
+test('allocation tooltips sort every category by label', () => {
+  const html = draw({available: true, settings: {}, memories: [{id: 'gpu0', total: GIB,
+    uses: {other: GIB}, blocks: [
+      {category: 'other', pool: 'Buffers', label: 'Zebra', bytes: GIB / 2},
+      {category: 'other', pool: 'Buffers', label: 'Alpha', bytes: GIB / 2}]}]});
+  const tooltip = /data-use="other" title="([^"]*)"/.exec(html)[1];
+  assert.ok(tooltip.indexOf('Alpha') < tooltip.indexOf('Zebra'));
+});
+
+
+test('context buttons escape engine names and protocol addresses', () => {
+  const html = drawConversations([{id: 'slot" onclick="evil()', name: '<script>evil()</script>',
+    place: 'vram', state: 'holding', count: 1, capacity: 8, bytes: 1, used: 1}]);
+  assert.doesNotMatch(html, /<script>| onclick="evil/);
+  assert.match(html, /&lt;script&gt;evil\(\)&lt;\/script&gt;/);
+  assert.match(html, /data-context="slot&quot; onclick=&quot;evil\(\)"/);
 });

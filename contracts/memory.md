@@ -118,3 +118,29 @@ SAVE/RESTORE and automatic SSD pauses retain them. Disk-paused payloads are rele
 from RAM after writing and read back on resume. Qwen uses layout identity 4; files
 from its former GPU-checkpoint layout are rejected without changing them. DeepSeek's
 existing host-state file layout is unchanged.
+
+The report may include `MEMORY_DETAIL <key> <percent-encoded-value>` lines.
+Python exposes these as the `details` dictionary. The paged engines supply
+`drafter_label`, `drafter_details`, `suffix_label` and `kv_quantization` for
+settings help. Drafter cost includes reloadable dense weights and prediction
+experts; per-conversation state is accounted separately. Older engines omit
+these fields, so readers must allow missing discovery and cost information.
+
+Paged engines report `has_drafter`, `suffix_draft` and `lookup_chain` alongside
+`drafter`. The latter two settings accept the corresponding numeric startup
+values in `CHANGE_SETTINGS`. The UI selects suffix drafting with a minimum
+three-token match and no lookup chain. It requires greedy sampling. Planner
+changes apply to the next request; an existing request retains its planner.
+Unused protocol addresses are omitted from conversation reports. The `main`
+address remains for compatibility with solo requests; it is not a separate
+conversation category in the UI. Empty scheduling records allocate no KV pages.
+
+The Memory form stages edits until Apply settings, or Apply and save as default.
+Memory dividers still apply when released. Context fill counts GPU-resident tokens
+across conversations against `tokens_max`, including idle contexts still held.
+The API monitor's Context in VRAM table selects the context to inspect.
+
+The server serializes settings commands with engine protocol operations. A solo
+request holds the command channel until generation ends, so Apply can wait for
+that boundary. Batch commands may run between engine steps when the control
+channel is available. HTTP itself does not require waiting for a generation.

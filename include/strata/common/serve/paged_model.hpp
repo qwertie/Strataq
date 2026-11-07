@@ -101,6 +101,12 @@ struct PagedModelFacts {
     bool has_drafter = false;
     /// what the start needs for a drafter, for the refusal of `drafter on` without one ("--mtp and ...")
     std::string drafter_start;
+    /// Names the loaded prediction model for the Memory settings UI.
+    std::string drafter_label = "model";
+    /// Describes the formats used for token state in the shared memory report.
+    std::string kv_quantization;
+    /// Accounts for prediction experts in addition to reloadable dense weights.
+    uint64_t drafter_expert_bytes = 0;
     /// the most conversations one step may run; 0: as many as the step has rows
     int max_concurrent = 0;
     bool serial_conversations = false;     ///< the model switches shared inputs between conversations

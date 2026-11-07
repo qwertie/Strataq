@@ -214,6 +214,14 @@ class Monitor(unittest.TestCase):
         self.engine.context_windows = lambda ids: self.asked.append(("get", list(ids))) or \
             {i: array("i", held[i][2]) if i in held else None for i in ids}
 
+    def test_context_hides_unused_addresses_and_names_solo_like_batch(self):
+        self.holds({"main": ("vram", "holding", [1, 2], 100),
+                    "slot0": ("vram", "empty", [], 0),
+                    "slot1": ("vram", "holding", [3], 100)})
+        entries = self.request("/api/context")[1]["entries"]
+        self.assertEqual([(e["id"], e["name"]) for e in entries],
+                         [("main", "Conversation 1"), ("slot1", "Conversation 2")])
+
     def test_context_lists_by_name_and_place_then_reads_one(self):
         # "é" is two bytes, one token each: the first token's piece is empty, the second completes it
         ids = [256, *b"system\nbe brief", 257, 256, *"user\nhi é".encode(), 257]
@@ -225,7 +233,7 @@ class Monitor(unittest.TestCase):
         self.assertEqual(self.asked, [("list", [256, *b"user\n"], self.svc.PREVIEW_TOKENS)])
         session, parked = body["entries"]
         self.assertEqual({k: session[k] for k in ("id", "name", "kind", "where", "state", "preview")},
-                         {"id": "main", "name": "Session", "kind": "session", "where": "vram", "state": "holding",
+                         {"id": "main", "name": "Conversation 1", "kind": "session", "where": "vram", "state": "holding",
                           "preview": "hi é"})
         self.assertEqual({k: session[k] for k in ("count", "capacity", "bytes", "used")},
                          {"count": len(ids), "capacity": 4096, "bytes": 409600, "used": 100 * len(ids)})
@@ -333,7 +341,8 @@ class Monitor(unittest.TestCase):
         code, script = self.request("/web/monitor.js")
         self.assertEqual(code, 200)
         self.assertIn("textContent", script)
-        self.assertNotIn("innerHTML", script)
+        self.assertIn("panel.drawConversations(", script)
+        self.assertNotIn("innerHTML = e.preview", script)
         for el in ("ctx-view", "ctx-refresh", "ctx-save", "ctx-binary", "ctx-slot", "ctx-sum", "ctx-note", "ctx-pager",
                    "ctx-prev", "ctx-next", "ctx-range"):
             self.assertIn(f'id="{el}"', html)
@@ -391,6 +400,15 @@ class EngineConversations(unittest.TestCase):
         self.assertEqual(engine.proc.stdin.getvalue(), "GET_CONTEXT_WINDOWS parked4 slot1 parked3\n")
         self.assertEqual({k: v if v is None else v.tolist() for k, v in got.items()},
                          {"parked4": [1, 2], "slot1": [], "parked3": None})
+
+    def test_memory_discovery_details(self):
+        engine = self.bare(["MEMORY_DETAIL drafter_label Use%20DSpark%20drafter%20%281.2%20GiB%29",
+                            "MEMORY_DETAIL kv_quantization FP8%20and%20FP4",
+                            "SETTINGS has_drafter=1 suffix_draft=0", "END_MEMORY"])
+        report = engine.memory()
+        self.assertEqual(report["details"], {"drafter_label": "Use DSpark drafter (1.2 GiB)",
+                                             "kv_quantization": "FP8 and FP4"})
+        self.assertEqual(report["settings"]["has_drafter"], 1)
 
     def test_memory(self):
         engine = self.bare(["MEMORY gpu0 total=1000 free=300 unified=1 weights=100 experts=450 name=Radeon  8060S",

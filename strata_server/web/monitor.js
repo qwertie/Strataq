@@ -216,15 +216,22 @@ async function loadContext() {
   $("ctx-refresh").disabled = true; text("ctx-sum", "Reading…");
   try {
     const keep = ctxEntry()?.id;
-    ctx = await api("/api/context");
+    const [context, memory, panel] = await Promise.all([
+      api("/api/context"), api("/v1/memory").catch(() => null), import("./memory-panel.js"),
+    ]);
+    ctx = context;
     const entries = ctx.entries || [], select = $("ctx-slot");
     select.replaceChildren(...entries.map(e => { const o = document.createElement("option"); o.value = e.id; o.textContent = entryLabel(e); return o; }));
-    // the session a request used last: the engine's own one when it holds anything (with --batch a request alone
-    // runs there and every admission is read there first), else the slot used last
-    const main = entries.find(e => e.kind === "session" && e.slot === null && e.count);
-    const latest = main || entries.reduce((best, e) => (e.last_used || 0) > (best.last_used || 0) ? e : best, entries[0]);
+    const latest = entries.reduce((best, e) => (e.last_used || 0) > (best.last_used || 0) ? e : best, entries[0]);
+    const list = $("ctx-conversations");
+    const conversations = entries.map(e => ({...e, place: e.where,
+      ...(memory?.conversations || []).find(c => c.id === e.id)}));
+    list.innerHTML = panel.drawConversations(conversations, memory?.pause_directory, memory?.settings?.tokens_max);
+    list.querySelectorAll("[data-context]").forEach(button => {
+      button.onclick = () => { select.value = button.dataset.context; ctxPicked = true; loadEntry(); };
+    });
     select.value = ctxPicked && entries.some(e => e.id === keep) ? keep : latest?.id ?? "";
-    select.hidden = entries.length < 2;
+    select.hidden = true;
     await loadEntry();
   } catch (error) { text("ctx-sum", error.message); }
   finally { $("ctx-refresh").disabled = false; }
@@ -246,3 +253,5 @@ $("ctx-refresh").onclick = loadContext; $("ctx-save").onclick = saveContext;
 $("ctx-slot").onchange = () => { ctxPicked = true; loadEntry(); };
 $("ctx-prev").onclick = () => { ctxPage--; showContext(); }; $("ctx-next").onclick = () => { ctxPage++; showContext(); };
 document.querySelectorAll("[data-view]").forEach(button => { button.onclick = () => { ctxView = button.dataset.view; document.querySelectorAll("[data-view]").forEach(b => b.setAttribute("aria-selected", String(b === button))); showContext(); }; });
+
+loadContext();

@@ -2089,14 +2089,14 @@ class Service:
                      **({"shortfall": shortfall} if shortfall else {})}
 
     def _context_entries(self, held: list[dict]) -> list[dict]:
-        """The engine's list as the Context view names it.  `main` is the engine's own session: with --batch, where a
-        request alone runs and every admission is read first (src/program/generate.cpp); `slot<b>` a batch slot's (on
-        the Qwen3.6 path a request alone takes one of them); `parked<serial>` a parked conversation."""
+        """Names occupied contexts uniformly while retaining the engine's protocol addresses for token reads."""
         eng = self.engine
-        batch, used = getattr(eng, "batch", 0), getattr(eng, "slot_used", None) or []
+        used = getattr(eng, "slot_used", None) or []
         parked = [h for h in held if h["id"].startswith("parked")]
         entries = []
         for h in held:
+            if not h["count"] and h["state"] == "empty":
+                continue
             e = {k: h[k] for k in ("id", "state", "count", "capacity", "bytes", "used")} | \
                 {"where": h["place"], "preview": self._preview_text(h["preview"])}
             if h["id"].startswith("parked"):
@@ -2105,7 +2105,7 @@ class Service:
             else:
                 slot = int(h["id"][4:]) if h["id"].startswith("slot") else None
                 e |= {"kind": "session", "slot": slot,
-                      "name": f"Slot {slot}" if slot is not None else "Solo session" if batch else "Session",
+                      "name": f"Conversation {len(entries) + 1}",
                       "last_used": used[slot] if slot is not None and slot < len(used) else None}
             entries.append(e)
         return entries

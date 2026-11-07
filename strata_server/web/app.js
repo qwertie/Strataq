@@ -325,15 +325,14 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
   }
   spark("sp-disk", h.disk_read_mb);
 
-  // context fill: the running request, else the last one
-  const ctx = eng.max_context || 0;
-  let used = 0;
-  if (live.state !== "idle") used = (live.prompt_tokens || 0) + (live.generated || 0);
-  else if (last) used = (last.prompt_tokens || 0) + (last.output_tokens || 0);
+  // The shared budget counts every conversation resident on the GPU.
+  const ctx = memoryReading?.settings?.tokens_max || 0;
+  const used = (memoryReading?.conversations || []).filter(c => c.place === "vram")
+    .reduce((total, c) => total + c.count, 0);
   const frac = ctx ? Math.min(1, used / ctx) : 0;
   $("ctx-fill").setAttribute("stroke-dasharray", `${(235.6 * frac).toFixed(1)} 314.2`);
   $("ctx-fill").style.opacity = 235.6 * frac >= 3 ? "1" : "0";         // a near-zero arc would draw just its round cap
-  $("ctx-pct").textContent = `${Math.round(frac * 100)}%`;
+  $("ctx-pct").textContent = ctx ? `${Math.round(frac * 100)}%` : "?";
   $("ctx-sub").textContent = ctx ? `${kfmt(used)} / ${ctxfmt(ctx)}` : "–";
   const cacheBytes = (eng.expert_cache_mib || 0) * 1048576;
   $("slots-text").textContent = eng.expert_slots ? `${fmt(eng.expert_slots)} · ${gb(cacheBytes)} GB` : "–";
@@ -456,6 +455,7 @@ function renderMcp() {
 // ------------------------------------------------------------------ Memory (GET / POST /v1/memory)
 // The Memory panel (memory-panel.js, shared with the desktop app), refreshed every third Monitor tick; its changes go
 // to POST /v1/memory.
+let memoryReading = null;
 async function loadMemory() {
   let m, panel;
   try {
@@ -463,6 +463,7 @@ async function loadMemory() {
     if (!r.ok) return;
     [m, panel] = await Promise.all([r.json(), import("./memory-panel.js")]);
   } catch (e) { return; /* an older server: no Memory panel */ }
+  memoryReading = m.available ? m : null;
   $("mem-card").hidden = !m.available;
   if (m.available) panel.drawMemoryPanel($("mem-panel"), m, changeMemory);
 }

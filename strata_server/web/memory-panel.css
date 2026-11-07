@@ -37,7 +37,9 @@
 .mem-preview.mem-refused, .mem-notice.mem-error { color: var(--st-danger-text); }
 .mem-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--st-s-2) var(--st-s-4);
                 margin-top: var(--st-s-4); font-size: var(--st-fs-sm); }
-.mem-input { width: auto; max-width: 8em; height: auto; min-height: 0; padding: 2px 6px; }
+.mem-controls label { display: flex; flex-direction: column; gap: 6px; width: 300px; max-width: 100%; }
+.mem-actions { margin-top: var(--st-s-4); }
+.mem-input { width: 100%; max-width: 100%; box-sizing: border-box; height: auto; min-height: 0; padding: 2px 6px; }
 .mem-undo { margin-left: var(--st-s-2); font: inherit; color: var(--st-accent-text); background: none; border: 0;
             padding: 0; text-decoration: underline; cursor: pointer; }
 

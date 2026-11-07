@@ -682,11 +682,16 @@ PagedDeepSeek::PagedDeepSeek(Model& m, const Options& o, const ProgramOptions& x
     facts.end_tokens.assign(eos.begin(), eos.end());
     facts.sampling.top_k = kDefaultTopK;
     facts.has_drafter = m.draft_block() > 0;
+    facts.drafter_label = "DSpark";
+    facts.kv_quantization = "FP8 sliding window, FP4 compressed KV, FP4 index";
     facts.drafter_start = "--dspark on and a --lookahead above 0";
     // the engine's tables are the trunk's; the drafter's experts are this model's alone (residency_ has room for them,
     // after the trunk's layers)
     blobs_ = m.get_expert_bytes();
     facts.expert_bytes.assign(blobs_.begin(), blobs_.begin() + g.nl);
+    if (facts.has_drafter)
+        for (size_t layer = (size_t) g.nl; layer < blobs_.size(); ++layer)
+            facts.drafter_expert_bytes += blobs_[layer] * (uint64_t) g.d_n_exp;
     if (cards.size() > 1) {
         facts.split_ranking = get_ranking(m, 0, g.nl, drafting);
         if (x.gpu_experts >= 0 && facts.split_ranking.size() > (size_t) x.gpu_experts)
