@@ -186,6 +186,7 @@ function showContext() {
   if (!got) { if (n) text("ctx-note", entry?.error || "Reading…"); return; }
   text("ctx-note", (got.busy ? `A request has the engine's turn: these are the tokens read at ${new Date(got.at * 1000).toLocaleTimeString()}. ` : "") +
     (ctxView === "colored" ? "Each token's colour comes from its id, so the same token always has the same colour. Hover a token for its position and id. " : "") + NOTES[e.kind]);
+  if (got.error) { text("ctx-note", got.error); return; }
   if (ctxView === "plain") { view.textContent = got.pieces.join(""); return; }
   const m = got.tokens.length, pages = Math.max(1, Math.ceil(m / PAGE));
   ctxPage = Math.min(Math.max(ctxPage < 0 ? pages - 1 : ctxPage, 0), pages - 1);
@@ -205,12 +206,15 @@ function showContext() {
 // the tokens of the conversation picked, read from the engine now (they may have grown since the list)
 async function loadEntry() {
   const e = ctxEntry();
-  entry = null; ctxPage = -1; showContext();
-  if (!e) return;
-  if (!e.count) { entry = {id: e.id, tokens: [], pieces: []}; showContext(); return; }
-  try { entry = await api(`/api/context?id=${encodeURIComponent(e.id)}`); }
-  catch (error) { entry = {id: e.id, error: error.message}; }
-  if (ctxEntry() === e) showContext();                // (unless another one was picked meanwhile)
+  if (!e) { entry = null; showContext(); return; }
+  let answer;
+  try { answer = e.count ? await api(`/api/context?id=${encodeURIComponent(e.id)}`) :
+    {id: e.id, tokens: [], pieces: []}; }
+  catch (error) { answer = {id: e.id, error: error.message}; }
+  if (ctxEntry() === e) {
+    entry = answer; ctxPage = -1;
+    showContext();
+  }
 }
 async function loadContext() {
   $("ctx-refresh").disabled = true; text("ctx-sum", "Reading…");
@@ -224,8 +228,8 @@ async function loadContext() {
     select.replaceChildren(...entries.map(e => { const o = document.createElement("option"); o.value = e.id; o.textContent = entryLabel(e); return o; }));
     const latest = entries.reduce((best, e) => (e.last_used || 0) > (best.last_used || 0) ? e : best, entries[0]);
     const list = $("ctx-conversations");
-    const conversations = entries.map(e => ({...e, place: e.where,
-      ...(memory?.conversations || []).find(c => c.id === e.id)}));
+    const conversations = entries.map(e => ({...(memory?.conversations || []).find(c => c.id === e.id),
+      ...e, place: e.where}));
     list.innerHTML = panel.drawConversations(conversations, memory?.pause_directory, memory?.settings?.tokens_max);
     list.querySelectorAll("[data-context]").forEach(button => {
       button.onclick = () => { select.value = button.dataset.context; ctxPicked = true; loadEntry(); };

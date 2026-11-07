@@ -52,6 +52,7 @@ def test_every_request_uses_run_even_when_alone(start_engine, mode):
     engine = start_engine(mode)
     sent, send = [], engine._send
     engine._send = lambda line, **kwargs: (sent.append(line), send(line, **kwargs))[-1]
+    assert engine.slots_view() == []
     out, last = collect(engine, 31, 6)
     assert out == [31] * 6
     assert last["generated"] == 6
@@ -67,6 +68,10 @@ def test_settings_reply_arrives_before_the_running_request_finishes(start_engine
     with ThreadPoolExecutor() as pool:
         future = pool.submit(collect, engine, 31, 400, first)
         assert first.wait(5)
+        active = engine.slots_view()
+        assert len(active) == 1
+        assert active[0]["generated"] > 0
+        assert active[0]["state"] == "generating"
         report = engine.change_settings({"rows": 3})
         assert report["settings"]["rows"] == 3
         assert not future.done()
@@ -159,6 +164,10 @@ def test_http_settings_apply_during_generation_including_first_lazy_request(star
             future = pool.submit(post, "/v1/chat/completions",
                                  {"messages": [{"role": "user", "content": "Hi"}], "max_tokens": 160})
             assert first.wait(5)
+            with urllib.request.urlopen(base + "/metrics", timeout=5) as response:
+                metrics = json.load(response)
+            assert len(metrics["live"]["slots"]) == 1
+            assert metrics["live"]["slots"][0]["generated"] > 0
             report = post("/v1/memory", {"set": {"rows": 3}})
             assert report["settings"]["rows"] == 3
             assert not future.done()

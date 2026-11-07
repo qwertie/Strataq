@@ -25,6 +25,8 @@
 .mem-conversations th, .mem-conversations td { padding: 3px var(--st-s-2) 3px 0;
                                                border-bottom: 1px solid var(--st-line-soft); }
 .mem-conversations .mem-num { text-align: right; font-variant-numeric: tabular-nums; }
+.mem-context-preview { display: block; max-width: 36ch; overflow: hidden; text-overflow: ellipsis;
+                       white-space: nowrap; color: var(--st-ink-muted); }
 .mem-note, .mem-hint, .mem-notice { margin: var(--st-s-3) 0 0; font-size: var(--st-fs-xs); }
 /* a divider the reader drags (M6): the end of the engine's pool, or of the SSD's room for paused conversations */
 .mem-divider { position: absolute; top: -5px; bottom: -5px; width: 8px; margin-left: -4px; border-radius: 3px;
@@ -37,7 +39,7 @@
 .mem-preview.mem-refused, .mem-notice.mem-error { color: var(--st-danger-text); }
 .mem-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--st-s-2) var(--st-s-4);
                 margin-top: var(--st-s-4); font-size: var(--st-fs-sm); }
-.mem-controls label { display: flex; flex-direction: column; gap: 6px; width: 300px; max-width: 100%; }
+.mem-controls label { display: flex; flex-direction: column; gap: 6px; width: 229px; max-width: 100%; }
 .mem-actions { margin-top: var(--st-s-4); }
 .mem-input { width: 100%; max-width: 100%; box-sizing: border-box; height: auto; min-height: 0; padding: 2px 6px; }
 .mem-undo { margin-left: var(--st-s-2); font: inherit; color: var(--st-accent-text); background: none; border: 0;

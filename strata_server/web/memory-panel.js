@@ -52,8 +52,8 @@ const CHANGED_KEY = "strata.memoryPanel.changed";
 /** Names shown for the engine's settings (keys of the view's `settings`); others show as the engine names them.
  * @type {Record<string, string>} */
 const SETTINGS = {context: "Per-conversation token limit", concurrent: "Conversations at once", rows: "Rows per step",
-                  vram_conversations: "Conversations held in VRAM",
-                  conversation_idle_seconds: "Idle conversation eviction age (seconds)",
+                  vram_conversations: "Max conversations in VRAM",
+                  conversation_idle_seconds: "Idle conversation eviction age (sec)",
                   lookahead: "Max lookahead", tokens_min: "Min conversation tokens",
                   tokens_max: "Max conversation tokens", ssd_pause_mib: "SSD for paused conversations (MiB)",
                   drafter: "Drafter", slots: "Maximum conversations at once"};
@@ -82,10 +82,10 @@ const PLACES = {vram: "GPU", ram: "RAM", ssd: "SSD"};
 const panels = new WeakMap();
 
 /**
- * Draws a GET /v1/memory answer whose `available` is true into `element`, replacing what it held: a bar per memory
+ * Draws a GET /v1/memory answer whose `available` is true into `element`: a bar per memory
  * with its legend and the engine's settings with a line that says
- * whether the reading is an old one.  Called again with each new reading; while the reader drags a divider, types in
- * a control or waits for a change, the new reading is drawn afterwards.
+ * whether the reading is an old one. Existing elements and focused edits survive each reading. While a divider is
+ * being dragged or a change is being applied, the new reading is drawn afterwards.
  * @param {HTMLElement} element
  * @param {MemoryView} view
  * @param {ChangeSettings} [onChange] sends a change to the server; without it the settings are only shown.
@@ -101,7 +101,7 @@ export function drawMemoryPanel(element, view, onChange) {
   const active = element.ownerDocument.activeElement, inside = !!active && element.contains(active);
   if (panel.drag?.x0 === null && !inside)
     panel.drag = null;    // a keyboard drag the reader left by moving the focus away; it would stop all redraws
-  if (!panel.drag && !panel.busy && !(inside && /^(INPUT|SELECT)$/.test(active.tagName)))
+  if (!panel.drag && !panel.busy)
     render(element, panel);
 }
 
@@ -124,7 +124,7 @@ export function drawMemoryPanel(element, view, onChange) {
  * @typedef {{category: string, pool: string, label: string, bytes: number,
  *   identity_group?: string, ids?: number[]}} MemoryBlock
  * @typedef {{id: string, place: string, state: string, count: number, capacity: number, bytes: number,
- *   used: number, last_tokens_at?: number, name?: string}} HeldConversation
+ *   used: number, last_tokens_at?: number, name?: string, preview?: string}} HeldConversation
  * @typedef {Record<string, number | boolean>} SettingsChange  POST /v1/memory's "set": MiB for the sizes.
  * @callback ChangeSettings  Sends a change to the engine's server (POST /v1/memory) and says how it went: `view` is
  *   the reading after it, `error` the server's reason for not changing anything (a refusal, 409).
@@ -140,9 +140,9 @@ export function drawMemoryPanel(element, view, onChange) {
  *   busy: boolean, notice: Notice | null, pending: SettingsChange}} Panel
  * A boundary of a bar that can be dragged.  `key`: the setting it changes; `from`: the size now; `start`: where the
  * segment it ends begins on the bar; `scale`: drawn bytes per byte of the engine's; `total`: the drawn bytes the
- * bar's width stands for.  Bytes.
+ * bar's width stands for; `fixed`: Strata allocations outside the adjustable pool. Bytes.
  * @typedef {{key: string, from: number, smallest: number, largest: number, start: number, scale: number,
- *   total: number}} Divider
+ *   total: number, fixed: number}} Divider
  * A divider being moved.  `value`: the size it would set (bytes); `x0`: the pointer's x where the drag started (null
  * for the keyboard); `perPx`: bytes per pixel of the bar.
  * @typedef {{id: string, value: number, x0: number | null, perPx: number}} Drag
@@ -169,13 +169,16 @@ function render(element, panel) {
   const notice = panel.notice && panel.notice.until > Date.now() ? panel.notice : null;
   const hint = Object.keys(panel.dividers).length && !hasChanged() ?
     `<p class="mem-hint">Drag the dividers to change sizes</p>` : "";
-  element.innerHTML = `<div class="mem-bars">${memories.map((x) =>
+  const html = `<div class="mem-bars">${memories.map((x) =>
       drawBar(x, panel.dividers[x.id], drag?.id === x.id ? drag : null, view)).join("")}</div>` +
     (editable ? drawControls(panel) : "") + hint +
     (notice ? `<p class="mem-notice${notice.error ? " mem-error" : ""}" role="status">${esc(notice.text)}` +
       (notice.undo && !panel.busy ? ` <button type="button" class="mem-undo" data-undo>Undo</button>` : "") + "</p>"
       : "") +
     (note ? `<p class="mem-note">${esc(note)}</p>` : "");
+  const template = element.ownerDocument.createElement("template");
+  template.innerHTML = html;
+  updateChildren(element, template.content);
   if (drag)
     /** @type {HTMLElement | null} */ (element.querySelector(`[data-divider="${drag.id}"]`))?.focus();
 }
@@ -360,7 +363,7 @@ function drawControls(panel) {
   const s = {...panel.view.settings, ...panel.pending}, off = panel.busy ? " disabled" : "";
   const fields = getEditableControls(s).map(([key, smallest, largest]) => {
     const help = esc(getControlHelp(key, s, panel.view.details));
-    return `<label title="${help}">${esc(SETTINGS[key])} ` +
+    return `<label data-control="${key}" title="${help}">${esc(SETTINGS[key])} ` +
       `<input class="st-input mem-input" type="number" step="1" data-setting="${key}" ` +
       `value="${s[key]}" min="${smallest(s)}"${largest(s) < Infinity ? ` max="${largest(s)}"` : ""}` +
       ` title="${help}"${off}></label>`;
@@ -391,7 +394,7 @@ function drawDrafterControl(settings, details = {}, disabled = "") {
   const lookup = settings.suffix_draft == null ? "" :
     `<option value="suffix"${suffix ? " selected" : ""}>` +
     `${esc(details.suffix_label || "Use suffix drafter (0 GiB)")}</option>`;
-  return `<label title="${esc(help)}">Drafter ` +
+  return `<label data-control="drafter" title="${esc(help)}">Drafter ` +
     `<select class="st-input mem-input" data-setting="drafter"${disabled}>` +
     `<option value="off"${!settings.drafter && !suffix ? " selected" : ""}>No MTP</option>` +
     `${model}${lookup}</select></label>`;
@@ -484,16 +487,18 @@ function findDivider(x) {
     return null;
   const start = !ssd && first < 0 && x.pool_offset != null ? x.pool_offset * scale :
     (first < 0 ? parts : parts.slice(0, first)).reduce((a, p) => a + (p.drawn ?? p.bytes), 0);
+  const fixed = ssd ? 0 : Math.max(0, Object.values(x.uses).reduce((a, b) => a + b, 0) - from);
   return {key: ssd ? "ssd_pause_mib" : `memory_mib.${x.id}`, from, smallest: x.smallest ?? 0,
-          largest: x.largest ?? Infinity, start, scale, total};
+          largest: x.largest ?? Infinity, start, scale, total, fixed};
 }
 
 /** Gets why the engine would refuse a divider's size, or "" when it accepts it.
  * @param {Divider} d
  * @param {number} value  bytes */
 function findRefusal(d, value) {
-  return value < d.smallest ? `at least ${size(d.smallest)} is needed here now (the biggest active conversation ` +
-    `and the minimum conversation tokens)` : value > d.largest ? `at most ${size(d.largest)} is free for it` : "";
+  return value < d.smallest ? `at least ${size(d.fixed + d.smallest)} is needed here now (fixed allocations, ` +
+    `the biggest active conversation and the minimum conversation tokens)` : value > d.largest ?
+    `at most ${size(d.fixed + d.largest)} is available to Strata here (${size(d.fixed)} fixed)` : "";
 }
 
 /** Gets the markup of one memory's row: its name and size, its bar (with its divider, moved by `drag`) and the
@@ -539,7 +544,8 @@ function drawBar(x, divider, drag, view) {
     `style="width:${total ? (100 * (p.drawn ?? p.bytes)) / total : 0}%"></span>`;
   const key = (/** @type {{use: string, bytes: number}} */ p) =>
     `<span title="${tip(p)}"><i class="mem-key" data-use="${esc(p.use)}"></i>${title(p)} ${size(p.bytes)}</span>`;
-  return `<div class="mem-row"><div class="mem-head" title="${x.id === "ssd" ? esc(pauseFolder) : ""}">` +
+  return `<div class="mem-row" data-memory="${esc(x.id)}"><div class="mem-head" ` +
+    `title="${x.id === "ssd" ? esc(pauseFolder) : ""}">` +
     `<span>${esc(label)}</span><span class="mem-facts">${esc(facts)}` +
     `</span></div><div class="mem-bar" style="width:${total ? 100 * Math.min(total / FULL_BAR, 1) :
       x.id === "ssd" ? 0 : 100}%">` +
@@ -556,12 +562,14 @@ function drawDivider(id, d, drag) {
   const value = drag ? drag.value : d.from, refused = drag && findRefusal(d, value) ? " mem-refused" : "";
   const at = (/** @type {number} */ b) => Math.min(100, Math.max(0, (100 * (d.start + b * d.scale)) / d.total));
   const what = id === "ssd" ? "the SSD space paused conversations may take" :
-    `the memory the engine's pool takes ${id === "ram" ? "in the RAM" : "on this GPU"}`;
+    `Strata's total memory ${id === "ram" ? "in RAM" : "on this GPU"}`;
+  const allocation = `${size(d.fixed + value)}${id === "ssd" ? "" :
+    ` total (${size(d.fixed)} fixed, ${size(value)} resizable pool)`}`;
   const moved = drag && value !== d.from ? `<span class="mem-change${refused}" style="left:` +
     `${Math.min(at(d.from), at(value))}%;width:${Math.abs(at(value) - at(d.from))}%"></span>` : "";
   return `${moved}<span class="mem-divider${refused}" data-divider="${esc(id)}" tabindex="0" role="slider" ` +
-    `aria-label="${esc(what)}" aria-valuetext="${size(value)}" title="Drag to change ${esc(what)} ` +
-    `(${size(d.from)} now). Arrow keys move it too; Enter applies, Escape cancels." style="left:${at(value)}%"></span>`;
+    `aria-label="${esc(what)}" aria-valuetext="${allocation}" title="Drag to change ${esc(what)}. ` +
+    `${allocation}. Arrow keys move it too; Enter applies, Escape cancels." style="left:${at(value)}%"></span>`;
 }
 
 /** Gets the markup of the line under a bar whose divider is being moved: the size before and after, or in red why
@@ -570,7 +578,9 @@ function drawDivider(id, d, drag) {
  * @param {Drag} drag */
 function drawPreview(d, drag) {
   const refusal = findRefusal(d, drag.value);
-  return `<p class="mem-preview${refusal ? " mem-refused" : ""}">${size(d.from)} → ${size(drag.value)}` +
+  return `<p class="mem-preview${refusal ? " mem-refused" : ""}">` +
+    `${size(d.fixed + d.from)} → ${size(d.fixed + drag.value)}` +
+    (d.key === "ssd_pause_mib" ? "" : ` Strata total (${size(d.fixed)} fixed; ${size(drag.value)} resizable pool)`) +
     (refusal ? `: ${esc(refusal)}; releasing here changes nothing` : ": release to apply, Escape cancels") + "</p>";
 }
 
@@ -592,12 +602,14 @@ export function drawConversations(list, pauseDirectory, gpuBudget) {
   const row = (/** @type {HeldConversation} */ c, /** @type {number} */ i) =>
     `<tr><td${c.state === "parked" && pauseDirectory ?
     ` title="${esc(`SSD pause folder: ${pauseDirectory}`)}"` : ""}>` +
-    `<button type="button" data-context="${esc(c.id)}">${esc(c.name || `Conversation ${i + 1}`)}</button></td>` +
+    `<button type="button" data-context="${esc(c.id)}">${esc(c.name || `Conversation ${i + 1}`)}</button>` +
+    (typeof c.preview === "string" && c.preview ?
+      `<span class="mem-context-preview">${esc(c.preview)}</span>` : "") + "</td>" +
     `<td>${esc(c.state)} (${esc(PLACES[c.place] || c.place)})</td>` +
     `<td class="mem-num"${c.place === "vram" && gpuBudget != null ?
       ` title="Shared GPU budget: ${fmt(gpuBudget)} tokens; ` +
         `per-conversation context limit: ${fmt(c.capacity)} tokens"` :
-      ""}>${fmt(c.count)} / ${fmt(c.place === "vram" && gpuBudget != null ? gpuBudget : c.capacity)}</td>` +
+      ""}>${fmt(c.count)} / ${fmt(c.capacity)}</td>` +
     `<td class="mem-num">${size(c.bytes)}</td>` +
     (activity ? `<td class="mem-num" title="${c.last_tokens_at ?
       esc(new Date(c.last_tokens_at * 1000).toLocaleString()) : "Unknown"}">` +
@@ -678,6 +690,57 @@ function splitPoolParts(memory, scale) {
       return size ? [{use, bytes: size, drawn: size * scale, pool: from >= start && boundary <= end}] : [];
     });
   });
+}
+
+/** Updates the panel's markup while retaining matching rows, controls and slider elements.
+ * @param {Node} parent
+ * @param {Node} reading */
+function updateChildren(parent, reading) {
+  let cursor = parent.firstChild;
+  for (const next of Array.from(reading.childNodes)) {
+    let node = cursor;
+    while (node && getNodeKey(node) !== getNodeKey(next))
+      node = node.nextSibling;
+    if (!node) {
+      node = next.cloneNode(true);
+      parent.insertBefore(node, cursor);
+    } else {
+      if (node !== cursor)
+        parent.insertBefore(node, cursor);
+      if (node.nodeType === 1) {
+        const current = /** @type {HTMLElement} */ (node), desired = /** @type {HTMLElement} */ (next);
+        for (const attribute of Array.from(current.attributes))
+          if (!desired.hasAttribute(attribute.name))
+            current.removeAttribute(attribute.name);
+        for (const attribute of Array.from(desired.attributes))
+          if (current.getAttribute(attribute.name) !== attribute.value)
+            current.setAttribute(attribute.name, attribute.value);
+        updateChildren(current, desired);
+        if (/^(INPUT|SELECT)$/.test(current.tagName) && current !== current.ownerDocument.activeElement) {
+          const input = /** @type {HTMLInputElement | HTMLSelectElement} */ (current);
+          const value = /** @type {HTMLInputElement | HTMLSelectElement} */ (desired).value;
+          if (input.value !== value)
+            input.value = value;
+        }
+      } else if (node.nodeValue !== next.nodeValue)
+        node.nodeValue = next.nodeValue;
+    }
+    cursor = node.nextSibling;
+  }
+  while (cursor) {
+    const next = cursor.nextSibling;
+    parent.removeChild(cursor);
+    cursor = next;
+  }
+}
+
+/** Gets a sibling's stable identity within the Memory panel's markup.
+ * @param {Node} node */
+function getNodeKey(node) {
+  const element = node.nodeType === 1 ? /** @type {HTMLElement} */ (node) : null;
+  const key = element && ["data-memory", "data-control", "data-divider", "data-setting", "data-apply", "data-use"]
+    .map((name) => element.getAttribute(name)).find((value) => value !== null);
+  return `${node.nodeName}:${key ?? element?.classList[0] ?? ""}`;
 }
 
 /** Escapes text for HTML. @param {unknown} s */

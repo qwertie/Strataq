@@ -361,6 +361,7 @@ class PickSlot(unittest.TestCase):
     def engine(self, n):
         e = StrataEngine("missing-executable", [], lazy=True)
         e.batch = n
+        e.slot_cv = threading.Condition()
         e.slot_order = list(range(n))
         e.slot_busy = [False] * n
         e.slot_held = [[] for _ in range(n)]

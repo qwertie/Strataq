@@ -2178,7 +2178,7 @@ class Service:
             with self.status_lock:
                 running = len(self.live_reqs)
             slots = self.engine.slots_view() if hasattr(self.engine, "slots_view") else []
-            # the requests in flight that are not in a slot: the one alone on the solo path, or waiting their turn
+            # Requests waiting in the server have no engine-side metrics entry yet.
             in_slots = sum(1 for x in slots if x["state"] != "idle")
             live.update(parallel=par, running=running, slots=slots, outside_slots=max(0, running - in_slots),
                         waiting=int(getattr(self.engine, "waiting", 0) or 0),

@@ -2381,18 +2381,28 @@ class StrataEngine:
         return boundary if 0 < boundary < len(prompt) and prompt[:boundary] == held[:boundary] else 0
 
     def slots_view(self) -> list[dict]:
-        """/metrics: each batch slot - idle (with the tokens it holds for a next turn), reading or decoding."""
+        """Gets active requests, or fixed execution slots for engines using the legacy protocol."""
         now, view = time.time(), []
-        for b in range(self.batch):
-            r = self.slot_live[b]
+        requests = getattr(self, "request_protocol", False)
+        if requests:
+            with self.request_lock:
+                live = [dict(r) for r in self.slot_live if r is not None]
+            held = []
+        else:
+            with self.slot_cv:
+                live = [dict(r) if r else None for r in self.slot_live]
+                held = [len(tokens) for tokens in self.slot_held]
+        for b, r in enumerate(live):
             if r is None:
-                view.append({"slot": b, "state": "idle", "held_tokens": len(self.slot_held[b])})
+                view.append({"slot": b, "state": "idle", "held_tokens": held[b]})
                 continue
             ft = r.get("first_token")
             view.append({"slot": b, "state": r["state"], "prompt_tokens": r["prompt_tokens"],
                          "prompt_read": r.get("prompt_read") if r["state"] == "reading" else None,
                          "generated": r["generated"], "elapsed_s": round(now - r["started"], 1),
                          "tok_s": round(r["generated"] / max(1e-6, now - ft), 1) if ft else None})
+            if requests:
+                view[-1]["request_id"] = r["request_id"]
         return view
 
     def generate(self, ids, max_new, sampling, cancel, embeddings=None):

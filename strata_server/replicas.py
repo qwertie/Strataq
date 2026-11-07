@@ -297,7 +297,7 @@ class ReplicaEngine:
                 [{"slot": 0, "state": "busy" if self.inflight[k] else "idle", "held_tokens": 0}]
             for s in view:
                 out.append({**s, "slot": base + s["slot"], "replica": k})
-            base += max(1, n)
+            base += max(1, n, len(view))
         return out
 
     def replica_view(self) -> list[dict]:

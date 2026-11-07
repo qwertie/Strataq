@@ -5,16 +5,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { parseHTML } from 'linkedom';
 import { drawMemoryPanel, drawConversations } from '../../../strata_server/web/memory-panel.js';
 
 const read = path => readFile(new URL(path, import.meta.url), 'utf8');
 const fixture = JSON.parse(await read('./fixtures/memory-strix-halo.json'));
-/** Draws `view` into a stand-in for a page element that records the panel's event listeners; `fire` sends one of
- *  them an event. */
+/** Mounts the panel in a DOM; `fire` invokes its listeners with synthetic pointer and control events. */
 const mount = (view, onChange) => {
-  const listeners = {}, element = { innerHTML: '', ownerDocument: { activeElement: null }, contains: () => false,
-    addEventListener: (type, listener) => { listeners[type] = listener; }, setPointerCapture() {},
-    querySelector: () => null };
+  const {document} = parseHTML('<html><body><div id="panel"></div></body></html>');
+  const listeners = {}, element = document.getElementById('panel');
+  element.addEventListener = (type, listener) => { listeners[type] = listener; };
+  element.setPointerCapture = () => {};
   drawMemoryPanel(element, view, onChange);
   const fire = (type, event) => listeners[type]({ button: 0, pointerId: 1, preventDefault() {}, ...event });
   return { element, fire };
@@ -28,9 +29,43 @@ const draw = view => mount(view).element.innerHTML;
 const drawHeld = view => drawConversations(view.conversations || [], view.pause_directory, view.settings?.tokens_max);
 const applyButton = save => ({closest: selector => selector === '[data-apply]' ? {dataset: {apply: save}} : null});
 const apply = (fire, save = 'session') => fire('click', {target: applyButton(save)});
-const rows = html => html.split('<div class="mem-row">').slice(1);
+const rows = html => html.split(/<div class="mem-row"[^>]*>/).slice(1);
 const widths = row => [...row.matchAll(/class="mem-seg"[^>]*style="width:([\d.e-]+)%/g)].map(m => Number(m[1]));
 const barWidth = row => Number(/class="mem-bar" style="width:([\d.]+)%/.exec(row)[1]);
+
+test('polling updates memory facts without replacing controls, rows or dividers', () => {
+  const {element, fire} = mount(live, recorder().onChange);
+  const selectors = ['.mem-controls', '[data-memory="gpu0"]', '[data-divider="gpu0"]', '[data-setting="rows"]'];
+  const nodes = selectors.map(selector => element.querySelector(selector));
+  fire('change', {target: control('[data-setting]', {dataset: {setting: 'rows'}, value: '6'})});
+  drawMemoryPanel(element, {...live, memories: live.memories.map(m => ({...m, allocated_pct: 75}))},
+    recorder().onChange);
+  selectors.forEach((selector, i) => assert.equal(element.querySelector(selector), nodes[i]));
+  assert.equal(nodes[3].value, '6');
+  assert.match(element.querySelector('.mem-facts').textContent, /75[.,]0% allocated/);
+});
+
+test('the right edge counts fixed allocations in the total while sending only the pool size', async () => {
+  const view = {available: true, can_change: true, settings: {}, memories: [{id: 'gpu0', total: 64 * GIB,
+    free: 33 * GIB, setting: 24 * GIB, pool_offset: 7 * GIB, largest: 57 * GIB,
+    uses: {weights: 7 * GIB, experts: 24 * GIB}}]};
+  const {calls, onChange} = recorder(), {element, fire} = mount(view, onChange);
+  fire('pointerdown', {target: onDivider('gpu0'), clientX: 1000 * 31 / 64});
+  fire('pointermove', {clientX: 1000});
+  assert.match(element.querySelector('.mem-preview').textContent, /64.00 GiB Strata total/);
+  assert.match(element.querySelector('.mem-preview').textContent, /7.00 GiB fixed; 57.00 GiB resizable pool/);
+  fire('pointerup', {});
+  await settle();
+  assert.deepEqual(calls, [[{'memory_mib.gpu0': 57 * 1024}, 'session']]);
+});
+
+test('context snippets are escaped and rows show individual limits above the shared total', () => {
+  const html = drawConversations([{id: 'conversation0', count: 100, capacity: 204800, place: 'vram',
+    state: 'holding', bytes: GIB, preview: '<user> show my files'}], undefined, 401111);
+  assert.match(html, /mem-context-preview">&lt;user&gt; show my files/);
+  assert.match(html, />100 \/ 204.800<\/td>/);
+  assert.match(html, /GPU total \(shared budget\)[^]*100 \/ 401.111/);
+});
 
 test('a GPU whose memory is system RAM is drawn as its BIOS share, and what it borrows is a segment of the RAM', () => {
   const [gpu, ram] = rows(draw(fixture));
@@ -109,17 +144,18 @@ const undoButton = { closest: selector => selector === '[data-undo]' ? {} : null
 test('dragging a divider previews the new size and changes nothing until it is released', async () => {
   const { calls, onChange } = recorder(), { element, fire } = mount(live, onChange);
   assert.match(element.innerHTML, /class="mem-divider" data-divider="gpu0" tabindex="0" role="slider"/);
-  assert.match(element.innerHTML, /title="Drag to change the memory the engine&#39;s pool takes on this GPU/);
+  assert.match(element.innerHTML, /title="Drag to change Strata(?:&#39;|')s total memory on this GPU/);
   assert.match(element.innerHTML, /<p class="mem-hint">Drag the dividers to change sizes<\/p>/);
   fire('pointerdown', { target: onDivider('gpu0'), clientX: 500 });
   fire('pointermove', { clientX: 600 });
   assert.equal(calls.length, 0);
-  assert.match(element.innerHTML, /<p class="mem-preview">16[.,]08 GiB → 22[.,]\d\d GiB: release to apply/);
+  assert.match(element.innerHTML, /<p class="mem-preview">19[.,]83 GiB → 26[.,]\d\d GiB Strata total/);
+  assert.match(element.innerHTML, /3[.,]75 GiB fixed; 22[.,]\d\d GiB resizable pool/);
   assert.match(element.innerHTML, /class="mem-change"/);
   fire('pointerup', {});
   await settle();
   assert.deepEqual(calls, [[{ 'memory_mib.gpu0': Math.round((pool + 100 * perPx) / MIB) }, 'session']]);
-  assert.match(element.innerHTML, /mem-notice" role="status">Changed for this session\. <button[^>]*data-undo>Undo/);
+  assert.match(element.querySelector('.mem-notice').textContent, /Changed for this session\. Undo/);
 });
 
 test('a change that got less than asked says what it lacked and still offers Undo', async () => {
@@ -128,8 +164,8 @@ test('a change that got less than asked says what it lacked and still offers Und
   fire('keydown', { target: onDivider('gpu0'), key: 'ArrowRight' });
   fire('keydown', { target: onDivider('gpu0'), key: 'Enter' });
   await settle();
-  assert.match(element.innerHTML, new RegExp('mem-notice mem-error" role="status">Changed for this session\\. ' +
-    'But it got less than asked: the RAM&#39;s pool: out of memory\\. <button[^>]*data-undo>Undo'));
+  assert.match(element.querySelector('.mem-notice.mem-error').textContent,
+    /Changed for this session\. But it got less than asked: the RAM's pool: out of memory\. Undo/);
 });
 
 test('Apply and save as default persists current controls and live pool sizes', async () => {
@@ -161,11 +197,11 @@ test('a size outside what the engine accepts shows red with the reason, and rele
   fire('pointermove', { clientX: 250 });                 // about 16.9 GiB less: below the 4 GiB the engine needs
   assert.match(element.innerHTML, /class="mem-divider mem-refused"/);
   assert.match(element.innerHTML,
-    /<p class="mem-preview mem-refused">16[.,]08 GiB → [^:]*: at least 4[.,]00 GiB is needed here now/);
+    /<p class="mem-preview mem-refused">19[.,]83 GiB → [^:]*: at least 7[.,]75 GiB is needed here now/);
   assert.match(element.innerHTML, /releasing here changes nothing/);
   fire('pointerup', {});
   assert.equal(calls.length, 0);
-  assert.match(element.innerHTML, /mem-notice mem-error" role="status">Nothing changed: at least 4[.,]00 GiB/);
+  assert.match(element.querySelector('.mem-notice.mem-error').textContent, /Nothing changed: at least 7[.,]75 GiB/);
 });
 
 test('Escape cancels a drag, and dropping a divider where it started changes nothing', () => {
@@ -193,9 +229,9 @@ test('the server\'s refusal is shown as it said it', async () => {
   const { element, fire } = mount(live, onChange);
   fire('keydown', { target: onDivider('gpu0'), key: 'ArrowLeft' });
   fire('keydown', { target: onDivider('gpu0'), key: 'Enter' });
-  assert.match(element.innerHTML, /mem-notice" role="status">Changing…/);
+  assert.match(element.querySelector('.mem-notice').textContent, /^Changing/);
   await settle();
-  assert.match(element.innerHTML, new RegExp(`mem-notice mem-error" role="status">${why}</p>`));
+  assert.equal(element.querySelector('.mem-notice.mem-error').textContent, why.replace('&#39;', "'"));
   assert.doesNotMatch(element.innerHTML, /data-undo/);
 });
 
@@ -209,8 +245,8 @@ test('the controls change the other settings within their ranges', async () => {
   fire('change', { target: setting('concurrent', { value: '5' }) });
   apply(fire);
   assert.equal(calls.length, 0);
-  assert.match(element.innerHTML,
-    /mem-error" role="status">Conversations at once: choose a whole number from 1 to 4\./);
+  assert.match(element.querySelector('.mem-notice.mem-error').textContent,
+    /Conversations at once: choose a whole number from 1 to 4\./);
   fire('change', { target: setting('concurrent', { value: '2' }) });
   fire('change', { target: setting('drafter', { value: 'off' }) });
   assert.deepEqual(calls, []);
@@ -286,7 +322,7 @@ test('arbitrary categories retain sublabels in both tooltips; other apps follow 
   assert.match(html, /Layer 4 \(2.00 MiB experts\): 3.00 GiB/);
   assert.match(html, /Drafter \/ Expert weights: 1.00 GiB/);
   assert.match(html, /Prompt \/ Working buffers: 1.00 GiB/);
-  assert.match(html, /&lt;arbitrary&gt; &amp; labels: 1.00 GiB/);
+  assert.match(html, /<arbitrary> & labels: 1.00 GiB/);
   const uses = [...html.matchAll(/class="mem-seg" data-use="([^"]*)"/g)].map(m => m[1]);
   assert.deepEqual(uses.slice(-2), ['free', 'other_apps']);
   assert.equal((html.match(/Drafter \/ Expert weights/g) || []).length, 2);
@@ -328,7 +364,7 @@ test('fixed allocations precede the pool and conversation sublabels precede laye
   const tooltip = /data-use="experts" title="([^"]*)"/.exec(html)[1];
   assert.ok(tooltip.indexOf('Conversation Alice') < tooltip.indexOf('Layer 2'));
   assert.doesNotMatch(tooltip, /Expert and conversation pool/);
-  assert.match(html, /&#10;Alignment padding: 0 MiB/);
+  assert.match(html, /\nAlignment padding: 0 MiB/);
   assert.doesNotMatch(html, /Expert and conversation pool \/ Alignment padding/);
   assert.match(tooltip, /Experts give the model most of its knowledge and skill/);
 });
@@ -391,7 +427,7 @@ test('paused conversations show last-token ages and the SSD pause folder', () =>
       {id: 'parked2', place: 'disk', state: 'parked', count: 5, capacity: 5, bytes: 1, used: 1}]});
   assert.match(html, /parked1: last tokens 2 h ago/);
   assert.match(html, /parked2: last tokens Unknown/);
-  assert.match(html, /SSD pause folder: C:\/pause &lt;files&gt;/);
+  assert.match(html, /SSD pause folder: C:\/pause <files>/);
   assert.doesNotMatch(html, /mem-conversations/);
   assert.match(drawHeld({settings: {}, conversations: [{id: "parked1", count: 5, capacity: 5, place: "disk",
     state: "parked", bytes: GIB}]}), /Last tokens<\/th>/);
@@ -411,7 +447,7 @@ test('the GPU table shows the combined allowance, its total and each conversatio
       conversation('parked0', 'ram', 100000)]};
   const html = drawHeld(view);
   assert.match(html, /Shared GPU budget: 401.000 tokens; per-conversation context limit: 204.800 tokens/);
-  assert.match(html, />180.000 \/ 401.000<\/td>/);
+  assert.match(html, />180.000 \/ 204.800<\/td>/);
   assert.match(html, />100.000 \/ 204.800<\/td>/);
   assert.match(html, /GPU total \(shared budget\)[^]*>370.000 \/ 401.000<\/td>/);
   assert.doesNotMatch(html, /class="mem-num mem-over-budget"/);
@@ -448,7 +484,7 @@ test('the VRAM conversation cap explains fixed overhead and rejects a count belo
   const view = {...live, settings: {...live.settings, concurrent: 2, vram_conversations: 2,
     conversation_bytes: 117683200}};
   const {calls, onChange} = recorder(), {element, fire} = mount(view, onChange);
-  assert.match(element.innerHTML, /Conversations held in VRAM <input/);
+  assert.match(element.innerHTML, /Max conversations in VRAM <input/);
   assert.match(element.innerHTML, /data-setting="vram_conversations" value="2" min="1" max="4"/);
   assert.match(element.innerHTML, /Limits active conversations and idle GPU caches together\. Each takes 112 MiB/);
   assert.match(element.innerHTML, /Rewind checkpoints are allocated separately in RAM as needed/);
@@ -515,7 +551,7 @@ test('suffix mode uses engine labels and is submitted as one mutually exclusive 
       suffix_label: 'Use suffix drafter (0 GiB)', kv_quantization: 'FP8'}};
   const {calls, onChange} = recorder(), {element, fire} = mount(view, onChange);
   assert.match(element.innerHTML, /Use DSpark drafter \(1.5 GiB\)/);
-  assert.match(element.innerHTML, /Discovered drafter: &lt;DSpark&gt;/);
+  assert.match(element.innerHTML, /Discovered drafter: <DSpark>/);
   assert.match(element.innerHTML, /KV cache quantization: FP8/);
   fire('change', {target: control('[data-setting]', {dataset: {setting: 'drafter'}, value: 'suffix'})});
   assert.deepEqual(calls, []);
