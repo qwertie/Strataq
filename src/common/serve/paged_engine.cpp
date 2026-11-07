@@ -2435,7 +2435,7 @@ uint64_t PagedEngine::get_smallest_ram() const {
 uint64_t PagedEngine::get_largest_ram() const {
     const strata::core::PagePool& pool = ram_.pages().pool();
     const uint64_t chunk = pool.chunk_bytes();
-    return (pool.report().total.bytes + get_ram_room(facts_.ram_headroom)) / chunk * chunk + ram_.ring_bytes();
+    return (pool.report().total.bytes + get_ram_room(0)) / chunk * chunk + ram_.ring_bytes();
 }
 
 strata::spec::StepModel PagedEngine::get_step_model() {

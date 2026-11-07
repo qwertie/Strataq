@@ -25,6 +25,8 @@ import { friendlyModelName } from './model-names.mjs';
 import { parseSaved as parseRoles, mirror as mirrorRoles } from './gpu-roles.mjs';
 
 const ROOT=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+/** Allows the server's two 30-second lock waits and five-minute engine reply deadline, plus network time. */
+const MEMORY_CHANGE_TIMEOUT_MS = 370000;
 const safeId=value=>typeof value==='string'&&/^[a-z0-9](?:[a-z0-9_-]|\.(?!\.)){0,79}$/i.test(value);   /* a dot inside the name: deepseek-v4.1-flash-ist-das-2.00bpw */
 const busy=requests=>requests.some(r=>['queued','generating'].includes(r.state));
 function readJson(path,fallback={}){try{return JSON.parse(readFileSync(path,'utf8').replace(/^\uFEFF/,''));}catch{return fallback;}}
@@ -357,7 +359,8 @@ return {summary:result.summary??'Deleted',removed:result.plan?.gb??null};}
  /** Sends a change of a ready model's engine settings, {set, save} (the Memory panel's, or saveThroughServer's), to its
     server's POST /v1/memory. -> {status, body}: the server's answer (200: the new reading; 409: refused, body.error.message says why). */
  async function changeMemory(id,change){
-  const response=await fetchMemory(resolveInstance(id),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(change),signal:AbortSignal.timeout(40000)});
+  const response=await fetchMemory(resolveInstance(id),{method:'POST',headers:{'content-type':'application/json'},
+   body:JSON.stringify(change),signal:AbortSignal.timeout(MEMORY_CHANGE_TIMEOUT_MS)});
   return {status:response.status,body:await response.json().catch(()=>({}))};
  }
  /** Saves a model's settings like save, with the running engine's server as the only writer of the settings that engine

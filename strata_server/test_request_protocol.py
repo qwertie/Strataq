@@ -267,6 +267,17 @@ def test_timed_out_command_reply_cannot_be_mistaken_for_the_next_reply(start_eng
     assert report["settings"]["rows"] == 3
 
 
+def test_settings_allow_a_slower_reply_than_memory_queries(start_engine):
+    engine = start_engine("slow")
+    engine.MEMORY_QUERY_TIMEOUT_S = 0.02
+    engine.SETTINGS_REPLY_TIMEOUT_S = 1.0
+    with pytest.raises(EngineDied, match="did not answer"):
+        engine.memory()
+    report = engine.change_settings({"rows": 2})
+    assert report["settings"]["rows"] == 2
+    assert engine.alive()
+
+
 @pytest.mark.parametrize("mode", ["native", "legacy", "serial"])
 def test_started_retires_queue_deadline_once_before_a_longer_generation(start_engine, mode):
     engine = start_engine(mode)

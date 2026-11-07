@@ -44,6 +44,11 @@ There is no automatic Windows commit reserve. The operating system and allocator
 can still refuse an allocation, which is reported through the existing refusal
 or shortfall response.
 
+Manual RAM resizing uses available physical RAM and remaining commit capacity.
+The headroom used to choose an automatic startup size does not limit manual changes.
+Memory queries wait up to 30 seconds for a reply. Settings changes wait up to
+five minutes, since allocating page-locked memory or moving paused state can take longer.
+
 Blocks may append an identity group and comma-separated unsigned member IDs:
 `MEMORY_BLOCK <memory> <bytes> <category> <pool> <label> <identity-group> <ids>`.
 The group is percent-encoded like the labels. Members within one block have
@@ -79,8 +84,8 @@ change live. Both `context` and `tokens_max` may change in `CHANGE_SETTINGS`,
 but a proposed `context` above either `tokens_max` or `context_capacity` is
 rejected before settings change. Saved defaults use `--conversation-tokens`
 for the per-conversation limit; `--max-context` still sets loaded capacity.
-The memory table shows the shared GPU budget beside GPU counts, each individual
-limit in a tooltip, and the combined GPU count in its footer.
+The memory table shows each conversation's limit beside its token count and
+the shared GPU budget beside the combined count in its footer.
 
 `vram_conversations` limits the number of GPU-resident conversations, including
 idle caches and their fixed regions. Its default leaves one cached place beyond decode concurrency. Qwen gets

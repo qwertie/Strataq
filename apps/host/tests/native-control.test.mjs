@@ -3,6 +3,27 @@ import assert from 'node:assert/strict';
 import {readFileSync,readdirSync,mkdirSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {nativeFixture,finishJob} from './helpers/native-fixture.mjs';
+import {setTimeout as delay} from 'node:timers/promises';
+
+test('memory changes allow a slow allocation reply through the desktop host', async t => {
+ const f = nativeFixture();
+ try {
+  await f.control.refresh(true);
+  const done = await finishJob(f.control, f.control.operation('load', {model: 'iq2_xs', gpus: [0]}).id);
+  assert.equal(done.state, 'done', done.error);
+  const timeout = AbortSignal.timeout.bind(AbortSignal);
+  t.mock.method(AbortSignal, 'timeout', milliseconds => timeout(Math.max(1, milliseconds / 1000)));
+  f.setMemoryServer(async options => {
+   await delay(80, undefined, {signal: options.signal});
+   return Response.json({available: true, settings: {'memory_mib.ram': 12288}});
+  });
+  const answer = await f.control.changeMemory(done.result.instanceId, {set: {'memory_mib.ram': 12288}});
+  assert.equal(answer.status, 200);
+  assert.equal(answer.body.settings['memory_mib.ram'], 12288);
+ } finally {
+  await f.cleanup();
+ }
+});
 test('native instances isolate devices, ports, IDs and private keys; default loading switches one model',async()=>{
  const f=nativeFixture();try{
   await f.control.refresh(true);const load=async args=>{const job=f.control.operation('load',args);const done=await finishJob(f.control,job.id);assert.equal(done.state,'done',done.error);return f.control.resolveInstance(done.result.instanceId);};

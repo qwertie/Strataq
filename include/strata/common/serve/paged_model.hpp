@@ -116,7 +116,6 @@ struct PagedModelFacts {
     /// would hold); empty without a split
     std::vector<strata::core::ExpertKey> split_ranking;
     int64_t gpu_experts = 0;                ///< the most experts the GPUs' pools hold (--expert-cache)
-    uint64_t ram_headroom = 0;              ///< the RAM the RAM pool's largest size leaves free
     /// the adaptive tier (the old engine's --adapt-swaps, --adapt-min-gain and --adapt-decay; the interval is
     /// PagedModel::get_adapt_interval)
     int adapt_swaps = 0;

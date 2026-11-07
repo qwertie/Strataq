@@ -1189,6 +1189,9 @@ class StrataEngine:
             out[f[1]] = None if f[2] == "gone" else array("i", map(int, f[3].split(","))) if len(f) > 3 else array("i")
         return out
 
+    MEMORY_QUERY_TIMEOUT_S = 30.0
+    SETTINGS_REPLY_TIMEOUT_S = 300.0  # Page-locked allocation and paused-state moves can outlast a query.
+
     def memory(self) -> dict:
         """GET /v1/memory: `GET_MEMORY_USE` (an engine whose READY says "memory";
         include/strata/common/serve/memory_report.hpp) - what the engine holds in each memory and its settings:
@@ -1216,6 +1219,7 @@ class StrataEngine:
         memories, settings, held, shortfall, pause_directory = [], {}, [], None, None
         details = {}
         for f in self._ask(command, "MEMORY", end="END_MEMORY",
+                           timeout=self.SETTINGS_REPLY_TIMEOUT_S if refused else self.MEMORY_QUERY_TIMEOUT_S,
                            also=("SETTINGS", "CONVERSATION", "SHORTFALL", "MEMORY_BLOCK",
                                  "PAUSE_DIRECTORY", "MEMORY_DETAIL"),
                            refused=refused):

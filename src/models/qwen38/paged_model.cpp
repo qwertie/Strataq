@@ -481,7 +481,6 @@ PagedQwen::PagedQwen(Model& m, Conversation& conv, const PagedCards& cards, Mode
     for (size_t i = 0; i < m.profile_all.size() && (int64_t) i < o.expert_cache; ++i)
         facts.split_ranking.push_back({m.profile_all[i].first, m.profile_all[i].second});
     facts.gpu_experts = o.expert_cache;
-    facts.ram_headroom = o.resident_headroom;
     facts.adapt_swaps = o.adapt_swaps;
     facts.adapt_min_gain = o.adapt_min_gain;
     facts.adapt_decay = o.adapt_decay;
