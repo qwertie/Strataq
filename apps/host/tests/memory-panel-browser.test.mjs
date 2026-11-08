@@ -118,7 +118,7 @@ test('context selection retains scroll position and shows snippets and individua
       const labels = await page.locator('.mem-controls label').evaluateAll(elements =>
         elements.map(element => ({width: element.getBoundingClientRect().width,
           top: element.getBoundingClientRect().top})));
-      assert.ok(labels.every(label => label.width === 229));
+      assert.ok(labels.every(label => label.width === 212));
       assert.ok(labels.slice(0, 5).every(label => label.top === labels[0].top));
     } finally {
       release();

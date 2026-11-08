@@ -39,7 +39,7 @@
 .mem-preview.mem-refused, .mem-notice.mem-error { color: var(--st-danger-text); }
 .mem-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--st-s-2) var(--st-s-4);
                 margin-top: var(--st-s-4); font-size: var(--st-fs-sm); }
-.mem-controls label { display: flex; flex-direction: column; gap: 6px; width: 229px; max-width: 100%; }
+.mem-controls label { display: flex; flex-direction: column; gap: 6px; width: 212px; max-width: 100%; }
 .mem-controls label.mem-switch { flex-direction: row; align-items: center; }
 .mem-actions { margin-top: var(--st-s-4); }
 .mem-input { width: 100%; max-width: 100%; box-sizing: border-box; height: auto; min-height: 0; padding: 2px 6px; }
