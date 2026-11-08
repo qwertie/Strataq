@@ -382,7 +382,7 @@ function drawControls(panel) {
     fields.push(drawDrafterControl(s, panel.view.details, off));
   if (s.save_on_shutdown != null) {
     const help = esc(getControlHelp("save_on_shutdown", s));
-    fields.push(`<label data-control="save_on_shutdown" title="${help}"><input type="checkbox" ` +
+    fields.push(`<label class="mem-switch" data-control="save_on_shutdown" title="${help}"><input type="checkbox" ` +
       `data-setting="save_on_shutdown"${s.save_on_shutdown ? " checked" : ""}${off}> ` +
       `${esc(SETTINGS.save_on_shutdown)}</label>`);
   }

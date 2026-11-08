@@ -166,7 +166,14 @@ std::vector<std::string> find_stale_pause_files(const std::string& dir, std::vec
         const uint64_t pid = std::strtoull(name.c_str() + sizeof kPausePrefix - 1, &pid_end, 10);
         if (*pid_end != '-' || pid == 0 || !f.is_regular_file(ec) || f.is_symlink(ec))
             continue;
-        if (!strata::platform::is_process_running(pid))
+        // the writer's start (get_pause_file_prefix): a process with its id that began later is not the writer
+        char* start_end = nullptr;
+        const long long start = std::strtoll(pid_end + 1, &start_end, 10);
+        using clock = std::chrono::system_clock;
+        const auto began_by = start_end != pid_end + 1 && *start_end == '-'
+                                  ? clock::time_point(clock::duration(start))
+                                  : clock::time_point::max();
+        if (!strata::platform::is_process_running(pid, began_by))
             files.push_back(f.path().string());
         else if (running)
             running->push_back(f.path().string());

@@ -9,6 +9,7 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -247,8 +248,10 @@ inline uint64_t get_process_id() {
     return (uint64_t) ::getpid();
 #endif
 }
-/// Tells whether a process of id `pid` runs now (one of another user counts too).
-inline bool is_process_running(uint64_t pid) {
+/// Tells whether a process of id `pid` runs now (one of another user counts too).  On Windows, which reuses ids
+/// soon, a process that began after `began_by` only has the id of the one asked about, so it does not count.
+inline bool is_process_running(
+    uint64_t pid, std::chrono::system_clock::time_point began_by = std::chrono::system_clock::time_point::max()) {
     if (pid == 0 || pid > (uint64_t) INT32_MAX)   // (no process has it; kill(0) would ask about the process group)
         return false;
 #if defined(_WIN32)
@@ -256,7 +259,16 @@ inline bool is_process_running(uint64_t pid) {
     if (h == nullptr)
         return GetLastError() == ERROR_ACCESS_DENIED;
     DWORD code = 0;
-    const bool running = GetExitCodeProcess(h, &code) && code == STILL_ACTIVE;
+    FILETIME created, exited, kernel, user;
+    bool running = GetExitCodeProcess(h, &code) && code == STILL_ACTIVE;
+    if (running && GetProcessTimes(h, &created, &exited, &kernel, &user)) {
+        // FILETIME counts 100 ns steps from 1601; 116444736000000000 of them come before 1970
+        const ULARGE_INTEGER t{{created.dwLowDateTime, created.dwHighDateTime}};
+        const std::chrono::duration<int64_t, std::ratio<1, 10000000>> since_1970((int64_t) t.QuadPart -
+                                                                                   116444736000000000LL);
+        running = std::chrono::system_clock::time_point(
+                      std::chrono::duration_cast<std::chrono::system_clock::duration>(since_1970)) <= began_by;
+    }
     CloseHandle(h);
     return running;
 #else

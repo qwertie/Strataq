@@ -5,6 +5,9 @@
 // larger one, to a file, and back.
 #include "strata/common/state/pool_copy.hpp"
 
+#include "strata/base/platform/os.hpp"
+
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -189,6 +192,17 @@ int main() {
               running == std::vector<std::string>{mine} && std::filesystem::exists(mine) &&
               std::filesystem::exists(gone) && std::filesystem::exists(other),
           "only files of a dead process are offered for adoption, without deletion; a live one's are named");
+#if defined(_WIN32)
+    // a file of this process's id from before it began: a process that ran earlier with the same id wrote it
+    const std::string mine_id = "paused-" + std::to_string(strata::platform::get_process_id());
+    const std::filesystem::path reused = dir / (mine_id + "-1-1.bin"), unstamped = dir / (mine_id + "--1.bin");
+    for (const std::filesystem::path& f : {reused, unstamped})
+        std::fclose(std::fopen(f.string().c_str(), "wb"));
+    std::vector<std::string> stale{gone.string(), reused.string()};
+    std::sort(stale.begin(), stale.end());
+    check(find_stale_pause_files(dir.string()) == stale,
+          "a file whose process id was reused by a later process is offered for adoption; an unstamped one is not");
+#endif
     check(find_stale_pause_files((dir / "missing").string()).empty(),
           "a missing pause directory does not fail discovery");
     std::filesystem::remove_all(dir);
