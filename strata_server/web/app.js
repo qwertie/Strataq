@@ -287,7 +287,7 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
       detail = `${fmt(live.prompt_tokens)} tokens`;
     }
   } else if (live.state === "generating") {
-    label = live.phase ? live.phase[0].toUpperCase() + live.phase.slice(1) : "Generating";
+    label = live.phases.map(p => p[0].toUpperCase() + p.slice(1)).join("; ") || "Generating";
     delete prog.dataset.tone;
     pct = live.max_tokens ? Math.min(100, (100 * live.generated) / live.max_tokens) : 0;
     detail = `${fmt(live.generated)} tokens · ${fmt(live.tok_s, 1)} tok/s`;
@@ -299,7 +299,7 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
   stateLabel.textContent = label;
   if (live.state === "reading" && live.request) stateLabel.href = `api-monitor#${encodeURIComponent(live.request)}`;
   else stateLabel.removeAttribute("href");
-  stateLabel.title = live.state === "reading" ? describeReading(live) : "";
+  stateLabel.title = live.state === "reading" ? describeReading(live) : live.state === "generating" ? label : "";
   $("state-detail").textContent = detail;
   $("state-bar").style.width = `${pct}%`;
 

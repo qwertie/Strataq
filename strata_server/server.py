@@ -2198,6 +2198,9 @@ class Service:
         else:
             state = "idle"
         live = {"state": state, "queued": s.get("queued", 0), "phase": s.get("phase") if s.get("busy") else None,
+                # the phase of every request past its prompt, oldest first (`phase` is only the newest request's)
+                "phases": [x.get("phase") or "generating" for x in running_st or [s]
+                           if x.get("busy") and x.get("first_token")],
                 "prompt_tokens": s.get("prompt_tokens") if s.get("busy") else None,
                 "prompt_read": None, "prompt_total": None, "generated": s.get("generated") if s.get("busy") else None,
                 "max_tokens": s.get("max_tokens") if s.get("busy") else None,

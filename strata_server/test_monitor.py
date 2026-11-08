@@ -274,6 +274,13 @@ class Monitor(unittest.TestCase):
         self.assertEqual(self.svc._find_reading_request(running[-1], running, slots),
                          {"request": "m1", "prompt_reused": 7})
 
+    def test_metrics_list_the_phase_of_each_generating_request(self):
+        self.svc.live_reqs.update({k: ({"busy": True, "generated": 1, "first_token": first, "phase": phase}, [])
+                                   for k, first, phase in ((1, 1.0, "thinking"), (2, None, "reading the prompt"),
+                                                           (3, 2.0, "writing a tool call: Bash"))})
+        self.addCleanup(self.svc.live_reqs.clear)
+        self.assertEqual(self.svc.metrics()["live"]["phases"], ["thinking", "writing a tool call: Bash"])
+
     def test_context_of_an_engine_that_cannot_list_it(self):
         code, body = self.request("/api/context")
         self.assertEqual(code, 200)
