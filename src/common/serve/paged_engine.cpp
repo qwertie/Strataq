@@ -302,8 +302,10 @@ private:
     /// holds nothing after.  `ram_only`: into the RAM's pool beyond that budget, or not at all (move_cut).  False (and
     /// `err`) when a copy failed or the RAM's pool had no room for it: then `h` keeps its conversation.
     bool pause(Held& h, std::string& err, bool ram_only = false);
-    /// Puts paused conversation `p` back in `h`, which holds nothing: its pages, then the model's state beside them.
-    bool resume(const Paused& p, Held& h, std::string& err,
+    /// Puts paused conversation `p` back in `h`, which holds nothing: the pages of its first `tokens` tokens (a request
+    /// that branches off before its end needs no more room than that), then the model's state beside them
+    /// (PagedModel::restore_state).  Short of its end, the caller then rewinds it to `tokens`.
+    bool resume(const Paused& p, Held& h, int64_t tokens, std::string& err,
                 std::optional<int64_t> priority = std::nullopt);
     /// Moves the lowest-priority conversation paused in RAM to the SSD (forgetting it when the copy fails); false when
     /// none is there.
@@ -1334,7 +1336,7 @@ int64_t PagedEngine::take_conversation(size_t target, const std::vector<int64_t>
     if ((p || most == 0) && !h.live.empty())
         pause_or_forget(h);
     if (p) {
-        const bool ok = resume(*p, h, err, priority);
+        const bool ok = resume(*p, h, most, err, priority);
         if (whole || !model_.keeps_rewind_branch(h.parts, most)) {
             drop_pages(*p);
         } else {   // it stays paused whole; the pauses that made room for it did not count its bytes
@@ -1356,7 +1358,9 @@ int64_t PagedEngine::take_conversation(size_t target, const std::vector<int64_t>
         h.forget();
         return 0;
     }
-    say("a conversation of %zu tokens goes back to token %lld\n", h.live.size(), (long long) most);
+    const auto differs = std::mismatch(h.live.begin(), h.live.end(), ids.begin(), ids.end()).first;
+    say("a conversation of %zu tokens goes back to token %lld (the new prompt differs from token %lld)\n",
+        h.live.size(), (long long) most, (long long) (differs - h.live.begin()));
     h.live.resize((size_t) most);
     h.gpu_tokens.shrink_to((uint64_t) most);
     for (const std::unique_ptr<PagedPart>& part : h.parts)
@@ -1524,11 +1528,12 @@ bool PagedEngine::pause(Held& h, std::string& err, bool ram_only) {
     return true;
 }
 
-bool PagedEngine::resume(const Paused& p, Held& h, std::string& err, std::optional<int64_t> priority) {
+bool PagedEngine::resume(const Paused& p, Held& h, int64_t tokens, std::string& err,
+                         std::optional<int64_t> priority) {
     const Clock::time_point t0 = Clock::now();
     const std::vector<int32_t>& live = p.head.live;
-    // Restoring precedes rewind: a fork whose shorter prefix fits may still need a fresh prompt read.
-    if ((!h.has_pages() && !init_pages(h, err, priority)) || !make_room(h, (int64_t) live.size(), err, priority))
+    // the copies below take as many first blocks as `h` holds
+    if ((!h.has_pages() && !init_pages(h, err, priority)) || !make_room(h, tokens, err, priority))
         return false;
     strata::core::PagePool& ram = ram_.pages().pool();
     strata::core::PauseStream file;
@@ -1540,8 +1545,8 @@ bool PagedEngine::resume(const Paused& p, Held& h, std::string& err, std::option
     // sections of cards at another cut come together in the RAM's pool, whose layout has every layer
     const bool through_ram = !p.file.empty() && p.head.cut != get_cut();
     if (through_ram) {
-        const int64_t tokens = h.parts[0]->get_pool_tokens((int64_t) live.size());
-        if (const std::string why = ram.grow_conversation(p.serial, tokens); !why.empty()) {
+        const int64_t whole = h.parts[0]->get_pool_tokens((int64_t) live.size());   // (sections are read whole)
+        if (const std::string why = ram.grow_conversation(p.serial, whole); !why.empty()) {
             err = "the RAM's pool has no room for a conversation paused before the layer cut moved: " + why;
             return false;
         }
@@ -1566,7 +1571,7 @@ bool PagedEngine::resume(const Paused& p, Held& h, std::string& err, std::option
     }
     if (through_ram)
         ram.remove_conversation(p.serial);
-    if (!ok || !model_.restore_state(p.file.empty() ? p.head.state : saved.state, h.parts, live, err))
+    if (!ok || !model_.restore_state(p.file.empty() ? p.head.state : saved.state, h.parts, live, tokens, err))
         return false;
     h.policy = p.policy;
     h.live = live;
@@ -2158,7 +2163,7 @@ bool PagedEngine::move_cut(const std::vector<int64_t>& cut, std::string& err) {
                 continue;
             }
             std::string why;
-            const bool ok = resume(p, *h, why);
+            const bool ok = resume(p, *h, (int64_t) p.head.live.size(), why);
             drop_pages(p);
             if (ok)
                 continue;

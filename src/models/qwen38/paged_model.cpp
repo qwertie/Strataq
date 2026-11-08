@@ -194,7 +194,7 @@ public:
     void start_request(int session, const strata::serve::RequestStart& r) override;
     bool save_state(const PagedParts& parts, std::vector<uint8_t>& state, std::string& err) const override;
     bool restore_state(const std::vector<uint8_t>& state, const PagedParts& parts, const std::vector<int32_t>& live,
-                       std::string& err) const override;
+                       int64_t kept, std::string& err) const override;
     bool keeps_rewind_branch(const PagedParts& parts, int64_t tokens) const override;
     std::vector<int64_t> get_rewind_points(const PagedParts& parts) const override;
     uint64_t get_host_state_bytes(const PagedParts& parts) const override {
@@ -902,7 +902,7 @@ bool PagedQwen::save_state(const PagedParts& parts, std::vector<uint8_t>& state,
 }
 
 bool PagedQwen::restore_state(const std::vector<uint8_t>& state, const PagedParts& parts,
-                              const std::vector<int32_t>& live, std::string& err) const {
+                              const std::vector<int32_t>& live, int64_t kept, std::string& err) const {
     strata::core::StateReader reader{state};
     std::vector<uint8_t> running;
     std::vector<Checkpoint> checks;
@@ -915,7 +915,8 @@ bool PagedQwen::restore_state(const std::vector<uint8_t>& state, const PagedPart
         err = "the paused conversation's rewind directory is damaged";
         return false;
     }
-    if (!restore_running_state(running, parts, live, err))
+    // (the running state after all of `live` has dead rows that would be written past the pages of `kept` tokens)
+    if ((size_t) kept == live.size() && !restore_running_state(running, parts, live, err))
         return false;
     get_part(*parts.front()).checks = std::move(checks);
     return true;

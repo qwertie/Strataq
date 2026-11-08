@@ -349,7 +349,7 @@ public:
     void start_request(int session, const strata::serve::RequestStart& r) override;
     bool save_state(const PagedParts& parts, std::vector<uint8_t>& state, std::string& err) const override;
     bool restore_state(const std::vector<uint8_t>& state, const PagedParts& parts, const std::vector<int32_t>& live,
-                       std::string& err) const override;
+                       int64_t kept, std::string& err) const override;
     bool get_session_identity(strata::core::SessionFileIdentity& id, std::string& err) const override {
         std::vector<strata::core::SessionModelFile> files;
         for (const char* name : {"ds4.txt", "tensors.txt", "engram.bin"})
@@ -862,7 +862,7 @@ bool PagedDeepSeek::save_state(const PagedParts& parts, std::vector<uint8_t>& st
 }
 
 bool PagedDeepSeek::restore_state(const std::vector<uint8_t>& state, const PagedParts& parts,
-                                  const std::vector<int32_t>& live, std::string& err) const {
+                                  const std::vector<int32_t>& live, int64_t, std::string& err) const {
     Part& p = get_part(*parts[0]);
     ConversationState s;
     if (!decode_state(state, s, err))

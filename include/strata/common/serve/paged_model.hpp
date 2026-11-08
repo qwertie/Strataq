@@ -226,10 +226,11 @@ public:
     /// leave the cards' pools.
     virtual bool save_state(const PagedParts& parts, std::vector<uint8_t>& state, std::string& err) const = 0;
     /// Puts `state` (save_state's) back into `parts`, each card its layers', which may be another cut's than when it
-    /// was saved; `live` are the conversation's tokens.  The engine calls it as it resumes the conversation, after
-    /// its pages are back.
+    /// was saved; `live` are the conversation's tokens, of which its pages hold the first `kept`.  With fewer than all
+    /// of them, a rewind to `kept` follows, so the state that belongs after all of `live` need not be put back.  The
+    /// engine calls it as it resumes the conversation, after its pages are back.
     virtual bool restore_state(const std::vector<uint8_t>& state, const PagedParts& parts,
-                               const std::vector<int32_t>& live, std::string& err) const = 0;
+                               const std::vector<int32_t>& live, int64_t kept, std::string& err) const = 0;
     /// Gets what a conversation saved to a file (a pause file on the SSD, a saved session) is bound to into `id`: a
     /// fingerprint of the model's files, and one of the settings that change what the saved bytes mean.  False (and
     /// `err`) when a model file cannot be read.  The engine asks once, when it first needs an identity.
