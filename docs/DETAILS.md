@@ -723,8 +723,9 @@ checkpoint layout and slot count; earlier paged Qwen files and files with anothe
 On startup these engines scan `--pause-dir` for regular `paused-<pid>-*.bin` files whose process no longer runs.
 They check the whole-file checksum, model and settings fingerprints, context limit and layer cut before adopting
 a file. Adoption renames it under the new process's prefix and counts it against `--ssd-pause-mib`. Files beyond
-that budget are deleted by the usual lowest-priority, least-recently-used rule; recovered files have priority zero
-and rank by when they last took tokens, the most recent highest. The engine logs one line per file it leaves, with
+that budget are deleted by the usual lowest-priority, least-recently-used rule, but only at the next pause, so the
+first requests after a start can still find their conversations among all of them; recovered files have priority
+zero and rank by when they last took tokens, the most recent highest. The engine logs one line per file it leaves, with
 the reason, and one line for those it adopted. Files belonging to a live process (including a reused PID), links,
 damaged or incompatible files, and unfinished `.tmp` files are left alone. Remove those manually when no engine
 uses the directory. An unreadable directory or file does not prevent startup.

@@ -228,8 +228,9 @@ private:
     /// prompt starts with its tokens continues it, reading only the rest.  When the file was refused or could not be
     /// copied, nothing changed.
     void restore_session(const std::string& path);
-    /// Claims compatible orphaned SSD pauses, the most recently active ranked highest, and says why it leaves each
-    /// other pause file in `dir` (unreadable, foreign, or its engine still runs); those stay untouched.
+    /// Claims compatible orphaned SSD pauses, the most recently active ranked highest, even beyond --ssd-pause-mib
+    /// (trim_ssd waits for the next pause), and says why it leaves each other pause file in `dir` (unreadable,
+    /// foreign, or its engine still runs); those stay untouched.
     void adopt_pause_files(const std::string& dir);
     /// Moves every conversation in the GPUs' and the RAM's pools to the SSD, the highest ranked first (find_lowest's
     /// order) up to --ssd-pause-mib, and lets go of the files so that ~PagedEngine leaves them for the next start
@@ -840,9 +841,11 @@ void PagedEngine::adopt_pause_files(const std::string& dir) {
         bytes += p->bytes;
     }
     if (paused_.size() > first)
-        say("adopted %zu paused conversations (%.1f GiB) from %s\n", paused_.size() - first,
-            (double) bytes / 1073741824.0, dir.c_str());
-    trim_ssd();
+        say("adopted %zu paused conversations (%.1f GiB) from %s%s\n", paused_.size() - first,
+            (double) bytes / 1073741824.0, dir.c_str(),
+            get_paused_bytes(false) > ((uint64_t) settings_.ssd_pause_mib << 20)
+                ? ", more than --ssd-pause-mib: the lowest ranked go at the next pause"
+                : "");
 }
 
 void PagedEngine::save_conversations_for_restart() {
