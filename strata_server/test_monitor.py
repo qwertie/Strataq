@@ -291,6 +291,28 @@ class Monitor(unittest.TestCase):
         self.assertEqual(self.chat()[0], 200)
         self.assertIsNone(self.svc.metrics()["live"]["error"])
 
+    def test_a_request_waiting_for_its_turn_does_not_show_a_finished_prompt_as_read(self):
+        """With parallel requests the header showed "Reading prompt 100%" for minutes: the newest request only waited
+        for its turn, and the engine's one prompt counter still held the last prompt it had finished reading."""
+        self.svc.live_reqs.update({1: ({"busy": True, "generated": 40, "first_token": 1.0, "phase": "thinking",
+                                        "request_id": "a"}, []),
+                                   2: ({"busy": True, "generated": 0, "first_token": None, "prompt_tokens": 9000,
+                                        "request_id": "b"}, [])})
+        self.addCleanup(self.svc.live_reqs.clear)
+        waiting = [{"slot": 0, "state": "generating", "request_id": "a"},
+                   {"slot": 1, "state": "queued", "request_id": "b", "prompt_tokens": 9000}]
+        with mock.patch.object(self.engine, "batch", 2, create=True), \
+             mock.patch.object(self.engine, "progress", (122281, 122282), create=True), \
+             mock.patch.object(self.engine, "slots_view", return_value=waiting, create=True):
+            live = self.svc.metrics()["live"]
+            self.assertEqual((live["state"], live["generated"]), ("generating", 40))
+            waiting[1].update(state="reading", prompt_read=2048)
+            live = self.svc.metrics()["live"]
+            self.assertEqual((live["state"], live["prompt_read"], live["prompt_total"]), ("reading", 2048, 9000))
+            waiting[:] = [{"slot": 0, "state": "busy"}, {"slot": 1, "state": "busy"}]    # replicas without slots
+            live = self.svc.metrics()["live"]
+            self.assertEqual((live["state"], live["prompt_read"]), ("reading", 122281))
+
     def test_requests_the_engine_holds_back_count_as_queued(self):
         slots = [{"slot": 0, "state": "generating"}, {"slot": 1, "state": "queued"}, {"slot": 2, "state": "queued"}]
         with mock.patch.object(self.engine, "batch", 2, create=True), \

@@ -2182,16 +2182,27 @@ class Service:
     def metrics(self, all_requests=False) -> dict:
         """GET /metrics: what the Monitor tab shows - the engine's facts, what it is doing, the last requests, and
         the hardware (with a minute of history per series)."""
+        par = int(getattr(self.engine, "batch", 0) or 0)
+        slots = (self.engine.slots_view() if hasattr(self.engine, "slots_view") else []) if par else None
+        reading = next((x for x in slots or [] if x["state"] == "reading"), None)
+        # Whether the slots say which prompt is read: a replica without slots only says "busy" (replicas.slots_view).
+        slots_tell_reading = slots is not None and all(x["state"] != "busy" for x in slots)
         with self.status_lock:
             s = dict(self.status)
             running_st = [dict(st) for st, _ in self.live_reqs.values()]
             if running_st:                              # parallel requests: the newest one's status
-                s = {**s, **running_st[-1], "queued": s.get("queued", 0)}
+                shown = running_st[-1]
+                if slots_tell_reading and reading is None and shown.get("first_token") is None:
+                    # it only waits for its turn: the newest one generating says what the engine does
+                    shown = next((x for x in reversed(running_st) if x.get("first_token")), shown)
+                s = {**s, **shown, "queued": s.get("queued", 0)}
             hist = list(self.history)
             totals = dict(self.totals)
             last_error = self.last_error
         now = time.time()
-        progress = getattr(self.engine, "progress", None)
+        # with parallel requests, the reading slot's own count: the engine's one counter may be a finished prompt's
+        progress = (reading.get("prompt_read") or 0, reading["prompt_tokens"]) if reading else \
+            None if slots_tell_reading else getattr(self.engine, "progress", None)
         if s.get("busy") and s.get("first_token") is None:
             state = "reading"
         elif s.get("busy"):
@@ -2214,11 +2225,9 @@ class Service:
                 "tok_s_window_s": RATE_WINDOW_S if state == "generating" else None}
         if state == "reading" and progress:
             live["prompt_read"], live["prompt_total"] = progress
-        par = int(getattr(self.engine, "batch", 0) or 0)
         if par:                                         # #465: the requests running together, slot by slot
             with self.status_lock:
                 running = len(self.live_reqs)
-            slots = self.engine.slots_view() if hasattr(self.engine, "slots_view") else []
             # Requests waiting in the server have no engine-side metrics entry yet.
             in_slots = sum(1 for x in slots if x["state"] != "idle")
             # Requests the engine holds back until it has room count as queued, like those waiting in the server.
