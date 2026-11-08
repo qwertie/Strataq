@@ -35,6 +35,8 @@ int take_paged_options(int& argc, char** argv, const std::string& program, Paged
                        {"--conversation-tokens", &s.conversation_context},
                        {"--vram-conversations", &s.vram_conversations},
                        {"--conversation-idle-seconds", &s.conversation_idle_seconds},
+                       {"--decode-share-percent", &s.decode_share_percent},
+                       {"--prompt-turn-ms", &s.prompt_turn_ms},
                        {"--gpu-mib", nullptr, &gpu_mib},      {"--ram-mib", &s.ram_mib},
                        {"--ssd-pause-mib", &s.ssd_pause_mib}, {"--rows", &rows},
                        {"--mtp-max-t", &mtp_rows},            {"--lookup-chain", &s.lookup_chain},
@@ -73,6 +75,8 @@ int take_paged_options(int& argc, char** argv, const std::string& program, Paged
     s.drafter = drafter == "on";
     s.step.model_lookahead = mtp_rows > 0 ? (int) std::min<int64_t>(mtp_rows - 1, 7) : -1;
     s.suffix_draft = std::clamp<int64_t>(s.suffix_draft, 0, INT32_MAX);
+    s.decode_share_percent = std::clamp<int64_t>(s.decode_share_percent, 0, INT32_MAX);
+    s.prompt_turn_ms = std::clamp<int64_t>(s.prompt_turn_ms, 0, INT32_MAX);
     s.lookup_chain = std::clamp<int64_t>(s.lookup_chain, 0, 7);
     s.lookup_chain_min = std::clamp<int64_t>(s.lookup_chain_min, 3, INT32_MAX);
     if (s.batch_groups != "auto" && (s.batch_groups.empty() ||

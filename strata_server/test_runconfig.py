@@ -37,6 +37,14 @@ class Apply(unittest.TestCase):
         with self.assertRaises(ValueError):
             runconfig.check_live({"conversation_idle_seconds": -1}, True)
 
+    def test_prompt_read_sharing_is_saved_and_takes_whole_numbers(self):
+        values = runconfig.check_live({"decode_share_percent": 0, "prompt_turn_ms": 20000}, True)
+        new, changed = runconfig.apply_live({"args": []}, values)
+        self.assertEqual(new["args"], ["--decode-share-percent", "0", "--prompt-turn-ms", "20000"])
+        self.assertEqual(changed, ["decode_share_percent", "prompt_turn_ms"])
+        with self.assertRaises(ValueError):
+            runconfig.check_live({"prompt_turn_ms": -1}, True)
+
     def test_live_residency_default_survives_a_restart_without_changing_concurrency(self):
         values = runconfig.check_live({"vram_conversations": 3}, True)
         new, changed = runconfig.apply_live({"args": ["--concurrent", "2"]}, values)

@@ -52,6 +52,7 @@ LIVE_FLAGS = {"memory_mib.gpu0": "--gpu-mib", "memory_mib.ram": "--ram-mib", "to
               "context": "--conversation-tokens",
               "vram_conversations": "--vram-conversations",
               "conversation_idle_seconds": "--conversation-idle-seconds",
+              "decode_share_percent": "--decode-share-percent", "prompt_turn_ms": "--prompt-turn-ms",
               "tokens_max": "--tokens-max", "ssd_pause_mib": "--ssd-pause-mib", "rows": "--rows",
               "suffix_draft": "--suffix-draft", "lookup_chain": "--lookup-chain",
               "lookahead": "--lookahead", "concurrent": "--concurrent", "drafter": "--drafter"}

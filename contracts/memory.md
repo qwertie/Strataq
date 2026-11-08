@@ -119,6 +119,13 @@ and decoding requests are excluded, and queued GPU state writes drain before
 copying or releasing pages. A zero age makes all idle caches eligible immediately.
 The hard count limit may reclaim newer conversations when necessary.
 
+`decode_share_percent` (`--decode-share-percent`, default 50) and `prompt_turn_ms` (`--prompt-turn-ms`, default
+0) decide how a prompt read shares the GPU with conversations that decode. The read goes in turns of whole chunks,
+each at least `prompt_turn_ms` long (0: one chunk); after each turn but the last, the decoding conversations take
+steps for `decode_share_percent` of the turn's time. 0 percent makes them wait for the whole prompt. It is the old
+engine's `STRATA_BATCH_DECODE_SHARE` in percent. A STOP, a pending CHANGE_SETTINGS and the progress line are still
+handled after every chunk.
+
 RAM checkpoints are serialized inside the shared pause-file host header, so named
 SAVE/RESTORE and automatic SSD pauses retain them. Disk-paused payloads are released
 from RAM after writing and read back on resume. Qwen uses layout identity 4; files

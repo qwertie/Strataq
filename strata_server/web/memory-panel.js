@@ -54,6 +54,8 @@ const CHANGED_KEY = "strata.memoryPanel.changed";
 const SETTINGS = {context: "Per-conversation token limit", concurrent: "Conversations at once", rows: "Rows per step",
                   vram_conversations: "Max conversations in VRAM",
                   conversation_idle_seconds: "Idle conversation eviction age (sec)",
+                  decode_share_percent: "Decoding while a prompt is read (%)",
+                  prompt_turn_ms: "Prompt reading turn (ms)",
                   lookahead: "Max lookahead", tokens_min: "Min conversation tokens",
                   tokens_max: "Max conversation tokens", ssd_pause_mib: "SSD for paused conversations (MiB)",
                   drafter: "Drafter", slots: "Maximum conversations at once"};
@@ -70,6 +72,8 @@ const CONTROLS = [["context", () => 1, (s) => s.context_capacity ?? s.context ??
                   ["concurrent", () => 1, (s) => Math.min(s.slots ?? 8, s.rows ?? 8, s.vram_conversations ?? Infinity)],
                   ["vram_conversations", () => 1, (s) => s.slots ?? 8],
                   ["conversation_idle_seconds", () => 0, () => Infinity],
+                  ["decode_share_percent", () => 0, () => Infinity],
+                  ["prompt_turn_ms", () => 0, () => Infinity],
                   ["rows", (s) => s.concurrent ?? 1, () => 8],
                   ["lookahead", () => 0, (s) => (s.rows ?? 1) - 1],
                   ["tokens_min", () => 0, (s) => s.tokens_max ?? Infinity],
@@ -441,6 +445,13 @@ function getControlHelp(key, settings, details = {}) {
   if (key === "conversation_idle_seconds")
     return "Idle GPU conversations this old may move to RAM or SSD when experts or another conversation need space. " +
       "Prompt-processing and decoding requests are protected; age alone does not evict anything.";
+  if (key === "decode_share_percent")
+    return "While a prompt is read, the conversations that are answering take turns with it: after each turn of " +
+      "reading they generate for this percentage of the time the turn took. 0 makes them wait for the whole prompt; " +
+      "more lets them answer faster and the prompt read slower.";
+  if (key === "prompt_turn_ms")
+    return "The least time a prompt is read before the answering conversations get their turn. 0 means one chunk " +
+      "of the prompt. Longer turns switch less often between reading and answering.";
   if (key === "vram_conversations")
     return "Limits active conversations and idle GPU caches together. " +
       (settings.conversation_bytes ? `Each takes ${size(settings.conversation_bytes)} of fixed state ` +

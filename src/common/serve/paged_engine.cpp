@@ -46,10 +46,6 @@ using Clock = std::chrono::steady_clock;
 template <class F>
 auto time_step_if(bool enabled, double& elapsed, F&& operation) -> decltype(operation());
 
-/// Between two chunks of a prompt, the conversations that decode take steps for this share of the time the chunk
-/// took, so that a long prompt does not stop them (the old engine's STRATA_BATCH_DECODE_SHARE default).
-constexpr double kDecodeShare = 0.5;
-
 /// Gets the milliseconds from `t0` to now.
 double get_ms_since(Clock::time_point t0) {
     return std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
@@ -245,8 +241,9 @@ private:
     /// get_session_identity) and the layout of the pages.  False (and `err`) when the model files cannot be read.
     bool find_identity(std::string& err);
     /// Reads `ids[from, to)` into `h` (the request began at `t0`); `read_to` gets how far it got.  Conversations that
-    /// decode meanwhile take steps between the prompt's chunks (kDecodeShare).  False with `err` "cancelled" after a
-    /// STOP, else on a failure that ends the engine (`fatal`: a decode step failed, its ERR printed).
+    /// decode meanwhile take steps between the prompt's turns (PagedSettings::decode_share_percent and
+    /// prompt_turn_ms).  False with `err` "cancelled" after a STOP, else on a failure that ends the engine (`fatal`:
+    /// a decode step failed, its ERR printed).
     bool read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t from, int64_t to, Clock::time_point t0,
                      int64_t& read_to, bool& fatal, std::string& err);
     /// Runs one step of the selected conversations and prints what it emitted; false (ERR printed) ends the engine.
@@ -1089,21 +1086,24 @@ bool PagedEngine::read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t 
             return true;
         return false;
     };
-    // beside conversations that decode, a chunk at a time, and they decode between two chunks
+    // beside conversations that decode, a chunk at a time, and they decode between two turns of whole chunks
     const int64_t piece = std::max<int64_t>(model_.get_prompt_chunk(), 1);
     bool ok = true;
+    Clock::time_point turn = Clock::now();
     for (int64_t q = from; ok && q < to; q += piece) {
-        const Clock::time_point tq = Clock::now();
         ok = model_.wait_state(err) &&
              model_.read_prompt(h.parts, ids, q, std::min(piece, to - q), is_model_drafting(), on_chunk, err);
-        const double budget_ms = kDecodeShare * get_ms_since(tq);
+        const double turn_ms = get_ms_since(turn);
+        if (q + piece >= to || turn_ms < (double) settings_.prompt_turn_ms)
+            continue;
+        const double budget_ms = (double) settings_.decode_share_percent / 100.0 * turn_ms;
         const Clock::time_point td = Clock::now();
-        while (ok && q + piece < to && is_decoding() && can_decode_while_reading() &&
-               get_ms_since(td) < budget_ms) {
+        while (ok && is_decoding() && can_decode_while_reading() && get_ms_since(td) < budget_ms) {
             poll_cancellations();
             fatal = !decode_step();
             ok = !fatal;
         }
+        turn = Clock::now();
     }
     reading_ = nullptr;
     return ok;
@@ -1869,6 +1869,8 @@ strata::serve::MemoryReport PagedEngine::describe_memory() const {
                        {"concurrent", settings_.step.concurrent},
                        {"vram_conversations", settings_.vram_conversations},
                        {"conversation_idle_seconds", settings_.conversation_idle_seconds},
+                       {"decode_share_percent", settings_.decode_share_percent},
+                       {"prompt_turn_ms", settings_.prompt_turn_ms},
                        {"slots", get_most_concurrent()},
                        {"rows", settings_.step.rows},
                        {"lookahead", settings_.step.lookahead},
@@ -1940,6 +1942,10 @@ std::string PagedEngine::change_settings(const SettingValues& values, std::strin
             s.vram_conversations = v;
         else if (name == "conversation_idle_seconds")
             s.conversation_idle_seconds = v;
+        else if (name == "decode_share_percent")
+            s.decode_share_percent = v;
+        else if (name == "prompt_turn_ms")
+            s.prompt_turn_ms = v;
         else if (name == "rows")
             s.step.rows = (int) v;
         else if (name == "lookahead")
@@ -1994,6 +2000,8 @@ std::string PagedEngine::change_settings(const SettingValues& values, std::strin
     (void) trim_gpu_conversations((int) s.vram_conversations);
     settings_.vram_conversations = s.vram_conversations;
     settings_.conversation_idle_seconds = s.conversation_idle_seconds;
+    settings_.decode_share_percent = s.decode_share_percent;
+    settings_.prompt_turn_ms = s.prompt_turn_ms;
     std::string err;
     if (!s.drafter && settings_.drafter)
         (void) switch_drafter(false, err);

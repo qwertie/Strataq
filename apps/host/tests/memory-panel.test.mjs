@@ -521,6 +521,17 @@ test('idle eviction age is configurable without implying that age alone evicts a
 });
 
 
+test('decoding while a prompt is read has a share and a turn length to change', async () => {
+  const view = {...live, settings: {...live.settings, decode_share_percent: 50, prompt_turn_ms: 0}};
+  const {calls, onChange} = recorder(), {element, fire} = mount(view, onChange);
+  assert.match(element.innerHTML, /data-setting="decode_share_percent" value="50" min="0"/);
+  assert.match(element.innerHTML, /data-setting="prompt_turn_ms" value="0" min="0"/);
+  fire('change', {target: control('[data-setting]', {dataset: {setting: 'decode_share_percent'}, value: '0'})});
+  apply(fire);
+  await settle();
+  assert.deepEqual(calls, [[{decode_share_percent: 0}, 'session']]);
+});
+
 test('pending edits survive polling and a live memory resize', async () => {
   const {calls, onChange} = recorder({ok: true, view: live});
   const {element, fire} = mount(live, onChange);
