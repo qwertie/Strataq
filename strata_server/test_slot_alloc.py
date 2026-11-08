@@ -14,13 +14,16 @@ from strata_common.engine_client import StrataEngine  # noqa: E402
 
 
 def engine(batch, groups, pipelined=True):
-    e = object.__new__(StrataEngine)          # pick_slot reads only the slot tables
+    e = object.__new__(StrataEngine)          # pick_slot reads only the slot tables, INFO facts and tail-role token
+    e.info, e._tail_role_token = {}, -1
     gs = batch // groups
     e.batch = batch
     e.slot_order = [g * gs + t for t in range(gs) for g in range(groups)]
     e.slot_busy = [False] * batch
     e.slot_held = [[] for _ in range(batch)]
     e.slot_used = [0.0] * batch
+    e.slot_live = [None] * batch               # nothing running, ending or being handed over
+    e.slot_releasing, e.slot_handover = set(), {}
     e.slot_gs = gs if pipelined and groups > 1 else 0
     return e
 

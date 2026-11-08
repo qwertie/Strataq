@@ -390,8 +390,8 @@ class Monitor(unittest.TestCase):
                          (200, True, False, {"context": 4096}))
         self.assertEqual(body["machine"]["ram_total"], 5000)
         gpu, ram = body["memories"]
-        self.assertEqual(gpu["other"], 100)              # in use there, not named by the engine
-        self.assertEqual((ram["total"], ram["free"], ram["other"]), (5000, 3000, 1980))   # the machine's RAM
+        self.assertEqual(gpu["other_apps"], 100)        # in use there, not named by the engine
+        self.assertEqual((ram["total"], ram["free"], ram["other_apps"]), (5000, 3000, 1980))   # the machine's RAM
         self.svc.CONTEXT_WAIT_S = 0.05
         with self.svc.fifo:                              # a request is running: the last answer, marked busy
             again = self.request("/v1/memory")[1]
@@ -423,21 +423,21 @@ class Monitor(unittest.TestCase):
         with mock.patch("strata_common.telemetry.read_shared_gpu_memory", return_value=split) as read:
             gpu, ram = self.request("/v1/memory")[1]["memories"]
         self.assertEqual(read.call_args.args[:2], ("Radeon", 0))
-        self.assertEqual((gpu["total"], gpu["free"], gpu["in_share"], gpu["borrowed"], gpu["other"]),
-                         (1000, 100, 700, 250, 200))            # other: the share's use beyond the engine's 700
+        self.assertEqual((gpu["total"], gpu["free"], gpu["in_share"], gpu["borrowed"], gpu["other_apps"]),
+                         (1000, 100, 700, 250, 200))            # other_apps: the share's use beyond the engine's 700
         self.assertEqual((gpu["runtime_total"], gpu["runtime_free"]), (9000, 4000))
-        self.assertEqual((ram["gpu_borrowed"], ram["other"]), (250, 1750))
+        self.assertEqual((ram["gpu_borrowed"], ram["other_apps"]), (250, 1750))
         split.update(in_share=None, borrowed_by="device")      # Linux: no per-process split
         with mock.patch("strata_common.telemetry.read_shared_gpu_memory", return_value=split):
             gpu = self.request("/v1/memory")[1]["memories"][0]
-        self.assertEqual((gpu["in_share"], gpu["other"]), (800, 100))   # at most what the share holds
+        self.assertEqual((gpu["in_share"], gpu["other_apps"]), (800, 100))   # at most what the share holds
         # the engine's page-locked RAM, which the GPU maps, is in its borrowed use but drawn as the engine's RAM
         memory = self.engine.memory()
         memory["memories"][1].update(mapped=200, uses={"experts": 200})
         self.engine.memory = lambda: memory
         with mock.patch("strata_common.telemetry.read_shared_gpu_memory", return_value=split):
             gpu, ram = self.request("/v1/memory")[1]["memories"]
-        self.assertEqual((gpu["borrowed"], ram["gpu_borrowed"], ram["other"]), (50, 50, 1750))
+        self.assertEqual((gpu["borrowed"], ram["gpu_borrowed"], ram["other_apps"]), (50, 50, 1750))
 
     def test_context_needs_the_key(self):
         self.svc.api_key = "k"
@@ -527,7 +527,7 @@ class EngineConversations(unittest.TestCase):
         got = engine.memory()
         self.assertEqual(engine.proc.stdin.getvalue(), "GET_MEMORY_USE\n")
         none = {"allocated_pct": None, "fragmented_pct": None,   # no page pool: the old engines
-                "setting": None, "smallest": None, "largest": None, "mapped": None}
+                "setting": None, "smallest": None, "largest": None, "mapped": None, "pool_offset": None}
         self.assertEqual(got, {"memories": [
             {"id": "gpu0", "name": "Radeon 8060S", "total": 1000, "free": 300, "unified": True, "paused_count": None,
              "paused_budget": None, **none, "uses": {"weights": 100, "experts": 450}},
