@@ -520,6 +520,9 @@ def narrate_start(log_path: str, offset: int, args: list, done: threading.Event,
                 elif " loaded " in line and "GiB at" in line:
                     say("loaded", "[strata] experts loaded: " + line.split(" loaded ", 1)[1].strip() +
                         f" ({time.time() - t0:.0f} s so far)")
+                elif " the page pool of " in line and " GiB (of " in line:   # the paged engines' expert store
+                    gib = line.split("): ", 1)[-1].split(" (of ", 1)[0]
+                    say("cache", f"[strata] filling the GPU's page pool for experts and conversations ({gib}) ...")
                 elif "expert cache " in line and " slots, " in line and "auto" not in line:
                     n = line.split("expert cache ", 1)[1].split(";")[0].replace(" slots,", " experts,").strip()
                     say("cache", f"[strata] filling the GPU's expert cache ({n}) ...")

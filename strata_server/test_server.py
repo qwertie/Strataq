@@ -2910,6 +2910,14 @@ class StartNarrator(unittest.TestCase):
         self.assertIn("loading the experts into RAM (tens of GB)", said)
         self.assertIn("experts loaded: 31.64 GiB at 3.17 GiB/s", said)
 
+    def test_a_paged_start_names_its_page_pool_not_the_cache_arena(self):
+        """strata-q38's expert cache is one chunk of pages ("10485 slots, 0.25 GiB"), not where the experts are."""
+        said = self.narrate([], ["strata-q38: the page pool of gpu0 (layers 0-47): 49.00 GiB (of 56.45 GiB it could "
+                                 "take) in chunks of 256 MiB, pages of 25600 bytes",
+                                 "strata generate: expert cache 10485 slots, 0.25 GiB of VRAM; policy is"])
+        self.assertIn("filling the GPU's page pool for experts and conversations (49.00 GiB)", said)
+        self.assertNotIn("10485", said)
+
 
 class CancelledRead(unittest.TestCase):
     """#471: a request cancelled while its prompt was read is recorded with the tokens the engine read (the DONE
