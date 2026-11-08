@@ -4325,6 +4325,19 @@ class ThinkingBudget(unittest.TestCase):
         self.assertIn("answering: 10 of max 6400 tokens", lines[1])
         self.assertIn("thinking: 10 of max 6400 tokens", lines[2])
 
+    def test_a_request_waiting_for_its_turn_does_not_show_another_requests_prompt(self):
+        """Under the request-ID protocol every request without output printed the engine's one prompt counter, so
+        those waiting for a turn seemed to be reading the prompt another request was reading."""
+        rows = [{"request_id": "a", "state": "reading", "prompt_read": 2048, "prompt_tokens": 9000},
+                {"request_id": "b", "state": "queued", "prompt_read": None, "prompt_tokens": 500}]
+        engine = SimpleNamespace(request_protocol=True, progress=(2048, 9000), slots_view=lambda: rows)
+        with mock.patch.object(self.svc, "engine", engine):
+            got = [self.svc._get_prompt_phase({"request_id": r, "prompt_tokens": n})
+                   for r, n in (("a", 9000), ("b", 500), ("c", 70))]
+        self.assertEqual(got, ["reading the prompt: 2,048 of 9,000 tokens",
+                               "waiting for its turn: a prompt of 500 tokens",
+                               "waiting for its turn: a prompt of 70 tokens"])
+
     def test_a_budget_above_max_tokens_is_capped_to_leave_room_for_the_answer(self):
         """#984: max_tokens 300 and a budget of 5000 never fired: the reply ended while still thinking.  The thinking
         is closed at max_tokens less the answer's reserve (max 512 or a quarter, at most half), with one log line."""

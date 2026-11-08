@@ -2673,19 +2673,29 @@ class Service:
             return last_print
         with self.status_lock:
             s = dict(self.status if st is None else st)
-        el = now - s.get("started", now)
+        begun = f"begun {now - s.get('started', now):.0f} s ago"
         if s.get("first_token") is None:
-            pr = getattr(self.engine, "progress", None)   # (position reached, prompt tokens): a reused prefix counts
-            done = f"{pr[0]:,} of {pr[1]:,}" if pr and pr[1] else f"{s.get('prompt_tokens', 0):,}"   # as read (#29)
-            print(f"[strata] reading the prompt: {done} tokens, {el:.0f} s so far", flush=True)
+            print(f"[strata] {self._get_prompt_phase(s)}, {begun}", flush=True)
         else:
             rate = s["generated"] / max(RATE_MIN_SPAN_S, now - s["first_token"])
             # #984: while a thinking budget applies, the thinking line shows it, not the request's max_tokens
             limit = (f"budget {s['thinking_budget']} (max {s.get('max_tokens')})"
                      if s["phase"] == "thinking" and s.get("thinking_budget") else f"max {s.get('max_tokens')}")
-            print(f"[strata] {s['phase']}: {s['generated']} of {limit} tokens, {rate:.1f} tok/s, "
-                  f"{el:.0f} s", flush=True)
+            print(f"[strata] {s['phase']}: {s['generated']} of {limit} tokens, {rate:.1f} tok/s, {begun}", flush=True)
         return now
+
+    def _get_prompt_phase(self, s) -> str:
+        """Gets what the request whose status is `s` does before its first token, for _progress: waiting for its turn
+        or reading its own prompt when the engine reports requests one by one (the request-ID protocol); else reading
+        the prompt, by the engine's one prompt counter (one request at a time, or a legacy batch engine)."""
+        if getattr(self.engine, "request_protocol", False):
+            row = next((r for r in self.engine.slots_view() if r.get("request_id") == s.get("request_id")), None)
+            if row is None or row["state"] != "reading":
+                return f"waiting for its turn: a prompt of {s.get('prompt_tokens', 0):,} tokens"
+            return f"reading the prompt: {row.get('prompt_read') or 0:,} of {row['prompt_tokens']:,} tokens"
+        pr = getattr(self.engine, "progress", None)   # (position reached, prompt tokens): a reused prefix counts
+        done = f"{pr[0]:,} of {pr[1]:,}" if pr and pr[1] else f"{s.get('prompt_tokens', 0):,}"   # as read (#29)
+        return f"reading the prompt: {done} tokens"
 
     def run(self, ids, thinking, tools, max_new, sampling, cancel, force=None,
             declared_only=False) -> Iterator[tuple[str, object]]:
