@@ -45,6 +45,14 @@ class Apply(unittest.TestCase):
         with self.assertRaises(ValueError):
             runconfig.check_live({"prompt_turn_ms": -1}, True)
 
+    def test_saving_conversations_on_shutdown_is_a_switch_saved_as_on_or_off(self):
+        values = runconfig.check_live({"save_on_shutdown": True}, True)
+        new, changed = runconfig.apply_live({"args": []}, values)
+        self.assertEqual(new["args"], ["--save-on-shutdown", "on"])
+        self.assertEqual(changed, ["save_on_shutdown"])
+        with self.assertRaises(ValueError):
+            runconfig.check_live({"save_on_shutdown": 1}, True)
+
     def test_live_residency_default_survives_a_restart_without_changing_concurrency(self):
         values = runconfig.check_live({"vram_conversations": 3}, True)
         new, changed = runconfig.apply_live({"args": ["--concurrent", "2"]}, values)

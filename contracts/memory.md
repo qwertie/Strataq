@@ -126,6 +126,11 @@ steps for `decode_share_percent` of the turn's time. 0 percent makes them wait f
 engine's `STRATA_BATCH_DECODE_SHARE` in percent. A STOP, a pending CHANGE_SETTINGS and the progress line are still
 handled after every chunk.
 
+`save_on_shutdown` (`--save-on-shutdown on|off`, default off; `INFO save_on_shutdown=0|1` at start) makes the
+engine, when its command loop ends (QUIT or the end of stdin), pause its conversations in VRAM and move those
+paused in RAM to the SSD, highest ranked first, within `ssd_pause_mib`. It keeps the files instead of deleting
+them, for the next start's adoption. CHANGE_SETTINGS takes `on` or `off`; the report gives 1 or 0.
+
 RAM checkpoints are serialized inside the shared pause-file host header, so named
 SAVE/RESTORE and automatic SSD pauses retain them. Disk-paused payloads are released
 from RAM after writing and read back on resume. Qwen uses layout identity 4; files

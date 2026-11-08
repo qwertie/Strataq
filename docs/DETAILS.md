@@ -724,10 +724,17 @@ On startup these engines scan `--pause-dir` for regular `paused-<pid>-*.bin` fil
 They check the whole-file checksum, model and settings fingerprints, context limit and layer cut before adopting
 a file. Adoption renames it under the new process's prefix and counts it against `--ssd-pause-mib`. Files beyond
 that budget are deleted by the usual lowest-priority, least-recently-used rule; recovered files have priority zero
-and are considered in filename order. Adopted files are deleted when consumed, evicted or on a clean shutdown.
-Files belonging to a live process (including a reused PID), links, damaged or incompatible files, and unfinished
-`.tmp` files are left alone. Remove those manually when no engine uses the directory. An unreadable directory or
-file does not prevent startup. Only SSD pauses survive a crash; RAM pauses and active GPU conversations do not.
+and rank by when they last took tokens, the most recent highest. The engine logs one line per file it leaves, with
+the reason, and one line for those it adopted. Files belonging to a live process (including a reused PID), links,
+damaged or incompatible files, and unfinished `.tmp` files are left alone. Remove those manually when no engine
+uses the directory. An unreadable directory or file does not prevent startup.
+
+By default, paused files are deleted when consumed, evicted or on a clean shutdown, so only the SSD pauses a crash
+leaves survive. With **Save conversations on shutdown** (`--save-on-shutdown on`, a live setting in the Memory panel)
+the engine, as it ends, pauses every conversation in VRAM, then moves the conversations paused in RAM to the SSD,
+the highest priority and most recently used first, until `--ssd-pause-mib` is full, and leaves the files for the
+next start. Stopping takes as long as writing them; the server then waits up to 140 s instead of 20 s before it
+ends the engine.
 
 Validation on 4 November 2026 used Windows HIP on the Strix Halo (gfx1151), context 8192 and greedy sampling.
 Qwen IQ3_S used MTP, suffix drafting and 8 GiB per stage plus 2 GiB in the RAM pool. Saves continued with identical

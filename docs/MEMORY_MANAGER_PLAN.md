@@ -42,6 +42,7 @@ Conversations at once: 2 of 3 | Rows per step: 8 | Lookahead: 4
 | Conversations held in VRAM | how many active or cached conversations keep their GPU state; at least Conversations at once | yes |
 | Idle conversation eviction age | how old idle GPU state must be to give way under memory pressure; 66 seconds by default | yes |
 | Decoding while a prompt is read | after each turn of a prompt read, the decoding conversations step for this percentage of the turn's time; 50 by default, 0 makes them wait | yes |
+| Save conversations on shutdown | when the engine ends, its conversations in VRAM and RAM go to the SSD, the most recent first, within the SSD allowance, for the next start to adopt; off by default | yes |
 | Prompt reading turn | the least time one turn of a prompt read lasts, in whole chunks, before the decoding conversations get their share; 0 (one chunk) by default | yes |
 | Rows per step | how many tokens one pass through the model computes (at most 8 today) | yes |
 | Lookahead | the most guesses one conversation may add in a step; 0 turns drafting off | yes |

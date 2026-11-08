@@ -30,7 +30,7 @@ int take_paged_options(int& argc, char** argv, const std::string& program, Paged
         std::string* text = nullptr;   ///< instead of `value`, for a word
     };
     int64_t rows = s.step.rows, lookahead = -1, concurrent = -1, mtp_rows = 0;   // -1: chosen after parsing
-    std::string drafter = "on", gpu_mib;
+    std::string drafter = "on", save_on_shutdown = "off", gpu_mib;
     const Own own[] = {{"--tokens-min", &s.tokens_min},       {"--tokens-max", &s.tokens_max},
                        {"--conversation-tokens", &s.conversation_context},
                        {"--vram-conversations", &s.vram_conversations},
@@ -45,6 +45,7 @@ int take_paged_options(int& argc, char** argv, const std::string& program, Paged
                        {"--concurrent", &concurrent}, {"--batch-groups", nullptr, &s.batch_groups},
                        {"--pause-dir", nullptr, &s.pause_dir}, {"--copy-back", nullptr, &s.copy_back},
                        {"--drafter", nullptr, &drafter},      {"--remote-experts", nullptr, &s.remote_experts},
+                       {"--save-on-shutdown", nullptr, &save_on_shutdown},
                        {"--step-profile", &s.step_profile}};
     const char* const name = program.c_str();
     int out = 1;
@@ -73,6 +74,7 @@ int take_paged_options(int& argc, char** argv, const std::string& program, Paged
     s.step.lookahead = (int) std::clamp<int64_t>(lookahead, -1, INT32_MAX);
     s.step.concurrent = (int) std::clamp<int64_t>(concurrent, -1, INT32_MAX);   // -1: --batch, set once it is read
     s.drafter = drafter == "on";
+    s.save_on_shutdown = save_on_shutdown == "on";
     s.step.model_lookahead = mtp_rows > 0 ? (int) std::min<int64_t>(mtp_rows - 1, 7) : -1;
     s.suffix_draft = std::clamp<int64_t>(s.suffix_draft, 0, INT32_MAX);
     s.decode_share_percent = std::clamp<int64_t>(s.decode_share_percent, 0, INT32_MAX);
@@ -94,10 +96,11 @@ int take_paged_options(int& argc, char** argv, const std::string& program, Paged
         std::fprintf(stderr, "%s: --remote-experts takes auto, on or off\n", name);
         return 2;
     }
-    if (drafter != "on" && drafter != "off") {
-        std::fprintf(stderr, "%s: --drafter takes on or off\n", name);
-        return 2;
-    }
+    for (const auto& [flag, word] : {std::pair{"--drafter", &drafter}, {"--save-on-shutdown", &save_on_shutdown}})
+        if (*word != "on" && *word != "off") {
+            std::fprintf(stderr, "%s: %s takes on or off\n", name, flag);
+            return 2;
+        }
     if (std::string err; !gpu_mib.empty() && !parse_i64_list(gpu_mib.c_str(), s.gpu_mib, err)) {
         std::fprintf(stderr, "%s: --gpu-mib takes MiB, one per card of a layer split: %s\n", name, err.c_str());
         return 2;

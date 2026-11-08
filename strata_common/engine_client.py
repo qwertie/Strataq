@@ -55,6 +55,8 @@ def popen(what: str, args: list, role: str = "engine", **kw):
 
 # How long close() gives the engine at each step of ending it (seconds). Module values so that a test can shorten them.
 ENGINE_QUIT_WAIT_S, ENGINE_TERM_WAIT_S, ENGINE_KILL_WAIT_S = 20, 5, 20
+# More time after QUIT for an engine that writes its conversations to the SSD as it ends (INFO save_on_shutdown=1).
+ENGINE_SAVE_WAIT_S = 120
 
 
 def rttime_limit_note() -> str:
@@ -1266,7 +1268,8 @@ class StrataEngine:
                              **{k: keys.pop(k, None) for k in
                                 ("setting", "smallest", "largest", "mapped", "pool_offset")},
                              "uses": keys})
-        for key in ("concurrent", "tokens_max", "vram_conversations", "conversation_idle_seconds"):
+        for key in ("concurrent", "tokens_max", "vram_conversations", "conversation_idle_seconds",
+                    "save_on_shutdown"):
             if key in self.info and key in settings:
                 self.info[key] = settings[key]
         if "context_capacity" in self.info and "context" in settings:
@@ -2710,7 +2713,8 @@ class StrataEngine:
                     self.proc.stdin.write("STOP\nQUIT\n")
                     self.proc.stdin.flush()
                     self.proc.stdin.close()  # Windows' detached stdin reader must see EOF before shutdown
-                    self.proc.wait(timeout=ENGINE_QUIT_WAIT_S)
+                    self.proc.wait(timeout=ENGINE_QUIT_WAIT_S +
+                                   (ENGINE_SAVE_WAIT_S if self.info.get("save_on_shutdown") == 1 else 0))
                 except (OSError, ValueError, subprocess.TimeoutExpired):
                     self.proc.terminate()
                     self.proc.wait(timeout=ENGINE_TERM_WAIT_S)

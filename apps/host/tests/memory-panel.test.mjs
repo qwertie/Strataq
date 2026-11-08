@@ -532,6 +532,18 @@ test('decoding while a prompt is read has a share and a turn length to change', 
   assert.deepEqual(calls, [[{decode_share_percent: 0}, 'session']]);
 });
 
+test('saving conversations on shutdown is a checkbox sent as a switch', async () => {
+  const view = {...live, settings: {...live.settings, save_on_shutdown: 0, ssd_pause_mib: 8192}};
+  const {calls, onChange} = recorder(), {element, fire} = mount(view, onChange);
+  assert.match(element.innerHTML, /type="checkbox" data-setting="save_on_shutdown">/);
+  assert.match(element.innerHTML, /up to the SSD allowance \(8,192 MiB\)/);
+  fire('change', {target: control('[data-setting]', {dataset: {setting: 'save_on_shutdown'}, type: 'checkbox',
+    checked: true})});
+  apply(fire);
+  await settle();
+  assert.deepEqual(calls, [[{save_on_shutdown: true}, 'session']]);
+});
+
 test('pending edits survive polling and a live memory resize', async () => {
   const {calls, onChange} = recorder({ok: true, view: live});
   const {element, fire} = mount(live, onChange);

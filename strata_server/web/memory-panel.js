@@ -58,7 +58,10 @@ const SETTINGS = {context: "Per-conversation token limit", concurrent: "Conversa
                   prompt_turn_ms: "Prompt reading turn (ms)",
                   lookahead: "Max lookahead", tokens_min: "Min conversation tokens",
                   tokens_max: "Max conversation tokens", ssd_pause_mib: "SSD for paused conversations (MiB)",
-                  drafter: "Drafter", slots: "Maximum conversations at once"};
+                  drafter: "Drafter", save_on_shutdown: "Save conversations on shutdown",
+                  slots: "Maximum conversations at once"};
+/** The settings that are switches: the engine reports them as 1 or 0 and takes "on" or "off". */
+const SWITCHES = ["drafter", "save_on_shutdown"];
 /** Settings the engine reports that the panel shows elsewhere (the bars) or not at all. */
 const UNLISTED = new RegExp("^memory_mib\\.|^(token_bytes|conversation_bytes|context_capacity|" +
   "has_drafter|suffix_draft|lookup_chain)$");
@@ -164,8 +167,8 @@ function render(element, panel) {
   panel.dividers = editable ? Object.fromEntries(memories.map((x) => [x.id, findDivider(x)]).filter(([, d]) => d))
     : {};
   const listed = Object.entries(view.settings).filter(([k]) => !UNLISTED.test(k) &&
-    !(editable && (k === "drafter" || getEditableControls(view.settings).some(([key]) => key === k))));
-  const note = [listed.map(([k, v]) => `${SETTINGS[k] || k}: ${k === "drafter" ?
+    !(editable && (SWITCHES.includes(k) || getEditableControls(view.settings).some(([key]) => key === k))));
+  const note = [listed.map(([k, v]) => `${SETTINGS[k] || k}: ${SWITCHES.includes(k) ?
     (v ? "on" : "off") : fmt(v)}` +
       (k === "context" ? " tokens" : "")).join(" · "),
     view.can_change === false ? "these change when the model starts again" : "",
@@ -284,7 +287,9 @@ function changeControl(element, panel, input) {
       panel.pending.suffix_draft = input.value === "suffix" ? 3 : 0;
       panel.pending.lookup_chain = 0;
     }
-  } else
+  } else if (input.type === "checkbox")
+    panel.pending[key] = input.checked;
+  else
     panel.pending[key] = input.value === "" ? NaN : Number(input.value);
 }
 
@@ -313,11 +318,12 @@ async function applyControls(element, panel, save) {
   const editable = new Set(getEditableControls(s).map(([key]) => key));
   const set = save === "default" ? Object.fromEntries(Object.entries(s).filter(([key]) =>
     editable.has(key) || key.startsWith("memory_mib.") ||
-    ["ssd_pause_mib", "drafter", "suffix_draft", "lookup_chain"].includes(key))) : {...panel.pending};
+    ["ssd_pause_mib", "suffix_draft", "lookup_chain", ...SWITCHES].includes(key))) : {...panel.pending};
   if (!Object.keys(set).length || (save === "default" && !panel.view.config))
     return;
-  if ("drafter" in set)
-    set.drafter = Boolean(set.drafter);
+  for (const key of SWITCHES)
+    if (key in set)
+      set[key] = Boolean(set[key]);
   await change(element, panel, set, null, save);
 }
 
@@ -374,6 +380,12 @@ function drawControls(panel) {
   });
   if (s.drafter != null)
     fields.push(drawDrafterControl(s, panel.view.details, off));
+  if (s.save_on_shutdown != null) {
+    const help = esc(getControlHelp("save_on_shutdown", s));
+    fields.push(`<label data-control="save_on_shutdown" title="${help}"><input type="checkbox" ` +
+      `data-setting="save_on_shutdown"${s.save_on_shutdown ? " checked" : ""}${off}> ` +
+      `${esc(SETTINGS.save_on_shutdown)}</label>`);
+  }
   return `<div class="mem-controls">${fields.join("")}</div><div class="mem-actions">` +
     `<button type="button" data-apply="session"${off}>Apply settings</button> ` +
     `<button type="button" data-apply="default"${off}${panel.view.config ? "" : " disabled"}>` +
@@ -445,6 +457,10 @@ function getControlHelp(key, settings, details = {}) {
   if (key === "conversation_idle_seconds")
     return "Idle GPU conversations this old may move to RAM or SSD when experts or another conversation need space. " +
       "Prompt-processing and decoding requests are protected; age alone does not evict anything.";
+  if (key === "save_on_shutdown")
+    return "When the model stops, conversations in VRAM and RAM are written to the SSD, the most recent first, " +
+      `up to the SSD allowance (${fmt(settings.ssd_pause_mib ?? 0)} MiB), and the next start picks them up. ` +
+      "Stopping takes a few seconds longer.";
   if (key === "decode_share_percent")
     return "While a prompt is read, the conversations that are answering take turns with it: after each turn of " +
       "reading they generate for this percentage of the time the turn took. 0 makes them wait for the whole prompt; " +

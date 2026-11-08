@@ -228,8 +228,13 @@ private:
     /// prompt starts with its tokens continues it, reading only the rest.  When the file was refused or could not be
     /// copied, nothing changed.
     void restore_session(const std::string& path);
-    /// Claims compatible orphaned SSD pauses; unreadable or foreign files stay untouched.
+    /// Claims compatible orphaned SSD pauses, the most recently active ranked highest, and says why it leaves each
+    /// other pause file in `dir` (unreadable, foreign, or its engine still runs); those stay untouched.
     void adopt_pause_files(const std::string& dir);
+    /// Moves every conversation in the GPUs' and the RAM's pools to the SSD, the highest ranked first (find_lowest's
+    /// order) up to --ssd-pause-mib, and lets go of the files so that ~PagedEngine leaves them for the next start
+    /// (PagedSettings::save_on_shutdown).
+    void save_conversations_for_restart();
     /// Prints a SERR line (SessionError `kind`, `why`) for a refused or failed SAVE or RESTORE `action` of `path`, and
     /// says it on stderr.
     void refuse_session(const char* action, const std::string& path, strata::core::SessionError kind,
@@ -307,8 +312,9 @@ private:
     /// Moves the lowest-priority conversation paused in RAM to the SSD (forgetting it when the copy fails); false when
     /// none is there.
     bool move_down();
-    /// Moves paused conversation `p`, in RAM, to the SSD (forgetting it when the copy fails).
-    void move_to_ssd(std::vector<Paused>::iterator p);
+    /// Moves paused conversation `p`, in RAM, to the SSD (forgetting it when the copy fails); false when the copy
+    /// failed.
+    bool move_to_ssd(std::vector<Paused>::iterator p);
     /// Moves the lowest-priority conversations paused in RAM to the SSD while those in RAM take more than the budget.
     void trim_ram();
     /// Forgets the lowest-priority paused conversations while those on the SSD take more than --ssd-pause-mib.
@@ -609,6 +615,7 @@ int PagedEngine::serve() {
     print_response("INFO concurrent=%d\n", settings_.step.concurrent);
     print_response("INFO vram_conversations=%lld\n", (long long) settings_.vram_conversations);
     print_response("INFO conversation_idle_seconds=%lld\n", (long long) settings_.conversation_idle_seconds);
+    print_response("INFO save_on_shutdown=%d\n", settings_.save_on_shutdown ? 1 : 0);
     print_response("INFO tokens_max=%lld\n", (long long) settings_.tokens_max);
     print_response("INFO context_capacity=%lld\n", (long long) facts_.context);
     if (settings_.batch_groups != "1") {
@@ -648,7 +655,11 @@ int PagedEngine::serve() {
         print_response("ERR %s does not take %s\n", facts_.name.c_str(), line.substr(0, line.find(' ')).c_str());
     }
     command_loop_ = nullptr;
-    return loop.is_failed() ? 1 : 0;
+    if (loop.is_failed())
+        return 1;
+    if (settings_.save_on_shutdown)
+        save_conversations_for_restart();
+    return 0;
 }
 
 void PagedEngine::run_session_command(const std::string& line) {
@@ -775,37 +786,90 @@ void PagedEngine::restore_session(const std::string& path) {
 }
 
 void PagedEngine::adopt_pause_files(const std::string& dir) {
-    for (const std::string& path : strata::core::find_stale_pause_files(dir)) {
+    std::vector<std::string> running;
+    const std::vector<std::string> stale = strata::core::find_stale_pause_files(dir, &running);
+    for (const std::string& path : running)
+        say("pause file %s not adopted: the engine that wrote it still runs\n", path.c_str());
+    const size_t first = paused_.size();
+    for (const std::string& path : stale) {
+        const auto skip = [&](const std::string& why) {
+            say("pause file %s not adopted: %s\n", path.c_str(), why.c_str());
+        };
         try {
             std::string err;
             if (!find_identity(err)) {
                 say("pause adoption skipped: %s\n", err.c_str());
-                return;
+                break;
             }
             Paused p;
             strata::core::PauseStream file;
-            if (strata::core::open_pause_file(path, *identity_, (uint64_t) facts_.context, file, p.head, err) !=
-                    strata::core::SessionError::none || !is_layer_cut(p.head.cut, facts_.n_layers))
+            const strata::core::SessionError kind =
+                strata::core::open_pause_file(path, *identity_, (uint64_t) facts_.context, file, p.head, err);
+            if (kind != strata::core::SessionError::none) {
+                skip(std::string(strata::core::session_error_name(kind)) + ": " + err);
                 continue;
+            }
+            if (!is_layer_cut(p.head.cut, facts_.n_layers)) {
+                skip("its layer cut does not fit this model's " + std::to_string(facts_.n_layers) + " layers");
+                continue;
+            }
             file.reset();
             std::error_code ec;
             p.bytes = std::filesystem::file_size(path, ec);
-            if (ec)
-                continue;
             p.serial = ++serial_;
             p.file = get_pause_file(p.serial);
             // A rename claims the file without duplicating its pages on disk.
-            std::filesystem::rename(path, p.file, ec);
-            if (ec)
+            if (!ec)
+                std::filesystem::rename(path, p.file, ec);
+            if (ec) {
+                skip(ec.message());
                 continue;
+            }
             std::vector<uint8_t>().swap(p.head.state);
-            p.used = ++requests_;
             paused_.push_back(std::move(p));
-            trim_ssd();
         } catch (const std::exception& e) {
-            say("pause adoption skipped %s: %s\n", path.c_str(), e.what());
+            skip(e.what());
         }
     }
+    // the most recently active rank highest, so that trim_ssd forgets the oldest first
+    std::sort(paused_.begin() + (std::ptrdiff_t) first, paused_.end(),
+              [](const Paused& a, const Paused& b) { return a.head.last_tokens_at < b.head.last_tokens_at; });
+    uint64_t bytes = 0;
+    for (auto p = paused_.begin() + (std::ptrdiff_t) first; p != paused_.end(); ++p) {
+        p->used = ++requests_;
+        bytes += p->bytes;
+    }
+    if (paused_.size() > first)
+        say("adopted %zu paused conversations (%.1f GiB) from %s\n", paused_.size() - first,
+            (double) bytes / 1073741824.0, dir.c_str());
+    trim_ssd();
+}
+
+void PagedEngine::save_conversations_for_restart() {
+    const Clock::time_point t0 = Clock::now();
+    if (!wait_model_state())
+        return;
+    for (const std::unique_ptr<Held>& h : held_)
+        if (h->is_resident() && !h->live.empty())
+            pause_for_capacity(*h);
+    std::vector<std::pair<std::pair<int64_t, uint64_t>, uint64_t>> in_ram;   // (rank, serial), the highest first
+    for (const Paused& p : paused_)
+        if (p.file.empty())
+            in_ram.push_back({{p.priority, p.used}, p.serial});
+    std::sort(in_ram.rbegin(), in_ram.rend());
+    const auto find = [this](uint64_t serial) {
+        return std::find_if(paused_.begin(), paused_.end(), [&](const Paused& p) { return p.serial == serial; });
+    };
+    for (const auto& [rank, serial] : in_ram)
+        // gone after a good copy: trim_ssd forgot it, so it would forget every one ranked lower too
+        if (move_to_ssd(find(serial)) && find(serial) == paused_.end())
+            break;
+    const size_t kept =
+        (size_t) std::count_if(paused_.begin(), paused_.end(), [](const Paused& p) { return !p.file.empty(); });
+    const uint64_t bytes = get_paused_bytes(false);
+    std::erase_if(paused_, [](const Paused& p) { return !p.file.empty(); });
+    say("%zu conversations (%.1f GiB) kept on the SSD for the next start, in %.0f ms\n", kept,
+        (double) bytes / 1073741824.0, get_ms_since(t0));
 }
 
 void PagedEngine::refuse_session(const char* action, const std::string& path, strata::core::SessionError kind,
@@ -1590,7 +1654,7 @@ bool PagedEngine::move_down() {
     return true;
 }
 
-void PagedEngine::move_to_ssd(std::vector<Paused>::iterator p) {
+bool PagedEngine::move_to_ssd(std::vector<Paused>::iterator p) {
     std::string err;
     const std::string file = get_pause_file(p->serial);
     p->head.cut = get_cut();
@@ -1601,10 +1665,11 @@ void PagedEngine::move_to_ssd(std::vector<Paused>::iterator p) {
         p->bytes = std::filesystem::file_size(file);
         std::vector<uint8_t>().swap(p->head.state);
         trim_ssd();
-        return;
+        return true;
     }
     say("moving a paused conversation to the SSD failed, so it is forgotten: %s\n", err.c_str());
     paused_.erase(p);
+    return false;
 }
 
 void PagedEngine::trim_ram() {
@@ -1885,6 +1950,7 @@ strata::serve::MemoryReport PagedEngine::describe_memory() const {
                             {"token_bytes", (int64_t) ((grown - fixed) / probe)},
                             {"conversation_bytes", (int64_t) fixed}});
     report.settings.emplace_back("drafter", settings_.drafter && facts_.has_drafter ? 1 : 0);
+    report.settings.emplace_back("save_on_shutdown", settings_.save_on_shutdown ? 1 : 0);
     report.settings.emplace_back("suffix_draft", settings_.suffix_draft);
     report.settings.emplace_back("lookup_chain", settings_.lookup_chain);
     uint64_t drafter_bytes = facts_.drafter_expert_bytes;
@@ -1907,10 +1973,10 @@ std::string PagedEngine::change_settings(const SettingValues& values, std::strin
     std::vector<std::optional<uint64_t>> gpu_bytes(cards_.size());   // per card
     std::optional<uint64_t> ram_bytes;
     for (const auto& [name, text] : values) {
-        if (name == "drafter") {
+        if (name == "drafter" || name == "save_on_shutdown") {
             if (text != "on" && text != "off")
-                return "drafter takes on or off, not " + text;
-            s.drafter = text == "on";
+                return name + " takes on or off, not " + text;
+            (name == "drafter" ? s.drafter : s.save_on_shutdown) = text == "on";
             continue;
         }
         char* end = nullptr;
@@ -2002,6 +2068,7 @@ std::string PagedEngine::change_settings(const SettingValues& values, std::strin
     settings_.conversation_idle_seconds = s.conversation_idle_seconds;
     settings_.decode_share_percent = s.decode_share_percent;
     settings_.prompt_turn_ms = s.prompt_turn_ms;
+    settings_.save_on_shutdown = s.save_on_shutdown;
     std::string err;
     if (!s.drafter && settings_.drafter)
         (void) switch_drafter(false, err);

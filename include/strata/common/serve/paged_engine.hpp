@@ -94,6 +94,10 @@ struct PagedSettings {
     int64_t lookup_chain = 0, lookup_chain_min = 3; ///< Existing lookup-chain length and match floor.
     int64_t suffix_draft = 0; ///< --suffix-draft: minimum repeated context; 0 disables prompt lookup.
     bool drafter = true;                           ///< --drafter on|off: its weights loaded (with --lookahead)
+    /// --save-on-shutdown on|off: when the engine ends, its conversations in the GPUs' and the RAM's pools go to the
+    /// SSD (by request priority, then the most recently used, up to --ssd-pause-mib) and stay there for the next
+    /// start to adopt.
+    bool save_on_shutdown = false;
     int64_t step_profile = 0; ///< --step-profile 1 reports host elapsed times for each decode step.
     strata::spec::StepSettings step;               ///< --rows, --lookahead and --concurrent (default --batch)
 };

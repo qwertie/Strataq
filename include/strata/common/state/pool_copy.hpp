@@ -52,7 +52,8 @@ bool read_conversation_section(std::FILE* file, const PagePool& pool, Conversati
 /// process id, the time now and "-", so that engines sharing the folder keep apart and find_stale_pause_files can
 /// tell whose a file is.
 std::string get_pause_file_prefix(const std::string& dir);
-/// Finds regular pause files whose owning process no longer runs. Files of a reused process id stay untouched.
-std::vector<std::string> find_stale_pause_files(const std::string& dir);
+/// Finds regular pause files whose owning process no longer runs. Files of a reused process id stay untouched;
+/// `running`, when given, receives those whose owner (or a process reusing its id) still runs.
+std::vector<std::string> find_stale_pause_files(const std::string& dir, std::vector<std::string>* running = nullptr);
 
 }  // namespace strata::core

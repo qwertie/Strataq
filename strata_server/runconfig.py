@@ -55,7 +55,10 @@ LIVE_FLAGS = {"memory_mib.gpu0": "--gpu-mib", "memory_mib.ram": "--ram-mib", "to
               "decode_share_percent": "--decode-share-percent", "prompt_turn_ms": "--prompt-turn-ms",
               "tokens_max": "--tokens-max", "ssd_pause_mib": "--ssd-pause-mib", "rows": "--rows",
               "suffix_draft": "--suffix-draft", "lookup_chain": "--lookup-chain",
-              "lookahead": "--lookahead", "concurrent": "--concurrent", "drafter": "--drafter"}
+              "lookahead": "--lookahead", "concurrent": "--concurrent", "drafter": "--drafter",
+              "save_on_shutdown": "--save-on-shutdown"}
+# The live settings that are switches: CHANGE_SETTINGS and the run config spell them "on" or "off".
+_LIVE_SWITCHES = ("drafter", "save_on_shutdown")
 # The numeric live settings whose range is not "at least 0": (least, most); the engine checks the rest (concurrent
 # against its batch slots, lookahead against rows).
 _LIVE_RANGE = {"rows": (1, 8), "concurrent": (1, None), "context": (1, None), "vram_conversations": (1, None)}
@@ -93,7 +96,7 @@ def view(cfg: dict, path: str | Path) -> dict:
 
 def check_live(changes, to_default: bool, cards: list[str] | None = None) -> dict:
     """Checks POST /v1/memory's "set" ({setting: value}): gets the values as CHANGE_SETTINGS spells them (whole
-    numbers; drafter "on" or "off"), or raises a ValueError naming the first bad setting or value.  `to_default`:
+    numbers; _LIVE_SWITCHES "on" or "off"), or raises a ValueError naming the first bad setting or value.  `to_default`:
     the values are to be saved to the run config too, so only settings with a flag there are accepted; `cards`: the
     engine's GPU pool settings (get_card_settings), which --gpu-mib holds (one size per card)."""
     if not isinstance(changes, dict) or not changes:
@@ -105,9 +108,9 @@ def check_live(changes, to_default: bool, cards: list[str] | None = None) -> dic
                              f"memory_mib.gpu<N>.<card> or one of {', '.join(LIVE_FLAGS)})")
         if to_default and key not in LIVE_FLAGS and key not in (cards or []):
             raise ValueError(f"{key} has no default in the run config; change it for this session only")
-        if key == "drafter":
+        if key in _LIVE_SWITCHES:
             if not isinstance(v, bool) and v not in ("on", "off"):
-                raise ValueError(f'drafter: expected true, false, "on" or "off", not {v!r}')
+                raise ValueError(f'{key}: expected true, false, "on" or "off", not {v!r}')
             out[key] = "on" if v in (True, "on") else "off"
         else:
             out[key] = _number(key, v, True, *_LIVE_RANGE.get(key, (0, None)))

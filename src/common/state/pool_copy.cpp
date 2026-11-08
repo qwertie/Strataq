@@ -153,7 +153,7 @@ std::string get_pause_file_prefix(const std::string& dir) {
         .string();
 }
 
-std::vector<std::string> find_stale_pause_files(const std::string& dir) {
+std::vector<std::string> find_stale_pause_files(const std::string& dir, std::vector<std::string>* running) {
     namespace fs = std::filesystem;
     std::error_code ec;
     std::vector<std::string> files;
@@ -164,9 +164,12 @@ std::vector<std::string> find_stale_pause_files(const std::string& dir) {
             continue;
         char* pid_end = nullptr;
         const uint64_t pid = std::strtoull(name.c_str() + sizeof kPausePrefix - 1, &pid_end, 10);
-        if (*pid_end == '-' && pid != 0 && !strata::platform::is_process_running(pid) && f.is_regular_file(ec) &&
-            !f.is_symlink(ec))
+        if (*pid_end != '-' || pid == 0 || !f.is_regular_file(ec) || f.is_symlink(ec))
+            continue;
+        if (!strata::platform::is_process_running(pid))
             files.push_back(f.path().string());
+        else if (running)
+            running->push_back(f.path().string());
     }
     std::sort(files.begin(), files.end());
     return files;
