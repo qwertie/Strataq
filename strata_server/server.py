@@ -2000,8 +2000,9 @@ class Service:
         and free are the BIOS share's, and what it borrows beyond the share counts against the RAM (the RAM's
         `gpu_borrowed`).  The engine's RAM the GPU maps (the RAM's `mapped`: strata-q38's page-locked pool) is in the
         GPU's borrowed use too, as Windows and Linux count it, and is not borrowed again: the RAM's bar has it as the
-        engine's. During prompt processing or while a request has the engine's turn, returns the last reading,
-        marked busy. The initial reading is cached before generation starts."""
+        engine's. While a request has the engine's turn, or during prompt processing on an engine that cannot answer
+        between a prompt's chunks (one without live settings), returns the last reading, marked busy. The initial
+        reading is cached before generation starts."""
         from strata_base.memory import read_ram
         from strata_common.telemetry import read_shared_gpu_memory
         eng, ram = self.engine, read_ram()
@@ -2020,9 +2021,11 @@ class Service:
         busy, error = False, None
         try:
             if answered is None:
+                # the paged engines (the ones that change settings live) answer between a prompt's chunks too
                 with self.status_lock:
-                    reading = any(s.get("busy") and s.get("first_token") is None
-                                  for s in ([st for st, _ in self.live_reqs.values()] or [self.status]))
+                    reading = not getattr(eng, "can_change_settings", False) and any(
+                        s.get("busy") and s.get("first_token") is None
+                        for s in ([st for st, _ in self.live_reqs.values()] or [self.status]))
                 if reading and self.memory_last["at"] is not None:
                     busy = True
                 else:

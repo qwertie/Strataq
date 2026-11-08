@@ -103,6 +103,19 @@ class InitialMemory(unittest.TestCase):
                 self.assertEqual(engine.memory.call_count, 1)
                 self.assertEqual(reading["settings"], {"rows": 6})
 
+    def test_a_paged_engine_reports_memory_while_a_prompt_is_read(self):
+        """The Memory panel's bars stood still through every prompt read, though the paged engines answer
+        GET_MEMORY_USE between a prompt's chunks."""
+        tok = ByteTokenizer()
+        engine = ReloadableEngine(tok, "Hello.")
+        engine.can_report_memory = engine.can_change_settings = True
+        engine.memory = mock.Mock(return_value={"memories": [], "settings": {"rows": 4}})
+        svc = Service(engine, tok, ChatTemplate(Path(__file__).parent / "chat_template.jinja"))
+        svc.status.update(busy=True, first_token=None)
+        calls = engine.memory.call_count
+        self.assertFalse(svc.memory_view()["busy"])
+        self.assertEqual(engine.memory.call_count, calls + 1)
+
     def test_monitor_failure_does_not_prevent_loading(self):
         tok = ByteTokenizer()
         engine = ReloadableEngine(tok, "Hello.")
