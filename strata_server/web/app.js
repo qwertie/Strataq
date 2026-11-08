@@ -261,6 +261,16 @@ function renderTotals(t) {
   return `Since ${since}: ${fmt(t.requests)} requests · ${fmt(read)} prompt tokens read${pSpeed} (${fmt(t.reused)} reused) · ` +
          `${fmt(t.output_tokens)} written${oSpeed}`;
 }
+// Gets the tooltip of "Reading prompt": how much of the prompt a kept conversation spared, and which request it is
+function describeReading(live) {
+  const total = live.prompt_total ?? live.prompt_tokens;
+  const reused = live.prompt_reused != null && total
+    ? `${fmt(live.prompt_reused)} of this prompt's ${fmt(total)} tokens came from a kept conversation; ` +
+      "the rest is read now. "
+    : "";
+  return reused + (live.request ? `Request ${live.request}: click to open it in the API monitor.`
+    : 'The API monitor ("api_monitor": true in the run config) shows which request this is.');
+}
 function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
   // model state
   const on = live.queued > 0 ? "queued" : live.state;
@@ -285,7 +295,11 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
     delete prog.dataset.tone;
     detail = `last: ${fmt(last.output_tokens)} tokens${last.decode_tok_s ? ` at ${fmt(last.decode_tok_s, 1)} tok/s` : ""}`;
   }
-  $("state-label").textContent = label;
+  const stateLabel = $("state-label");
+  stateLabel.textContent = label;
+  if (live.state === "reading" && live.request) stateLabel.href = `api-monitor#${encodeURIComponent(live.request)}`;
+  else stateLabel.removeAttribute("href");
+  stateLabel.title = live.state === "reading" ? describeReading(live) : "";
   $("state-detail").textContent = detail;
   $("state-bar").style.width = `${pct}%`;
 

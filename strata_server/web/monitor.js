@@ -1,6 +1,7 @@
 "use strict";
 const $ = id => document.getElementById(id);
-let selected = null, detail = null, pane = "input", records = [], state = null, operating = false, stamp = "", actionError = "";
+let selected = decodeURIComponent(location.hash.slice(1)) || null;   // the main page links to a request as #id
+let detail = null, pane = "input", records = [], state = null, operating = false, stamp = "", actionError = "";
 let apiKey = sessionStorage.getItem("strata.monitor.key") || "";
 document.documentElement.dataset.theme = localStorage.getItem("strata.theme") || "dark";
 const seconds = n => typeof n === "number" ? `${n.toFixed(2)} s` : "—";

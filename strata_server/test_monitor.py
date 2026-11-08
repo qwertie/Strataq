@@ -252,6 +252,28 @@ class Monitor(unittest.TestCase):
         self.assertLess(records[1]["load_s"], records[0]["load_s"])
         self.assertTrue(all(r["state"] == "completed" for r in records))
 
+    def test_metrics_name_the_request_whose_prompt_is_read(self):
+        reading, release = threading.Event(), threading.Event()
+        generate = self.engine.generate
+        def held(*args, **kwargs):
+            reading.set()
+            self.assertTrue(release.wait(5))
+            yield from generate(*args, **kwargs)
+        self.engine.reused = 5
+        with mock.patch.object(self.engine, "generate", side_effect=held), ThreadPoolExecutor(max_workers=1) as pool:
+            reply = pool.submit(self.chat)
+            self.assertTrue(reading.wait(5))
+            live = self.request("/metrics")[1]["live"]
+            release.set()
+            self.assertEqual(reply.result()[0], 200)
+        self.assertEqual((live["state"], live["request"], live["prompt_reused"]),
+                         ("reading", self.svc.api_requests[-1]["id"], 5))
+        # parallel requests: the one in a slot that reads, not the newest
+        running = [{"request_id": "a", "monitor_id": "m1"}, {"request_id": "b", "monitor_id": "m2"}]
+        slots = [{"state": "reading", "request_id": "a", "reused": 7}, {"state": "generating", "request_id": "b"}]
+        self.assertEqual(self.svc._find_reading_request(running[-1], running, slots),
+                         {"request": "m1", "prompt_reused": 7})
+
     def test_context_of_an_engine_that_cannot_list_it(self):
         code, body = self.request("/api/context")
         self.assertEqual(code, 200)

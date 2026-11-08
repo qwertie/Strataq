@@ -1841,6 +1841,8 @@ class StrataEngine:
                     live["first_token"] = live["first_token"] or time.time()
                     output.append(int(fields[1]))
                     yield output[-1]
+                elif fields[0] == "RESUME":
+                    live["reused"] = int(fields[1])
                 elif fields[0] == "PP":
                     live["prompt_read"] = int(fields[1])
                     self.progress = (int(fields[1]), int(fields[2]))
@@ -2414,7 +2416,7 @@ class StrataEngine:
                          "generated": r["generated"], "elapsed_s": round(now - r["started"], 1),
                          "tok_s": round(r["generated"] / max(1e-6, now - ft), 1) if ft else None})
             if requests:
-                view[-1]["request_id"] = r["request_id"]
+                view[-1].update(request_id=r["request_id"], reused=r.get("reused"))
         return view
 
     def generate(self, ids, max_new, sampling, cancel, embeddings=None):

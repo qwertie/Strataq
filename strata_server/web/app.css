@@ -86,6 +86,7 @@ main { flex: 1; min-height: 0; display: flex; }
 .badges { display: flex; gap: var(--st-s-2); flex-wrap: wrap; }
 .badges .st-badge { opacity: .38; transition: opacity var(--st-dur); }
 .badges .st-badge.on { opacity: 1; }
+#state-label:not([href]) { color: inherit; }
 .state-card__row { display: flex; justify-content: space-between; gap: var(--st-s-4); font-size: var(--st-fs-sm);
                    font-weight: var(--st-fw-medium); font-variant-numeric: tabular-nums; }
 .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--st-s-4); }

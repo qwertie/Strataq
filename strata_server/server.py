@@ -1896,6 +1896,17 @@ class Service:
             reading = self.status.get("busy") and self.status.get("first_token") is None
         return getattr(self.engine, "prefill_tok_s_mean", None) if reading else 0.0
 
+    def _find_reading_request(self, s, running, slots) -> dict:
+        """Gets, for /metrics' live state, the request whose prompt the engine reads: its API monitor record
+        ("request", None while the monitor is off) and the prompt tokens it continues from a kept conversation
+        ("prompt_reused"), each None when unknown.  With parallel requests it is the one in a slot that reads; `s`
+        (the newest request's status) is only used when requests run one at a time."""
+        if slots is None:
+            return {"request": s.get("monitor_id"), "prompt_reused": getattr(self.engine, "reused", None)}
+        slot = next((x for x in slots if x["state"] == "reading" and x.get("request_id")), {})
+        st = next((x for x in running if x.get("request_id") == slot.get("request_id")), {})
+        return {"request": st.get("monitor_id"), "prompt_reused": slot.get("reused")}
+
     def begin_request(self, path, req):
         """#332: a monitor record for this request, or None when the monitor is off (nothing is kept then)."""
         if not self.api_monitor:
@@ -2171,8 +2182,9 @@ class Service:
         the hardware (with a minute of history per series)."""
         with self.status_lock:
             s = dict(self.status)
-            if self.live_reqs:                          # parallel requests: the newest one's status
-                s = {**s, **dict(list(self.live_reqs.values())[-1][0]), "queued": s.get("queued", 0)}
+            running_st = [dict(st) for st, _ in self.live_reqs.values()]
+            if running_st:                              # parallel requests: the newest one's status
+                s = {**s, **running_st[-1], "queued": s.get("queued", 0)}
             hist = list(self.history)
             totals = dict(self.totals)
         now = time.time()
@@ -2208,6 +2220,8 @@ class Service:
                         admitting=int(getattr(self.engine, "admitting", 0) or 0))
             if running and state == "idle":
                 live["state"] = "generating"
+        if live["state"] == "reading":
+            live.update(self._find_reading_request(s, running_st, live.get("slots")))
         if hasattr(self.engine, "replica_view"):        # opt-in replicas: each one's state and requests routed to it
             live["replicas"] = self.engine.replica_view()
         engine = {"model": self.model, "max_context": self.reported_ctx(), "images": self.vision is not None,
@@ -2850,7 +2864,8 @@ class Service:
                             self._terminal_event_locked(request_id, "admitted")
                         st.update(busy=True, phase="reading the prompt", prompt_tokens=len(ids),
                                   generated=0, started=time.time(), first_token=None, tool=None, tail="",
-                                  max_tokens=max_new, reasoning_recoveries=0, thinking_budget=budget)
+                                  max_tokens=max_new, reasoning_recoveries=0, thinking_budget=budget,
+                                  request_id=request_id, monitor_id=trace["id"] if trace is not None else None)
                         if par:
                             self.live_reqs[id(st)] = (st, rate)
                             self.status.update(st)
