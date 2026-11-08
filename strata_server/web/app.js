@@ -186,11 +186,30 @@ async function poll() {
       throw new Error(`HTTP ${r.status}`);
     }
   } catch (e) {
-    if (++metricsFailures === 3) setPill("error", "Server not reachable");
+    if (++metricsFailures === 3) {
+      setPill("error", "Server not reachable");
+      setBadges("error");
+      setStateLabel("Error: the server is not reachable", {error: true});
+    }
   }
   if (tab === "monitor" && ++monitorTick % 10 === 0) loadMcp();   // server states change rarely: every 10 s
   if (tab === "monitor" && monitorTick % 3 === 0) loadMemory();
   setTimeout(poll, 1000);
+}
+
+// Lights the Monitor's state badges named in `states` (falsy entries are skipped) and dims the others
+function setBadges(...states) {
+  for (const b of document.querySelectorAll("#state-badges .st-badge"))
+    b.classList.toggle("on", states.includes(b.dataset.s));
+}
+// Sets the Monitor's state line: `href` makes it a link, `error` colours it as one
+function setStateLabel(text, {href = null, title = "", error = false} = {}) {
+  const el = $("state-label");
+  el.textContent = text;
+  if (href) el.href = href;
+  else el.removeAttribute("href");
+  el.title = title;
+  el.classList.toggle("is-error", error);
 }
 
 function setPill(state, text) {
@@ -273,8 +292,7 @@ function describeReading(live) {
 }
 function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
   // model state
-  const on = live.queued > 0 ? "queued" : live.state;
-  for (const b of document.querySelectorAll("#state-badges .st-badge")) b.classList.toggle("on", b.dataset.s === on || b.dataset.s === live.state);
+  setBadges(live.state, live.queued > 0 && "queued", live.error && "error");
   const prog = $("state-progress");
   let label = "Waiting for a request", detail = "", pct = 0;
   if (live.state === "reading") {
@@ -295,11 +313,18 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
     delete prog.dataset.tone;
     detail = `last: ${fmt(last.output_tokens)} tokens${last.decode_tok_s ? ` at ${fmt(last.decode_tok_s, 1)} tok/s` : ""}`;
   }
-  const stateLabel = $("state-label");
-  stateLabel.textContent = label;
-  if (live.state === "reading" && live.request) stateLabel.href = `api-monitor#${encodeURIComponent(live.request)}`;
-  else stateLabel.removeAttribute("href");
-  stateLabel.title = live.state === "reading" ? describeReading(live) : live.state === "generating" ? label : "";
+  // the last failed request: after the generating requests' phases, or alone when none runs
+  const error = live.error && `Error: ${live.error.message}`;
+  if (error && live.state === "generating") label += `; ${error}`;
+  else if (error && live.state !== "reading") label = error;
+  const failedAt = error && `A request failed at ${new Date(live.error.at * 1000).toLocaleTimeString()}; `
+                          + "this clears when a later request ends well.";
+  const full = live.state === "generating" || error ? label : "";    // the line may be cut short by the ellipsis
+  if (live.state === "reading")
+    setStateLabel(label, {href: live.request && `api-monitor#${encodeURIComponent(live.request)}`,
+                          title: describeReading(live)});
+  else
+    setStateLabel(label, {title: error ? `${full}\n${failedAt}` : full, error: label === error});
   $("state-detail").textContent = detail;
   $("state-bar").style.width = `${pct}%`;
 

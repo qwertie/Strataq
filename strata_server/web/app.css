@@ -88,6 +88,7 @@ main { flex: 1; min-height: 0; display: flex; }
 .badges .st-badge.on { opacity: 1; }
 #state-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #state-label:not([href]) { color: inherit; }
+#state-label.is-error { color: var(--st-danger-text); }
 #state-detail { flex-shrink: 0; white-space: nowrap; }
 .state-card__row { display: flex; justify-content: space-between; gap: var(--st-s-4); font-size: var(--st-fs-sm);
                    font-weight: var(--st-fw-medium); font-variant-numeric: tabular-nums; }

@@ -281,6 +281,22 @@ class Monitor(unittest.TestCase):
         self.addCleanup(self.svc.live_reqs.clear)
         self.assertEqual(self.svc.metrics()["live"]["phases"], ["thinking", "writing a tool call: Bash"])
 
+    def test_metrics_keep_the_last_error_until_a_request_ends_well(self):
+        def failing(*args, **kwargs):
+            raise ValueError("the prompt does not fit")
+            yield
+        with mock.patch.object(self.engine, "generate", side_effect=failing):
+            self.assertGreaterEqual(self.chat()[0], 400)
+        self.assertEqual(self.svc.metrics()["live"]["error"]["message"], "the prompt does not fit")
+        self.assertEqual(self.chat()[0], 200)
+        self.assertIsNone(self.svc.metrics()["live"]["error"])
+
+    def test_requests_the_engine_holds_back_count_as_queued(self):
+        slots = [{"slot": 0, "state": "generating"}, {"slot": 1, "state": "queued"}, {"slot": 2, "state": "queued"}]
+        with mock.patch.object(self.engine, "batch", 2, create=True), \
+             mock.patch.object(self.engine, "slots_view", return_value=slots, create=True):
+            self.assertEqual(self.svc.metrics()["live"]["queued"], 2)
+
     def test_context_of_an_engine_that_cannot_list_it(self):
         code, body = self.request("/api/context")
         self.assertEqual(code, 200)

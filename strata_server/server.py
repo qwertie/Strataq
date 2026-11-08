@@ -1202,6 +1202,8 @@ class Service:
                        "prompt_ms": 0.0, "decode_ms": 0.0,
                        "drafts_offered": 0, "drafts_accepted": 0}   # #457: the MTP drafts, summed where reported
         self.last_timings = None                         # the last finished request's, llama.cpp's names (/v1/status)
+        # {"message", "at"} of the last request that failed, until a later one ends well (/metrics' live "error")
+        self.last_error = None
         # /metrics/prometheus' two throughput gauges need the totals as they stood at the last scrape, because
         # llama.cpp averages them over the window between two scrapes (#2341).
         self.scrape_bucket = (0, 0.0, 0, 0.0)
@@ -2187,6 +2189,7 @@ class Service:
                 s = {**s, **running_st[-1], "queued": s.get("queued", 0)}
             hist = list(self.history)
             totals = dict(self.totals)
+            last_error = self.last_error
         now = time.time()
         progress = getattr(self.engine, "progress", None)
         if s.get("busy") and s.get("first_token") is None:
@@ -2218,6 +2221,8 @@ class Service:
             slots = self.engine.slots_view() if hasattr(self.engine, "slots_view") else []
             # Requests waiting in the server have no engine-side metrics entry yet.
             in_slots = sum(1 for x in slots if x["state"] != "idle")
+            # Requests the engine holds back until it has room count as queued, like those waiting in the server.
+            live["queued"] += sum(1 for x in slots if x["state"] == "queued")
             live.update(parallel=par, running=running, slots=slots, outside_slots=max(0, running - in_slots),
                         waiting=int(getattr(self.engine, "waiting", 0) or 0),
                         admitting=int(getattr(self.engine, "admitting", 0) or 0))
@@ -2225,6 +2230,7 @@ class Service:
                 live["state"] = "generating"
         if live["state"] == "reading":
             live.update(self._find_reading_request(s, running_st, live.get("slots")))
+        live["error"] = last_error
         if hasattr(self.engine, "replica_view"):        # opt-in replicas: each one's state and requests routed to it
             live["replicas"] = self.engine.replica_view()
         engine = {"model": self.model, "max_context": self.reported_ctx(), "images": self.vision is not None,
@@ -2732,7 +2738,7 @@ class Service:
                 budget = max(1, max_new - reserve)
         parser = self.parser_cls(thinking=thinking, tools=tools, stream_tools=True, recover=self.tool_call_recovery,
                                  declared_only=declared_only)
-        detok, n, finish = Detokenizer(self.tok), 0, "length"
+        detok, n, finish, failure = Detokenizer(self.tok), 0, "length", None
         run_tok, run_len, repeated = None, 0, False     # #606: the current run of one repeated token
         thinking_n = 0                                  # tokens written while thinking (Responses' reasoning_tokens)
         stop_list = stop_strings(sampling)
@@ -3201,13 +3207,19 @@ class Service:
             with self.status_lock:
                 self.queue_timeouts += 1
             raise
-        except Exception:
+        except Exception as e:
             finish = "error"
+            failure = e
             raise
         finally:
             with self.status_lock:
                 if queued_counted:
                     self.status["queued"] -= 1
+                if finish == "error":
+                    self.last_error = {"message": (failure and str(failure)) or "the engine ended the request",
+                                       "at": time.time()}
+                elif finish in ("stop", "length"):
+                    self.last_error = None
                 self.terminal_requests.pop(request_id, None)
                 event = {"stop": "finished", "length": "finished", "cancel": "cancelled",
                          "disconnect": "disconnected", "timeout": "timeout", "error": "error"}.get(finish, "error")
