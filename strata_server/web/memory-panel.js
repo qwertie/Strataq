@@ -64,7 +64,7 @@ const SETTINGS = {context: "Per-conversation token limit", concurrent: "Conversa
 const SWITCHES = ["drafter", "save_on_shutdown"];
 /** Settings the engine reports that the panel shows elsewhere (the bars) or not at all. */
 const UNLISTED = new RegExp("^memory_mib\\.|^(token_bytes|conversation_bytes|context_capacity|" +
-  "has_drafter|suffix_draft|lookup_chain)$");
+  "has_drafter|suffix_draft|lookup_chain|slots|ssd_pause_mib)$");
 /**
  * The number settings the panel's controls change, with the range each accepts given the reading's settings `s`
  * (the engine checks them again).
@@ -389,9 +389,7 @@ function drawControls(panel) {
   return `<div class="mem-controls">${fields.join("")}</div><div class="mem-actions">` +
     `<button type="button" data-apply="session"${off}>Apply settings</button> ` +
     `<button type="button" data-apply="default"${off}${panel.view.config ? "" : " disabled"}>` +
-    `Apply and save as default</button></div>` +
-    (s.vram_conversations != null && s.conversation_bytes ? `<p class="mem-note">Each conversation held in VRAM ` +
-      `uses ${size(s.conversation_bytes)} of fixed state before its KV cache.</p>` : "");
+    `Apply and save as default</button></div>`;
 }
 
 /** Gets the engine's supported prediction modes for the Memory settings form.
@@ -447,7 +445,9 @@ function getControlHelp(key, settings, details = {}) {
       "Multiple conversations can share this space. " +
       "If the largest two conversations don't fit, only one conversation can run at a time.";
   if (key === "concurrent")
-    return "Maximum conversations decoding in one step. Each active conversation uses at least one row.";
+    return "Maximum conversations decoding in one step. Each active conversation uses at least one row. " +
+      (settings.slots != null ? `The engine supports up to ${fmt(settings.slots)} conversations at once. ` : "") +
+      "This setting is also limited by Rows per step and Max conversations in VRAM.";
   if (key === "drafter")
     return "This option controls the multi-token prediction (MTP) mode that can speed up generation using rows " +
       "that aren't in use by active conversations.";

@@ -255,7 +255,9 @@ test('the controls change the other settings within their ranges', async () => {
   assert.deepEqual(calls, [[{ concurrent: 2, drafter: false }, 'session']]);
   // the controls' settings are not listed again in the line under the panel
   assert.match(element.innerHTML,
-    /<p class="mem-note">Per-conversation token limit:.*Maximum conversations at once: 4<\/p>/);
+    /<p class="mem-note">Per-conversation token limit: 32.768 tokens<\/p>/);
+  assert.match(element.querySelector('[data-setting="concurrent"]').title,
+    /The engine supports up to 4 conversations at once/);
 });
 
 test('every segment of a bar says in its tooltip what it is', () => {
@@ -294,9 +296,12 @@ test('the SSD\'s divider is the end of the room for paused conversations', async
 
 
 test('live concurrency uses the step capacity and available rows', () => {
-  const view = { ...live, settings: { ...live.settings, concurrent: 1, slots: 8, rows: 3 } };
-  const html = mount(view, recorder().onChange).element.innerHTML;
-  assert.match(html, /data-setting="concurrent" value="1" min="1" max="3"/);
+  const view = { ...live, settings: { ...live.settings, concurrent: 1, slots: 8, rows: 3, ssd_pause_mib: 10243 } };
+  const {element} = mount(view, recorder().onChange);
+  assert.match(element.innerHTML, /data-setting="concurrent" value="1" min="1" max="3"/);
+  assert.match(element.querySelector('[data-setting="concurrent"]').title,
+    /The engine supports up to 8 conversations at once\. This setting is also limited by Rows per step/);
+  assert.doesNotMatch(element.textContent, /Maximum conversations at once|SSD for paused conversations/);
 });
 
 
@@ -488,7 +493,9 @@ test('the VRAM conversation cap explains fixed overhead and rejects a count belo
   assert.match(element.innerHTML, /data-setting="vram_conversations" value="2" min="1" max="4"/);
   assert.match(element.innerHTML, /Limits active conversations and idle GPU caches together\. Each takes 112 MiB/);
   assert.match(element.innerHTML, /Rewind checkpoints are allocated separately in RAM as needed/);
-  assert.match(element.innerHTML, /Each conversation held in VRAM uses 112 MiB of fixed state before its KV cache/);
+  assert.match(element.querySelector('[data-setting="vram_conversations"]').title,
+    /Each takes 112 MiB of fixed state before its KV cache/);
+  assert.doesNotMatch(element.textContent, /fixed state before its KV cache/);
   const setting = (key, value) => control('[data-setting]', {dataset: {setting: key}, value});
   for (const [key, value] of [['vram_conversations', '1'], ['concurrent', '3']]) {
     fire('change', {target: setting(key, value)});
