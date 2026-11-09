@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <vector>
 
+using strata::core::ConversationImageKey;
+using strata::core::get_image_match_end;
 using strata::core::get_resume_tokens;
 
 namespace {
@@ -52,6 +54,21 @@ int main() {
     check(get_resume_tokens({}, points, get_prompt(1000, 100)) == 0, "an empty conversation: none");
     check(get_resume_tokens(chat, points, std::vector<int64_t>{}) == 0, "an empty prompt: none");
     check(get_resume_tokens(chat, points, std::vector<int>{1000}) == 0, "a prompt of one token: none");
+
+    // pictures: their tokens are equal placeholders, so where the pictures differ bounds the match
+    const std::vector<ConversationImageKey> one = {{500, 7}}, two = {{500, 7}, {2990, 9}};
+    check(get_image_match_end(one, one) == SIZE_MAX && get_image_match_end({}, {}) == SIZE_MAX, "the same pictures");
+    check(get_image_match_end(one, two) == 2990 && get_image_match_end(two, one) == 2990,
+          "a picture added after the others: up to its start");
+    check(get_image_match_end(one, {{500, 8}}) == 500, "another picture in the same place: up to it");
+    check(get_image_match_end(one, {{400, 7}}) == 400, "a picture moved: up to the earlier start");
+    check(get_image_match_end({}, one) == 500, "text, then a prompt with a picture: up to the picture");
+    check(get_resume_tokens(chat, points, get_prompt(1000, 3000, 40), get_image_match_end(one, two)) == 2950,
+          "the next turn adds a picture inside the conversation: back to the latest checkpoint before it");
+    check(get_resume_tokens(chat, points, get_prompt(1000, 3000, 40), 3000) == 3000,
+          "the next turn adds a picture after the conversation: whole");
+    check(get_resume_tokens(chat, points, get_prompt(1000, 3000, 40), 999) == 0,
+          "pictures that differ before every checkpoint: none");
     std::printf("resume_point_test: %d checks passed\n", checks);
     return 0;
 }

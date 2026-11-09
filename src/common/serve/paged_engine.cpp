@@ -54,12 +54,15 @@ double get_ms_since(Clock::time_point t0) {
 /// CHANGE_SETTINGS' fields: names and values, in order.
 using SettingValues = std::vector<std::pair<std::string, std::string>>;
 
+/// A prompt's pictures in prompt order: where each starts and a hash of its content (PagedModel::prepare_images).
+using ImageKeys = std::vector<strata::core::ConversationImageKey>;
+
 /// A place for a conversation on the GPUs: its state on each card and the tokens in it.  Its state on each card is the
 /// model's part of the same index there (PagedModel::make_parts).
 struct Held {
     explicit Held(strata::serve::TokenBudget& budget) : gpu_tokens(budget) {}
     strata::serve::TokenBudget::Reservation gpu_tokens; ///< Logical tokens claimed in the shared GPU allowance.
-    uint64_t image_key = 0;             ///< the content identity of the pictures in live
+    ImageKeys images;                   ///< the pictures in live
     int session = 0;                    ///< its index: its session in the model; its id in each card's pool - 1
     std::optional<strata::spec::DraftPolicy> policy; ///< Learned window costs of this logical conversation.
     PagedParts parts;                   ///< its state on each card, in the cards' order
@@ -86,7 +89,7 @@ struct Held {
         gpu_tokens.shrink_to(0);
         last_tokens_at = 0;
         policy.reset();
-        image_key = 0;
+        images.clear();
         for (const std::unique_ptr<PagedPart>& p : parts)
             if (p->is_ready())
                 p->truncate(0);
@@ -288,9 +291,11 @@ private:
     bool wait_model_state();
     /// Puts the conversation that holds the longest start of `ids` (an idle one on the GPU, or a paused one, which
     /// comes back) in place `target` of `at_`, pausing the one there unless that is it.  A conversation whose tokens
-    /// `ids` leave before their end comes back at the latest point it can go back to (get_resume_tokens), and stays
-    /// paused whole as well, as strata-dsv41's slots keep it.  Gets how many of `ids` it holds.
-    int64_t take_conversation(size_t target, const std::vector<int64_t>& ids, uint64_t image_key, int64_t priority);
+    /// `ids` or pictures `images` leave before their end comes back at the latest point it can go back to
+    /// (get_resume_tokens), and stays paused whole as well, as strata-dsv41's slots keep it.  Gets how many of `ids` it
+    /// holds.
+    int64_t take_conversation(size_t target, const std::vector<int64_t>& ids, const ImageKeys& images,
+                              int64_t priority);
     /// Gives `h` the pages for `tokens` tokens on every card, pausing idle conversations (the lowest priority, then
     /// the least recently used, first) while a pool has no room, and tells the kernels about the experts that left
     /// those pages.
@@ -397,7 +402,7 @@ private:
     strata::spec::StepModel get_step_model();
     /// Finds learned costs by token affinity even when the GPU state cannot rewind to that prompt.
     std::optional<strata::spec::DraftPolicy> find_draft_policy(const std::vector<int64_t>& ids,
-                                                             uint64_t image_key) const;
+                                                             const ImageKeys& images) const;
     /// Says `format`'s line on stderr after the program's name.
     void say(const char* format, ...) const;
 
@@ -738,7 +743,7 @@ void PagedEngine::save_session(const std::string& path) {
         } else {
             saved.head.live = held->live;
             saved.head.last_tokens_at = held->last_tokens_at;
-            saved.head.image_key = held->image_key;
+            saved.head.images = held->images;
             saved.head.points = model_.get_rewind_points(held->parts);
             ok = model_.save_state(held->parts, saved.head.state, err);
         }
@@ -1012,15 +1017,15 @@ bool PagedEngine::serve_request(const std::string& line, bool admit) {
         return false;
     }
     print_response("STARTED\n");
-    uint64_t image_key = 0;
-    if (!model_.prepare_images(req, ids, image_key, err)) {
+    ImageKeys images;
+    if (!model_.prepare_images(req, ids, images, err)) {
         print_response("ERR %s\n", err.c_str());
         return true;
     }
     input_.clear_stop();   // a STOP between requests is stale
     const Clock::time_point t0 = Clock::now();
-    const auto policy = find_draft_policy(ids, image_key);
-    const int64_t resume = take_conversation(target, ids, image_key, priority);
+    const auto policy = find_draft_policy(ids, images);
+    const int64_t resume = take_conversation(target, ids, images, priority);
     Held& h = get_held(target);
     h.request_id = req.request_id;
     const int session = h.session;
@@ -1050,7 +1055,7 @@ bool PagedEngine::serve_request(const std::string& line, bool admit) {
     }
     h.policy = policy;
     print_response("RESUME %lld\n", (long long) resume);
-    h.image_key = image_key;
+    h.images = std::move(images);
     model_.attach_images(h.parts);
     model_.start_request(session, {smp, req.keys});
     const char* finish = "length";
@@ -1380,19 +1385,19 @@ void PagedEngine::end_preempted(size_t position) {
     finish_request(h, "preempted");
 }
 
-int64_t PagedEngine::take_conversation(size_t target, const std::vector<int64_t>& ids, uint64_t image_key,
-                                         int64_t priority) {
-    const auto get_start = [&](const std::vector<int32_t>& live, const std::vector<int64_t>& points, uint64_t key) {
-        if (key != image_key)
-            return int64_t{0};
-        return (int64_t) strata::core::get_resume_tokens(live, points, ids);
+int64_t PagedEngine::take_conversation(size_t target, const std::vector<int64_t>& ids, const ImageKeys& images,
+                                       int64_t priority) {
+    const auto get_start = [&](const std::vector<int32_t>& live, const std::vector<int64_t>& points,
+                               const ImageKeys& held_images) {
+        return (int64_t) strata::core::get_resume_tokens(live, points, ids,
+                                                         strata::core::get_image_match_end(held_images, images));
     };
     size_t best = target;
     const Held& initial = get_held(target);
-    int64_t most = get_start(initial.live, model_.get_rewind_points(initial.parts), initial.image_key);
+    int64_t most = get_start(initial.live, model_.get_rewind_points(initial.parts), initial.images);
     for (size_t i = 0; i < at_.size(); ++i) {
         const Held& h = get_held(i);
-        if (const int64_t start = get_start(h.live, model_.get_rewind_points(h.parts), h.image_key);
+        if (const int64_t start = get_start(h.live, model_.get_rewind_points(h.parts), h.images);
             !h.decoding && start > most) {
             best = i;
             most = start;
@@ -1400,7 +1405,7 @@ int64_t PagedEngine::take_conversation(size_t target, const std::vector<int64_t>
     }
     auto back = paused_.end();
     for (auto p = paused_.begin(); p != paused_.end(); ++p)
-        if (const int64_t start = get_start(p->head.live, p->head.points, p->head.image_key); start > most) {
+        if (const int64_t start = get_start(p->head.live, p->head.points, p->head.images); start > most) {
             back = p;
             most = start;
         }
@@ -1451,9 +1456,11 @@ int64_t PagedEngine::take_conversation(size_t target, const std::vector<int64_t>
         h.forget();
         return 0;
     }
-    const auto differs = std::mismatch(h.live.begin(), h.live.end(), ids.begin(), ids.end()).first;
-    say("a conversation of %zu tokens goes back to token %lld (the new prompt differs from token %lld)\n",
-        h.live.size(), (long long) most, (long long) (differs - h.live.begin()));
+    const size_t differs = std::min(
+        (size_t) (std::mismatch(h.live.begin(), h.live.end(), ids.begin(), ids.end()).first - h.live.begin()),
+        strata::core::get_image_match_end(h.images, images));
+    say("a conversation of %zu tokens goes back to token %lld (the new prompt differs from token %zu)\n",
+        h.live.size(), (long long) most, differs);
     h.live.resize((size_t) most);
     h.gpu_tokens.shrink_to((uint64_t) most);
     for (const std::unique_ptr<PagedPart>& part : h.parts)
@@ -1574,7 +1581,7 @@ bool PagedEngine::pause(Held& h, std::string& err, bool ram_only) {
     p.policy = h.policy;
     p.head.live = h.live;
     p.head.last_tokens_at = h.last_tokens_at;
-    p.head.image_key = h.image_key;
+    p.head.images = h.images;
     p.head.points = model_.get_rewind_points(h.parts);
     if (!model_.save_state(h.parts, p.head.state, err))
         return false;
@@ -1669,7 +1676,7 @@ bool PagedEngine::resume(const Paused& p, Held& h, int64_t tokens, std::string& 
     h.policy = p.policy;
     h.live = live;
     h.last_tokens_at = p.head.last_tokens_at;
-    h.image_key = p.head.image_key;
+    h.images = p.head.images;
     say("a conversation of %zu tokens is back from %s (%.0f ms)\n", live.size(), p.file.empty() ? "RAM" : "the SSD",
         get_ms_since(t0));
     return true;
@@ -2697,26 +2704,28 @@ strata::spec::StepModel PagedEngine::get_step_model() {
     return model;
 }
 
-std::optional<strata::spec::DraftPolicy> PagedEngine::find_draft_policy(
-    const std::vector<int64_t>& ids, uint64_t image_key) const {
+std::optional<strata::spec::DraftPolicy> PagedEngine::find_draft_policy(const std::vector<int64_t>& ids,
+                                                                        const ImageKeys& images) const {
     /// Refers to a cached conversation without copying its token history.
     struct Candidate {
         const std::vector<int32_t>& live;
         const std::optional<strata::spec::DraftPolicy>& policy;
-        uint64_t image_key, used;
+        const ImageKeys& images;
+        uint64_t used;
     };
     std::vector<Candidate> candidates;
     candidates.reserve(held_.size() + paused_.size());
     for (const auto& h : held_)
-        candidates.push_back({h->live, h->policy, h->image_key, h->used});
+        candidates.push_back({h->live, h->policy, h->images, h->used});
     for (const Paused& p : paused_)
-        candidates.push_back({p.head.live, p.policy, p.head.image_key, p.used});
+        candidates.push_back({p.head.live, p.policy, p.head.images, p.used});
     std::optional<strata::spec::DraftPolicy> policy;
     std::pair<size_t, uint64_t> best{};
     for (const Candidate& c : candidates) {
         const size_t n = std::min(c.live.size(), ids.size());
-        if (c.policy && c.image_key == image_key && n > 0 && std::pair{n, c.used} > best &&
-            std::equal(c.live.begin(), c.live.begin() + n, ids.begin())) {
+        if (c.policy && n > 0 && std::pair{n, c.used} > best &&
+            std::equal(c.live.begin(), c.live.begin() + n, ids.begin()) &&
+            strata::core::get_image_match_end(c.images, images) >= n) {
             policy = c.policy;
             best = {n, c.used};
         }

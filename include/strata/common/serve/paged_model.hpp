@@ -154,9 +154,10 @@ public:
     /// What the engine reads of the model; the model fills it before serve_paged_model.
     PagedModelFacts facts;
 
-    /// Validates a request's pictures before taking a conversation; key identifies their content and positions.
+    /// Validates a request's pictures before taking a conversation, and fills the empty `images` with where each
+    /// picture starts and a hash of its content, in prompt order.
     virtual bool prepare_images(const RequestLine& request, const std::vector<int64_t>& ids,
-                                uint64_t& key, std::string& err) = 0;
+                                std::vector<strata::core::ConversationImageKey>& images, std::string& err) = 0;
     /// Attaches the validated pictures to the selected conversation.
     virtual void attach_images(const PagedParts& parts) = 0;
 

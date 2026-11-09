@@ -66,7 +66,7 @@ int main() {
     head.points = {2, 4};
     head.state.assign(1u << 20, 7);
     head.cut = {12};
-    head.image_key = 0x123456789abcdef0ull;
+    head.images = {{1, 0x123456789abcdef0ull}, {3, 42}};
     head.last_tokens_at = 1700000000;
     Pool first, second;
     first.fill(1, 40, 1);
@@ -79,7 +79,7 @@ int main() {
     PauseHeader got;
     check(open_pause_file(path, identity, 100, file, got, err) == SessionError::none && got.live == head.live &&
               got.points == head.points && got.state == head.state && got.cut == head.cut &&
-              got.image_key == head.image_key && got.last_tokens_at == head.last_tokens_at,
+              got.images == head.images && got.last_tokens_at == head.last_tokens_at,
           "the header comes back as written");
     Pool first_back, second_back;
     check(first_back.pool->grow_conversation(5, 40).empty() && second_back.pool->grow_conversation(5, 12).empty() &&
@@ -110,19 +110,19 @@ int main() {
           "a file cut short is refused before restoration");
     file.reset();
 
-    for (const auto& [image, activity] : std::vector<std::pair<uint64_t, uint64_t>>{
-             {head.image_key, 0}, {0, head.last_tokens_at}, {0, 0}}) {
-        head.image_key = image;
+    for (const auto& [images, activity] : std::vector<std::pair<std::vector<ConversationImageKey>, uint64_t>>{
+             {head.images, 0}, {{}, head.last_tokens_at}, {{}, 0}}) {
+        head.images = images;
         head.last_tokens_at = activity;
         check(write_pause_file(path, identity, head, {{first.pool.get(), 1}}, err),
               "optional header fields are written");
         check(open_pause_file(path, identity, 100, file, got, err) == SessionError::none &&
-                  got.image_key == image && got.last_tokens_at == activity,
+                  got.images == images && got.last_tokens_at == activity,
               "image-only, activity-only and legacy headers remain readable");
         file.reset();
     }
 
-    head.image_key = 0;
+    head.images.clear();
     head.last_tokens_at = 0;
     check(write_pause_file(path, identity, head, {{first.pool.get(), 1}}, err), "the file is written again");
     {

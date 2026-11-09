@@ -41,15 +41,16 @@ bool write_pause_file(const std::string& path, const SessionFileIdentity& identi
     body.reserve(sizeof identity + 4 * sizeof(uint64_t) + head.live.size() * sizeof(head.live[0]) +
                  head.points.size() * sizeof(head.points[0]) + head.state.size() +
                  head.cut.size() * sizeof(head.cut[0]) +
-                 (head.image_key != 0 || head.last_tokens_at != 0 ? sizeof head.image_key : 0) +
+                 (!head.images.empty() || head.last_tokens_at != 0
+                      ? sizeof(uint64_t) + head.images.size() * sizeof(head.images[0]) : 0) +
                  (head.last_tokens_at != 0 ? sizeof head.last_tokens_at : 0));
     append_state_bytes(body, &identity, sizeof identity);
     append_state_vector(body, head.live);
     append_state_vector(body, head.points);
     append_state_vector(body, head.state);
     append_state_vector(body, head.cut);
-    if (head.image_key != 0 || head.last_tokens_at != 0)
-        append_state_bytes(body, &head.image_key, sizeof head.image_key);
+    if (!head.images.empty() || head.last_tokens_at != 0)
+        append_state_vector(body, head.images);
     if (head.last_tokens_at != 0)
         append_state_bytes(body, &head.last_tokens_at, sizeof head.last_tokens_at);
     const uint64_t size = body.size(), hash = session_hash64(body.data(), body.size(), kHashSeed);
@@ -134,7 +135,7 @@ SessionError open_pause_file(const std::string& path, const SessionFileIdentity&
     if (!r.take(&bound, sizeof bound) || !r.take_vector(read.live) || !r.take_vector(read.points) ||
         !r.take_vector(read.state) ||
         !r.take_vector(read.cut) ||
-        (r.at != body.size() && !r.take(&read.image_key, sizeof read.image_key)) ||
+        (r.at != body.size() && !r.take_vector(read.images)) ||
         (r.at != body.size() && !r.take(&read.last_tokens_at, sizeof read.last_tokens_at)) || r.at != body.size())
         return refuse(SessionError::invalid, "damaged");
     if (bound.model != identity.model || bound.config != identity.config)

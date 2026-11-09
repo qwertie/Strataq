@@ -167,7 +167,7 @@ public:
               const strata::core::RamExperts& ram, ConversationDrafter* drafter, int sessions, int prompt_rows);
 
     bool prepare_images(const strata::serve::RequestLine& request, const std::vector<int64_t>& ids,
-                        uint64_t& key, std::string& err) override;
+                        std::vector<strata::core::ConversationImageKey>& images, std::string& err) override;
     void attach_images(const PagedParts& parts) override {
         Part& lead = get_part(*parts.front());
         lead.image_positions = std::move(pending_positions_);
@@ -734,7 +734,7 @@ void PagedQwen::report_hops() const {
 }
 
 bool PagedQwen::prepare_images(const strata::serve::RequestLine& request, const std::vector<int64_t>& ids,
-                                uint64_t& key, std::string& err) {
+                                std::vector<strata::core::ConversationImageKey>& images, std::string& err) {
     pending_positions_.clear();
     image_rows_.clear();
     image_row_ptrs_.clear();
@@ -749,16 +749,8 @@ bool PagedQwen::prepare_images(const strata::serve::RequestLine& request, const 
     for (const auto& [name, value] : request.keys)
         if (name == "img_keys")
             keys = strata::serve::parse_hex_list(value);
-    std::vector<strata::core::ConversationImageKey> hashes;
-    if (!read_prompt_images(request.file, ids, m_.g.n_embd, keys, pending_positions_, image_rows_,
-                            image_row_ptrs_, hashes, err))
-        return false;
-    key = 1469598103934665603ull;
-    for (const auto& image : hashes)
-        key = hash_image_bytes(&image, sizeof image, key);
-    if (key == 0)
-        key = 1;
-    return true;
+    return read_prompt_images(request.file, ids, m_.g.n_embd, keys, pending_positions_, image_rows_, image_row_ptrs_,
+                              images, err);
 }
 
 bool PagedQwen::activate_images(int session, std::string& err, bool shared) {

@@ -343,7 +343,7 @@ public:
     void set_hop_holders(const int32_t* holders) override { m_.set_hop_holders(holders); }
     void report_hops() const override { m_.report_hops(); }
     bool prepare_images(const strata::serve::RequestLine& request, const std::vector<int64_t>& ids,
-                        uint64_t& key, std::string& err) override;
+                        std::vector<strata::core::ConversationImageKey>& images, std::string& err) override;
     void attach_images(const PagedParts&) override {}
     void start_request(int session, const strata::serve::RequestStart& r) override;
     bool save_state(const PagedParts& parts, std::vector<uint8_t>& state, std::string& err) const override;
@@ -780,7 +780,7 @@ PagedParts PagedDeepSeek::make_parts(PagedCard& card, size_t first, size_t count
 }
 
 bool PagedDeepSeek::prepare_images(const strata::serve::RequestLine& request, const std::vector<int64_t>& ids,
-                                    uint64_t& key, std::string& err) {
+                                    std::vector<strata::core::ConversationImageKey>& images, std::string& err) {
     pending_images_.clear();
     if (!request.pictures)
         return true;
@@ -791,7 +791,6 @@ bool PagedDeepSeek::prepare_images(const strata::serve::RequestLine& request, co
     std::vector<Pic> pictures;
     if (!read_pics(request.file, pictures, err))
         return false;
-    strata::core::SessionHasher hash(1469598103934665603ull);
     int64_t end = 0;
     for (const Pic& picture : pictures) {
         auto rows = image_cache_.get(m_, picture, err);
@@ -806,13 +805,9 @@ bool PagedDeepSeek::prepare_images(const strata::serve::RequestLine& request, co
             return false;
         }
         end = picture.start + n;
-        hash.update(&picture.start, sizeof picture.start);
-        hash.update(&picture.hash, sizeof picture.hash);
+        images.push_back({picture.start, picture.hash});
         pending_images_.push_back({picture.start, rows});
     }
-    key = hash.digest();
-    if (key == 0)
-        key = 1;
     return true;
 }
 

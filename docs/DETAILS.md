@@ -1777,8 +1777,9 @@ All 24,576 experts were on the GPU. Minimum free commit/physical RAM was old 8.0
 new 5.785/26.262 GiB. These are realistic-budget picture checks; the earlier 4 GiB-pool numbers above
 remain historical restricted-memory evidence, not this setup's speed.
 
-Both engines bind prefix reuse to a hash of all pictures and their positions. A different picture set reads the
-prompt again from token zero. Pauses and saved sessions keep that identity; Qwen also keeps rotary coordinates.
+Both engines reuse a kept conversation only up to the first picture that differs, in its place or its content;
+from there the prompt is read again from the latest checkpoint before that picture, as for changed text. Pauses and
+saved sessions keep each picture's place and hash; Qwen also keeps rotary coordinates.
 The DeepSeek tower's allocated memory is counted as scratch. An external encoder is included in system use
 (the panel's Other), rather than the language engine's weights.
 
