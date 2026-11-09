@@ -646,7 +646,7 @@ class StrataEngine:
     retain the legacy client path so updating the Python server does not require replacing every installed engine.
     """
     silence_s = ENGINE_SILENCE_S         # #481: main() sets the config's engine_silence_s (survives restart())
-    silent_note = None                   # #481: why the server ended a silent engine (death_note says it)
+    silent_note = None                   # why the server ended the engine itself (#481, close()): death_note says it
     gpu_busy = None                      # #1317: () -> bool, "the GPU is working" (the telemetry's reading); a GPU at work is not frozen
     last_err = None                      # #997: an ERR that was its last stdout line (death_note says it)
     batch = 0                            # --batch: the engine's batch slots (0: one request at a time)
@@ -2708,6 +2708,8 @@ class StrataEngine:
         EngineStuck when it still runs after all three."""
         if self.proc is None:
             return
+        self.silent_note = self.silent_note or ("The server ended it on purpose (Strata was stopping, unloading or "
+                                                "restarting the engine); it did not crash.")
         try:
             if self.proc.poll() is None:
                 try:
