@@ -12,6 +12,10 @@ byte with `--compare DIR` (greedy answers of a request must not depend on who el
 Standard library only.  The prompts are fixed texts, so two runs of the tool send the same requests.
 """
 import argparse, json, os, statistics, sys, threading, time, urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from strata_common.expert_fill import wait_for_http_experts  # noqa: E402
 
 TOPICS = [
     "the history of lighthouses and how their lenses worked",
@@ -97,6 +101,7 @@ def main():
     ap.add_argument("--compare", help="compare every answer with the files a --save run wrote")
     ap.add_argument("--json", help="write the table as JSON")
     a = ap.parse_args()
+    wait_for_http_experts(a.url, a.key)
     extra = {}
     out = []
     bad = 0

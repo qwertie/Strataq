@@ -54,6 +54,7 @@ from agent_turns_bench import SYSTEM, TOOLS         # noqa: E402  the same agent
 import serve_load                                   # noqa: E402  the burst client for --clients
 from strata_base.memory import read_ram             # noqa: E402
 from strata_cli.bench_facts import SECRET_KEY, base_if_path, redact_object, redactor, run_cmd  # noqa: E402
+from strata_common.expert_fill import wait_for_http_experts  # noqa: E402
 
 SCHEMA = 1
 CHAT_MAX_TOKENS = 100
@@ -626,6 +627,7 @@ def wait_ready(base: str, key: str, proc, timeout: float, log=print) -> bool:
             return False
         h = try_json(base, "/health", key, 5)
         if h and h.get("service") == "strata" and h.get("loaded"):
+            wait_for_http_experts(base, key, max(0.1, timeout - (time.time() - t0)), log)
             return True
         if time.time() - last > 30:
             log(f"  still loading ({int(time.time() - t0)} s) ...")
@@ -896,6 +898,7 @@ def main(argv=None) -> int:
     try:
         if is_strata(base, key):
             say(f"Using the Strata server already running at {base}.")
+            wait_for_http_experts(base, key, a.ready_timeout, say)
         elif a.url:
             print(f"No Strata server answers at {base}.", file=sys.stderr)
             return 2

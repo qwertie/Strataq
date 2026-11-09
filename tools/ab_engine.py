@@ -24,6 +24,8 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from strata_common.expert_fill import wait_for_http_experts  # noqa: E402
 PROMPTS = (
     "Write a Python function that merges two sorted lists into one sorted list, with a docstring and two tests.",
     "Explain in two paragraphs how a refrigerator moves heat from inside to outside.",
@@ -79,6 +81,8 @@ def arm_server(base: dict, name: str, settings: dict, port: int, rnd: int, prefi
     try:
         t0 = time.time()
         wait_ready(port, proc)
+        wait_for_http_experts(f"http://127.0.0.1:{port}")
+        post(port, "Say hi.", 8)
         print(f"round {rnd} {name}: ready in {time.time() - t0:.0f} s", flush=True)
         yield
     finally:
@@ -98,7 +102,6 @@ def wait_ready(port: int, proc: subprocess.Popen, timeout: float = 1800) -> None
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=5) as r:
                 if r.status == 200:
-                    post(port, "Say hi.", 8)
                     return
         except Exception:
             pass

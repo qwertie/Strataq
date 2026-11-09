@@ -143,22 +143,21 @@ uint64_t get_ram_pool_bytes(const PagedSettings& s, uint64_t headroom, uint64_t 
 /// Gets the RAM's pool's config: the page size of `card`'s pool (a conversation's blocks are alike in both) and chunks
 /// of kChunkBytes in whole pages.
 strata::core::PagePoolConfig get_ram_pool_config(const PagedCard& card);
-/// Gets the order in which the RAM's pool takes experts: those of `profile` (hottest first) that the GPUs' pools do
-/// not hold (`residency`, PagedModel::get_residency's), then those they hold, then the other experts of the
-/// `blob_bytes.size()` layers of `n_expert`, so that RAM holds first what the GPUs lack.
+/// Gets the order in which the RAM's pool takes experts: those of `profile` (hottest first), then the other experts
+/// of the `blob_bytes.size()` layers of `n_expert`.  Once the GPUs' pools are full, the engine moves the experts they
+/// hold to the end (RamExperts::rank_gpu_experts_last), so that RAM holds first what the GPUs lack.
 std::vector<strata::core::ExpertKey> get_ram_ranking(const std::vector<strata::core::ExpertKey>& profile,
-                                                     const std::vector<int32_t>& residency,
                                                      const std::vector<uint64_t>& blob_bytes, int64_t n_expert);
 /// Opens the RAM's page pool `ram` over `files` (the experts on the SSD) and gets whether an expert a GPU's pool evicts
 /// is copied back to it (`copy_back`: --copy-back; auto by the speeds of copying from `gpu_bytes`, the start of
 /// `card`'s pool's first chunk, and of reading the SSD, measured here).  The pool takes --ram-mib, by default
 /// get_ram_room(`headroom`) but no more than every expert and its staging ring of `ring` buffers take; its
-/// conversations are `layout`'s, its pages `card`'s (get_ram_pool_config).  It holds the experts in get_ram_ranking's
-/// order as far as they fit.  Says on stderr after `program` what it took.
+/// conversations are `layout`'s, its pages `card`'s (get_ram_pool_config).  It opens empty: the engine's refills
+/// bring in the experts in get_ram_ranking's order as far as they fit.  Says on stderr after `program` what it took.
 bool open_ram_pool(const std::string& program, const PagedSettings& s, strata::core::ExpertSource& files,
                    uint64_t headroom, int ring, const strata::core::StateLayout& layout, const PagedCard& card,
                    const std::vector<uint64_t>& blob_bytes, int64_t n_expert,
-                   const std::vector<strata::core::ExpertKey>& profile, const std::vector<int32_t>& residency,
+                   const std::vector<strata::core::ExpertKey>& profile,
                    const uint8_t* gpu_bytes, strata::core::RamExperts& ram, bool& copy_back, std::string& err);
 
 /// Gets why the engine cannot decode with `s` on a model whose steps run at most `max_rows` rows (empty: it can).

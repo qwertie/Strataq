@@ -21,6 +21,7 @@ import re
 import socket
 import stat
 import statistics
+import sys
 import threading
 import time
 import urllib.error
@@ -32,6 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from strata_common.client import ClientError, Endpoint, _NoRedirect
+from strata_common.expert_fill import wait_for_http_experts
 from strata_common.profiles import ProfileError
 from strata_base import atomic as _atomic_mod
 from strata_base import posix_owner
@@ -746,6 +748,13 @@ def run(endpoint: Endpoint, telemetry: Endpoint, out: Path, *, suite: str = "ser
     instance = (before.get("instance") or {}).get("id")
     if not instance or (before.get("model") or {}).get("loaded") is not True:
         raise ProfileError("benchmark needs a loaded Strata instance with versioned telemetry", 5)
+    try:
+        wait_for_http_experts(endpoint.base_url, endpoint.credential or "",
+                              log=lambda message: print(message, file=sys.stderr))
+    except urllib.error.HTTPError as error:
+        # A key the server refuses fails the suite's requests too, and the suite reports those as its results
+        if error.code not in (401, 403):
+            raise
     managed_before = None
     if require_managed_match:
         managed_before = _managed_match(profile_identity or {}, endpoint.root, before)

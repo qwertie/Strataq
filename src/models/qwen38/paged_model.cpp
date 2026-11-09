@@ -298,6 +298,7 @@ private:
     std::vector<int32_t> picks_;       ///< the last step's token after each row, for the drafter
     std::vector<const std::vector<int32_t>*> histories_; ///< consumed tokens for the current step
     std::vector<int> history_lengths_; ///< each session's penalty window
+    std::vector<uint8_t> staging_;     ///< an expert read from the SSD on its way to a GPU (load_expert)
 };
 
 std::string get_split_hop_refusal(const Options& o);
@@ -478,6 +479,7 @@ PagedQwen::PagedQwen(Model& m, Conversation& conv, const PagedCards& cards, Mode
     facts.draft_limits.confidence = (float) o.spec_min_p;
     facts.drafter_start = "--mtp and a --lookahead above 0";
     facts.expert_bytes = get_blob_bytes(m);
+    staging_.resize(*std::max_element(facts.expert_bytes.begin(), facts.expert_bytes.end()));
     for (size_t i = 0; i < m.profile_all.size() && (int64_t) i < o.expert_cache; ++i)
         facts.split_ranking.push_back({m.profile_all[i].first, m.profile_all[i].second});
     facts.gpu_experts = o.expert_cache;
@@ -622,13 +624,15 @@ std::vector<strata::core::ExpertKey> PagedQwen::get_card_ranking(int64_t lb, int
 }
 
 bool PagedQwen::load_expert(const PagedCard& card, strata::core::ExpertKey key, int32_t first, std::string& err) {
-    const uint8_t* blob = m_.srcp->blob_stable(key.layer, key.expert);
+    const auto bytes = (int64_t) facts.expert_bytes[(size_t) key.layer];
+    // an expert the RAM's pool lacks is read past it, so that the pool keeps its pages for the experts the GPUs lack
+    const uint8_t* blob = ram_.holds(key.layer, key.expert) ? m_.srcp->blob_stable(key.layer, key.expert)
+                          : m_.srcp->copy_blob(key.layer, key.expert, staging_.data()) ? staging_.data()
+                                                                                       : nullptr;
     if (blob == nullptr)
         err = "no bytes for layer " + std::to_string(key.layer) + " expert " + std::to_string(key.expert);
     const strata::core::OnDevice on(card.dev);
-    return blob != nullptr &&
-           cards_[card.index].cache->fill_slot_blocking(
-               first, blob, err, (int64_t) strata::kernels::cpu::expert_layout().blob_bytes(key.layer));
+    return blob != nullptr && cards_[card.index].cache->fill_slot_blocking(first, blob, err, bytes);
 }
 
 bool PagedQwen::publish_residency(const PagedCard& card, std::string& err) {
@@ -1429,9 +1433,9 @@ bool open_pages(Model& m, PagedCard& card, ModelCard& mc, int64_t tokens_min, in
 }
 
 /// Opens the RAM's page pool `ram` beside the cards' (open_ram_pool) and gets whether an expert a GPU's pool evicts is
-/// copied back to it (`copy_back`): first the experts of the profile that the GPUs' pools do not hold.  Its conversation
-/// layout has the whole model's regions, so that a paused conversation is one conversation in it wherever the layer
-/// cut is (PagedQwen::get_ram_span).
+/// copied back to it (`copy_back`); it takes the profile's experts once the engine serves.  Its conversation layout
+/// has the whole model's regions, so that a paused conversation is one conversation in it wherever the layer cut is
+/// (PagedQwen::get_ram_span).
 bool open_ram(Model& m, const PagedCards& cards, const ModelCards& model_cards, const PagedSettings& s,
               strata::core::RamExperts& ram, bool& copy_back, std::string& err) {
     std::vector<strata::core::ExpertKey> profile;
@@ -1441,8 +1445,8 @@ bool open_ram(Model& m, const PagedCards& cards, const ModelCards& model_cards, 
     const int ring = strata::kernels::kVerifyMaxT * (int) m.K;   // the experts of one layer of a step
     return get_card_layout(m, cards.back(), model_cards.back(), 0, m.g.n_layers, layout, err) &&
            strata::serve::open_ram_pool(kProgram, s, m.src, m.o.resident_headroom, ring, layout, cards[0],
-                                        get_blob_bytes(m), m.g.n_expert, profile, m.host_res,
-                                        m.xcache.device_slot(0), ram, copy_back, err);
+                                        get_blob_bytes(m), m.g.n_expert, profile, m.xcache.device_slot(0), ram,
+                                        copy_back, err);
 }
 
 /// Gets why strata-q38 cannot run the loaded model `m` (empty: it can).

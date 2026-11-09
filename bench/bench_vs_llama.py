@@ -22,6 +22,9 @@ from pathlib import Path
 
 import psutil
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from strata_common.expert_fill import wait_for_http_experts  # noqa: E402
+
 CELLS = [("4k", 4000, 2), ("32k", 32000, 1)]       # (name, prompt tokens, reps per round)
 TEMPS = [0.0, 0.7]
 GEN = 256
@@ -112,6 +115,8 @@ class Engine:
             time.sleep(2)
         else:
             raise RuntimeError("server not ready in 1500 s")
+        if self.cfg["kind"] == "strata":
+            wait_for_http_experts(f"http://127.0.0.1:{PORT}")
         self.load_s = time.time() - self.t0
 
     def stop(self):

@@ -1224,14 +1224,18 @@ class StrataEngine:
     def _ask_memory_report(self, command: str, refused: type[Exception] | None = None) -> dict:
         """Sends `command` and parses its GET_MEMORY_USE-style answer for memory() and change_settings()."""
         memories, settings, held, shortfall, pause_directory = [], {}, [], None, None
-        details = {}
+        details, expert_fill = {}, {}
         for f in self._ask(command, "MEMORY", end="END_MEMORY",
                            timeout=self.MEMORY_QUERY_TIMEOUT_S,
                            also=("SETTINGS", "CONVERSATION", "SHORTFALL", "MEMORY_BLOCK",
-                                 "PAUSE_DIRECTORY", "MEMORY_DETAIL"),
+                                 "PAUSE_DIRECTORY", "MEMORY_DETAIL", "EXPERT_FILL"),
                            refused=refused):
             # MEMORY <id> [key=value ...] [name=<text to the end>]  /  CONVERSATION ...  /  SETTINGS [key=value ...]  /
             # SHORTFALL <text>
+            if f[0] == "EXPERT_FILL":
+                values = dict(x.split("=", 1) for x in f[1:])
+                expert_fill = {"loaded": bool(int(values["loaded"])), "pending": int(values["pending"])}
+                continue
             if f[0] == "MEMORY_DETAIL":
                 details[f[1]] = unquote(f[2])
                 continue
@@ -1278,6 +1282,7 @@ class StrataEngine:
         if "context_capacity" in self.info and "context" in settings:
             self.max_context = settings["context"]
         return {"memories": memories, "settings": settings, **({"details": details} if details else {}),
+                **({"expert_fill": expert_fill} if expert_fill else {}),
                 **({"conversations": held} if held else {}),
                 **({"shortfall": shortfall} if shortfall else {}),
                 **({"pause_directory": pause_directory} if pause_directory else {})}

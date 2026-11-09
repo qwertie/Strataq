@@ -34,6 +34,7 @@ from pathlib import Path
 from strata_cli import bench_facts as facts
 from strata_base.atomic import write_new
 from strata_control.bench import _private_mkdir
+from strata_common.expert_fill import wait_for_experts
 from strata_common.profiles import ProfileError
 
 FORMAT = "strata-standard-benchmark"
@@ -784,6 +785,8 @@ def run(target: Target, out: Path | None, *, out_root: Path | None = None, optio
         raise ProfileError("no Strata server answers at that address", 5)
     if health.get("loaded") is not True:
         raise ProfileError("the server has no model loaded; the benchmark needs a loaded model", 5)
+    wait_for_experts(lambda: target.get("/v1/memory", timeout=30) or {},
+                     log=lambda message: print(message, file=sys.stderr))
     props = target.get("/props", timeout=15)
     status = target.get("/v1/status", timeout=15) or {}
     if props is None:

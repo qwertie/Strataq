@@ -3285,9 +3285,10 @@ int Model::load() {
     // ---- R4.2e: fill the tier from the profile.  This is the only place the plan is applied, and it runs
     // ONCE: with `slots` pairs and `slots` slots the cache is full when this returns, so the decode-time
     // admission finds no room and every non-profiled expert stays a CPU miss.  That is what makes the profile
-    // the policy rather than a hint.
+    // the policy rather than a hint.  (With open_expert_pages, strata-q38's, the pools are filled after READY
+    // instead, by PagedEngine::refill_experts; so are a layer split's stages with open_stage_pages, below.)
     int64_t prefilled = 0;
-    if (!profile.empty() && srcp != nullptr) {
+    if (!open_expert_pages && !profile.empty() && srcp != nullptr) {
         // #369 (dag08): per layer, a full layer skips only its own pairs - each layer takes its hottest experts until
         // its range is full (one full layer used to end the whole fill, leaving most layers empty)
         const bool per_layer = xcache.per_layer_admission();
@@ -3424,30 +3425,33 @@ int Model::load() {
                          sized.empty() && !open_stage_pages ? "no room" : err.c_str());
             return 1;
         }
-        int64_t filled = 0;
-        for (const auto& pr : st.profile) {
-            if (filled >= st.cache.slots()) break;
-            const int32_t slot = st.cache.admit(pr.first, pr.second);
-            if (slot == strata::core::kNotResident) break;
-            const uint8_t* b = srcp->blob_stable(pr.first, pr.second);
-            if (b == nullptr || !st.cache.fill_slot_blocking(slot, b, err, (int64_t) lay.blob_bytes(pr.first))) {
-                std::fprintf(stderr, "strata generate: layer split, CUDA%d profile fill failed at pair %lld: %s\n",
-                             st.dev, (long long) filled, err.c_str());
+        if (!open_stage_pages) {
+            int64_t filled = 0;
+            for (const auto& pr : st.profile) {
+                if (filled >= st.cache.slots()) break;
+                const int32_t slot = st.cache.admit(pr.first, pr.second);
+                if (slot == strata::core::kNotResident) break;
+                const uint8_t* b = srcp->blob_stable(pr.first, pr.second);
+                if (b == nullptr || !st.cache.fill_slot_blocking(slot, b, err, (int64_t) lay.blob_bytes(pr.first))) {
+                    std::fprintf(stderr, "strata generate: layer split, CUDA%d profile fill failed at pair %lld: %s\n",
+                                 st.dev, (long long) filled, err.c_str());
+                    return 1;
+                }
+                ++filled;
+            }
+            if (filled == 0 || !st.cache.verify_slot(st.cache.slot_of(st.profile[0].first, st.profile[0].second),
+                                                     srcp->blob_stable(st.profile[0].first, st.profile[0].second), err,
+                                                     (int64_t) lay.blob_bytes(st.profile[0].first))) {
+                std::fprintf(stderr, "strata generate: layer split, CUDA%d expert cache: %s\n", st.dev,
+                             filled == 0 ? "nothing filled" : err.c_str());
                 return 1;
             }
-            ++filled;
+            std::fprintf(stderr, "strata generate: layer split: CUDA%d runs layers %lld-%lld, expert cache %lld slots "
+                                 "(%.2f GiB), %lld of its %zu profiled pairs; slot 0 verified\n",
+                         st.dev, (long long) st.lb, (long long) (st.le - 1),
+                         (long long) st.cache.slots(), st.cache.gib(),
+                         (long long) filled, st.profile.size());
         }
-        if (filled == 0 || !st.cache.verify_slot(st.cache.slot_of(st.profile[0].first, st.profile[0].second),
-                                                 srcp->blob_stable(st.profile[0].first, st.profile[0].second), err,
-                                                 (int64_t) lay.blob_bytes(st.profile[0].first))) {
-            std::fprintf(stderr, "strata generate: layer split, CUDA%d expert cache: %s\n", st.dev,
-                         filled == 0 ? "nothing filled" : err.c_str());
-            return 1;
-        }
-        std::fprintf(stderr, "strata generate: layer split: CUDA%d runs layers %lld-%lld, expert cache %lld slots "
-                             "(%.2f GiB), %lld of its %zu profiled pairs; slot 0 verified\n",
-                     st.dev, (long long) st.lb, (long long) (st.le - 1), (long long) st.cache.slots(), st.cache.gib(),
-                     (long long) filled, st.profile.size());
     }
     if (multi_gpu)
         std::fprintf(stderr, "strata generate: layer split: CUDA0 runs layers 0-%lld\n", (long long) (split_at[0] - 1));

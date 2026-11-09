@@ -10,6 +10,7 @@
 //     [PAUSE_DIRECTORY <path>]                                                  folder for automatic SSD pauses
 //     [CONVERSATION <id> <place> <state> <tokens> <capacity> <bytes> <used>]     with per_conversation: one per
 //                                                                                conversation (LIST_CONVERSATIONS')
+//     [EXPERT_FILL loaded=<0|1> pending=<n>]                                     paged engines: experts' fill
 //     SETTINGS [context=<tokens>] [concurrent=<n>] [rows=<n>] [lookahead=<n>] [tokens_min=<tokens>]
 //     [SHORTFALL <text>]                                                         CHANGE_SETTINGS' answer only
 //     END_MEMORY
@@ -31,8 +32,11 @@
 // bytes of it that are page-locked for the GPUs to read (strata-q38's RAM pool); Windows counts them in a GPU's shared
 // use too, so a reader takes them off that.  name: the device's name, to the end of the line.  settings: the context
 // in tokens, the conversations decoded at once, the rows one step computes, the most guesses one conversation adds in
-// a step, the conversation tokens kept free of experts, and what else the engine can change.  A value the engine does
-// not know is left out, not guessed.  The command changes nothing.
+// a step, the conversation tokens kept free of experts, and what else the engine can change.  EXPERT_FILL (the paged
+// engines, which fill their expert pools after READY): loaded=1 when no pool can take more experts now, which an
+// eviction or a grown pool turns back to 0; pending: the experts the pools should hold and do not, counting those that
+// wait for pages conversations hold.  A value the engine does not know is left out, not guessed.  The command changes
+// nothing.
 //
 //   CHANGE_SETTINGS <name>=<value> [...]      -> the GET_MEMORY_USE answer once changed, or ERR <why>, changing
 //                                                nothing of the line
@@ -49,6 +53,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -99,6 +104,10 @@ struct MemoryReport {
     std::vector<std::pair<std::string, int64_t>> settings;   ///< SETTINGS' keys, in order
     /// Each conversation the engine holds gets a CONVERSATION line (what it takes, conversation by conversation).
     bool per_conversation = false;
+    /// Whether the expert pools hold all they can take now (EXPERT_FILL's loaded); unset, no EXPERT_FILL line, for an
+    /// engine that loads its experts before READY.
+    std::optional<bool> experts_loaded;
+    uint64_t experts_pending = 0;   ///< EXPERT_FILL's pending: experts the pools should hold and do not
     /// CHANGE_SETTINGS' answer: what the change got less of than asked, in words (a SHORTFALL line); empty: nothing.
     std::string shortfall;
     /// Folder used by this engine for automatic SSD pause files.
@@ -198,6 +207,9 @@ inline std::string format_memory_report(MemoryReport report, const std::vector<c
         s += "PAUSE_DIRECTORY " + report.pause_directory + "\n";
     for (const auto& [key, value] : report.details)
         s += "MEMORY_DETAIL " + key + " " + encode_memory_label(value) + "\n";
+    if (report.experts_loaded)
+        s += std::string("EXPERT_FILL loaded=") + (*report.experts_loaded ? "1" : "0") +
+             " pending=" + std::to_string(report.experts_pending) + "\n";
     s += "SETTINGS";
     for (const auto& [key, v] : report.settings)
         s += " " + key + "=" + std::to_string(v);

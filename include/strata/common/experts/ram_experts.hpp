@@ -19,7 +19,7 @@ namespace strata::core {
 /// them, else read from the SSD.  An expert a step reads from the SSD (blob, prefetch) takes the place of the least
 /// recently used one of its size, unless the current layer has used that one, so the pool keeps the experts the
 /// conversations use; else it is read into a ring of staging buffers.  The pool's conversations are paused ones
-/// (pool_copy.hpp); they take the least recently used experts' pages, and `pages().refill` puts those back.
+/// (pool_copy.hpp); they take the least recently used experts' pages, and `refill` puts those back.
 ///
 /// Threads: the engine's thread makes every call but blob, prefetch, copy_blob and copy_blobs, which the prompt path's
 /// threads make too while the engine's thread reads a prompt chunk and makes no other call (a layer split's next card
@@ -36,12 +36,18 @@ public:
     /// Makes the pool in `bytes` of page-locked RAM, less a staging ring of `ring` buffers of the largest expert (as
     /// many as the experts a step's layer may read from the SSD), with the conversations' `layout` and `config`'s
     /// limits; `config.page_bytes` is the GPU pool's, so that a conversation's blocks are alike in both, and the pool
-    /// takes its memory in chunks of `config.chunk_bytes` (at most the pool).  Then reads the experts of `ranking`
-    /// into it, in order, as far as they fit.  The experts of layer l are `blob_bytes[l]` bytes, `n_expert` per layer.
-    /// `files` reads the experts from the SSD and must outlive this object.
+    /// takes its memory in chunks of `config.chunk_bytes` (at most the pool).  The pool opens empty; `refill` brings
+    /// in the experts of `ranking` in order, as far as they fit.  The experts of layer l are `blob_bytes[l]` bytes,
+    /// `n_expert` per layer.  `files` reads the experts from the SSD and must outlive this object.
     bool open(ExpertSource& files, uint64_t bytes, int ring, const StateLayout& layout, PagePoolConfig config,
               const std::vector<uint64_t>& blob_bytes, int64_t n_expert, const std::vector<ExpertKey>& ranking,
               std::string& err);
+    /// Puts up to `max` of the experts the pool wants into free pages (ExpertPages::refill), reading them from the
+    /// SSD in one batch of requests.  Gets how many, or -1 (with `err`) when the read failed; then none of them stays.
+    int refill(int max, uint64_t& wait_ms, std::string& err);
+    /// Moves the experts the GPUs' pools hold (`residency`: per expert, its GPU page, or negative) behind the others
+    /// in the pool's ranking, each group keeping its order, so that refills bring in what the GPUs lack first.
+    void rank_gpu_experts_last(const std::vector<int32_t>& residency);
     /// Takes or gives back chunks so that the pool and the staging ring hold `bytes` (ExpertPages::resize).
     PoolResize resize(uint64_t bytes) { return pages_.resize(bytes > ring_bytes() ? bytes - ring_bytes() : 0); }
     /// Copies expert `key` in from `bytes` (any memory: a GPU's pages it is leaving) when the pool does not hold it
@@ -100,6 +106,9 @@ private:
     uint8_t* alloc(uint64_t bytes);
     void free(uint8_t* p);
 
+    /// While `refill` runs, the batch it reads from the SSD after admitting its experts (the `load` hook adds them);
+    /// null otherwise, when the hook reads each expert at once.
+    Reads* refill_reads_ = nullptr;
     ExpertSource* files_ = nullptr;
     /// The memory is page-locked (the GPU reads it in place), else pageable: decided by the first allocation.
     bool page_locked_ = true;
@@ -116,7 +125,8 @@ private:
     /// one read from the SSD, as the layer's work may still read it (the previous layers' work is done).  0 before
     /// the first layer: only lower-ranked experts give way.
     uint64_t layer_t0_ = 0;
-    /// Held by blob and prefetch, which change the pool and the ring; shared by copy_blobs, which only reads them
+    /// Held by blob, prefetch and refill, which change the pool and the ring; shared by copy_blobs, which only reads
+    /// them
     mutable std::shared_mutex mu_;
 };
 

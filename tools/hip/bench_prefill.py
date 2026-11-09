@@ -9,8 +9,12 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
 import time
 import urllib.request
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from strata_common.expert_fill import wait_for_http_experts  # noqa: E402
 
 PATTERN = re.compile(r'prompt (\d+) tokens = (\d+) reused \+ (\d+) read in (\d+) ms \(([0-9.]+) tok/s\), (\d+) generated in (\d+) ms \(([0-9.]+) tok/s\)')
 FIELDS = ('prompt_tokens', 'reused', 'fresh', 'prefill_ms', 'prefill_tps', 'generated', 'decode_ms', 'decode_tps')
@@ -24,6 +28,7 @@ def main():
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--label', required=True)
     args = p.parse_args()
+    wait_for_http_experts(args.url, os.environ.get("STRATA_API_KEY", ""))
     results = []
 
     def request(messages, kind, trial):

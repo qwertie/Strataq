@@ -42,6 +42,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT))
+from strata_common.expert_fill import wait_for_experts, wait_for_http_experts  # noqa: E402
 from dsv41.smoke import tokenizer  # noqa: E402
 from report import GPU_FIELDS, get_cut_move_problem, startup_lines  # noqa: E402
 
@@ -135,6 +137,7 @@ def run_engine(a, env: dict[str, str]) -> int:
     failed = False
     try:
         e.until("READY")
+        wait_for_experts(lambda: e.ask_quietly("GET_MEMORY_USE", "END_MEMORY"))
         e.record_memory("ready")
         SCENARIOS[a.scenario](e, a)
         e.record_memory("after scenario")
@@ -637,6 +640,7 @@ def wait_healthy(p: subprocess.Popen, timeout_s: int):
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/health", timeout=5) as r:
                 if r.status == 200:
+                    wait_for_http_experts(f"http://127.0.0.1:{PORT}", timeout=max(0.1, end - time.time()))
                     return
         except OSError:
             pass

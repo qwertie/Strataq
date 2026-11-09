@@ -555,6 +555,12 @@ class EngineConversations(unittest.TestCase):
                                              "kv_quantization": "FP8 and FP4"})
         self.assertEqual(report["settings"]["has_drafter"], 1)
 
+    def test_expert_fill(self):
+        report = self.bare(["EXPERT_FILL loaded=0 pending=42", "END_MEMORY"]).memory()
+        self.assertEqual(report["expert_fill"], {"loaded": False, "pending": 42})
+        report = self.bare(["EXPERT_FILL loaded=1 pending=9", "END_MEMORY"]).memory()
+        self.assertEqual(report["expert_fill"], {"loaded": True, "pending": 9})
+
     def test_memory(self):
         engine = self.bare(["MEMORY gpu0 total=1000 free=300 unified=1 weights=100 experts=450 name=Radeon  8060S",
                             "NOTE something else", "MEMORY ram paused=300 paused_count=2 paused_budget=800",

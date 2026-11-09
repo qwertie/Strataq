@@ -11,6 +11,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import strata_tokenizer as ST  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from strata_common.expert_fill import wait_for_protocol_experts  # noqa: E402
+
 QUESTIONS = [
     "Explique en detail le fonctionnement d'un B-tree.",
     "Write a Python function that merges overlapping intervals, then explain it.",
@@ -51,6 +54,7 @@ class Engine:
                                   stdout=subprocess.PIPE, stderr=self.log, text=True, bufsize=1, env=env)
         for line in self.p.stdout:
             if line.startswith("READY"):
+                wait_for_protocol_experts(self.send, self.p.stdout.readline)
                 return
         raise SystemExit(f"the engine ended before READY - see {self.log_path}")
 

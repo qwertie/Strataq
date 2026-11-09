@@ -22,7 +22,8 @@ engine).
   strata-q38 runs it for Qwen3.8 (`src/models/qwen38/paged_model.cpp`), strata-ds41 for DeepSeek
   (`src/models/deepseekv41/paged_model.cpp`). What each model's start does before it, `paged_start.cpp`: the engine's
   own options, the runtime's environment, the cards' links, the pools' sizes and their GPU memory, and the RAM's pool
-  opened with the experts the GPUs lack first and the copy-back rule (`open_ram_pool`).
+  and the copy-back rule (`open_ram_pool`). The pools open empty: the engine says `READY` and then fills them while
+  it serves, the GPUs' first, and the RAM's with the experts the GPUs lack first.
 - `decode_selection.hpp`: selects the highest-priority requests for a paged decode step. Equal priorities keep
   request order until completion or preemption; requests waiting for a turn do not rotate into the selected set.
   Cancellations drain first without generating rows. `concurrent` limits this selected set, not admitted requests

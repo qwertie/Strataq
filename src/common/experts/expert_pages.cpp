@@ -29,7 +29,7 @@ bool ExpertPages::open(ExpertCache& cache, ChunkMemory memory, uint64_t bytes, c
                    max_experts, ranking, err))
         return false;
     cache.set_admitter([this](int64_t layer, int64_t expert) { return admit(layer, expert); });
-    want_missing();   // the cache's own fill takes its slots, the arena; `refill` fills the other chunks
+    want_missing();
     return true;
 }
 
@@ -137,9 +137,7 @@ int ExpertPages::refill(int max, uint64_t& wait_ms, std::string& err) {
     int loaded = 0;
     while (loaded < max && !evicted_.empty()) {
         const ExpertKey key = ranked_[(size_t) *evicted_.begin()];
-        free_only_ = true;
-        const int32_t slot = cache_ != nullptr ? cache_->admit(key.layer, key.expert) : admit(key.layer, key.expert);
-        free_only_ = false;
+        const int32_t slot = admit_free(key);
         if (slot == kNotResident) {
             const uint64_t opening = pool_->get_next_opening();
             if (opening > 0)
@@ -177,6 +175,19 @@ int32_t ExpertPages::admit(int64_t layer, int64_t expert, uint64_t used_at) {
 
 bool ExpertPages::replace(int32_t layer, int32_t out, int32_t in, std::string& err) {
     const ExpertKey gone{layer, out}, key{layer, in};
+    if (pool_->find_expert(key) != no_page)
+        return true;
+    if (const int32_t free_slot = admit_free(key); free_slot != kNotResident) {
+        if (!hooks_.load(key, free_slot, err)) {
+            pool_->remove_expert(key);
+            if (cache_ != nullptr)
+                cache_->evict(layer, in);
+            return false;
+        }
+        hooks_.moved(key, free_slot);
+        note_use(key);
+        return true;
+    }
     const PageId first = pool_->replace_expert(gone, key);
     if (first == no_page)
         return true;
@@ -200,6 +211,15 @@ bool ExpertPages::replace(int32_t layer, int32_t out, int32_t in, std::string& e
         cache_->replace(layer, out, in);
     hooks_.moved(key, slot);
     return true;
+}
+
+/// Brings `key` into free pages without evicting anything, for `refill` and `replace`: through the cache when there
+/// is one, so that the cache records the slot.  Gets the slot of its first page, or kNotResident.
+int32_t ExpertPages::admit_free(ExpertKey key) {
+    free_only_ = true;
+    const int32_t slot = cache_ != nullptr ? cache_->admit(key.layer, key.expert) : admit(key.layer, key.expert);
+    free_only_ = false;
+    return slot;
 }
 
 /// Gets a chunk of `bytes` for the pool (its alloc hook): the cache's arena first, then memory_'s.  A cache's chunk

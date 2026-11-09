@@ -19,7 +19,6 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
-#include <climits>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -417,11 +416,6 @@ public:
     }
     void end_request() override { m_.save_profile(); }
 
-    /// Puts the experts `card`'s pool wants into it before the engine starts, as strata-q38's expert cache fills at
-    /// load, read from the files (through hooks of its own, which the engine's replace); false (and `err`) when a read
-    /// or a copy failed.
-    bool fill_card(PagedCard& card, std::string& err);
-
 private:
     /// Gets the experts of trunk layers [lb, le) in the order the GPU's pool takes them (get_ranking), the drafter's
     /// before them while it is on.
@@ -645,8 +639,7 @@ int run_paged_engine(int argc, char** argv) {
         int64_t most = x.gpu_experts;
         const auto ranking = model.get_card_ranking(card.lb, card.le, most);
         if (!model.get_card_layout(card, card.lb, card.le, stage_layout, err) ||
-            !open_card_pool(m, settings, stage_layout, (uint64_t) o.reserve_mib << 20, most, ranking, card, err) ||
-            !model.fill_card(card, err)) {
+            !open_card_pool(m, settings, stage_layout, (uint64_t) o.reserve_mib << 20, most, ranking, card, err)) {
             std::fprintf(stderr, "%s: %s\n", kProgram.c_str(), err.c_str());
             return 1;
         }
@@ -656,8 +649,8 @@ int run_paged_engine(int argc, char** argv) {
         m.get_usage().assign((size_t) g.nl * (size_t) g.n_exp, 0.0f);
     const std::vector<uint64_t> trunk(blobs.begin(), blobs.begin() + g.nl);   // (the RAM's pool: the trunk's experts)
     if (!strata::serve::open_ram_pool(kProgram, settings, files, kRamHeadroom, kCpuLaneExperts, layout, card, trunk,
-                                      g.n_exp, get_ranking(m, 0, g.nl, false), model.get_residency(),
-                                      card.experts.pool().page_address(0), ram, copy_back, err)) {
+                                      g.n_exp, get_ranking(m, 0, g.nl, false), card.experts.pool().page_address(0),
+                                      ram, copy_back, err)) {
         std::fprintf(stderr, "%s: %s\n", kProgram.c_str(), err.c_str());
         return 1;
     }
@@ -748,24 +741,6 @@ bool PagedDeepSeek::publish_residency(const PagedCard& card, std::string& err) {
             at[i] = pool.page_address((strata::core::PageId) residency_[i]);
     const strata::core::OnDevice on(card.dev);
     return m_.set_expert_addresses(at, err, (int) card.index);
-}
-
-bool PagedDeepSeek::fill_card(PagedCard& card, std::string& err) {
-    strata::core::ExpertPages::Hooks hooks;
-    hooks.load = [&](strata::core::ExpertKey key, int32_t first, std::string& e) {
-        return copy_expert(card, key, first, false, e);
-    };
-    hooks.moved = [&](strata::core::ExpertKey key, int32_t first) {
-        residency_[(size_t) key.layer * (size_t) facts.n_expert + (size_t) key.expert] = first;
-    };
-    card.experts.set_hooks(std::move(hooks));
-    for (uint64_t wait_ms = 0;;) {
-        const int got = card.experts.refill(INT_MAX, wait_ms, err);
-        if (got < 0)
-            return false;
-        if (got == 0)
-            return publish_residency(card, err);
-    }
 }
 
 /// Copies expert `key` into `card`'s pool from page `first`: from the RAM's pool (`from_ram`, which holds it) or from

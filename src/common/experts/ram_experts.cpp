@@ -11,8 +11,6 @@
 namespace strata::core {
 namespace {
 
-/// The experts read from the SSD in one batch of requests while the pool fills.
-constexpr size_t kFillBatch = 64;
 /// The most bytes of experts one read from the SSD takes on the prompt path's threads (copy_blobs).  The file source
 /// keeps a buffer as large as the largest read on each thread that reads: its 32 stager threads kept 16-28 MiB each for
 /// their batches of 8 experts, 0.8 GiB at a 1 GiB RAM setting.  32 threads keep the drive as busy with smaller reads.
@@ -60,6 +58,10 @@ bool RamExperts::open(ExpertSource& files, uint64_t bytes, int ring, const State
     }
     ExpertPages::Hooks hooks;
     hooks.load = [this](ExpertKey key, int32_t first, std::string& e) {
+        if (refill_reads_ != nullptr) {
+            refill_reads_->add(key.layer, key.expert, get_page(first));
+            return true;
+        }
         Reads one;
         one.add(key.layer, key.expert, get_page(first));
         if (read_from_ssd(one))
@@ -69,22 +71,29 @@ bool RamExperts::open(ExpertSource& files, uint64_t bytes, int ring, const State
     };
     hooks.moved = [this](ExpertKey key, int32_t first) { first_page_[index_of(key.layer, key.expert)] = first; };
     pages_.set_hooks(std::move(hooks));
-    Reads batch;
-    for (size_t i = 0; i < ranking.size(); ++i) {
-        const ExpertKey key = ranking[i];
-        if (const int32_t first = pages_.admit(key.layer, key.expert); first != kNotResident) {
-            first_page_[index_of(key.layer, key.expert)] = first;
-            batch.add(key.layer, key.expert, get_page(first));
-        }
-        if (batch.layers.size() < kFillBatch && i + 1 < ranking.size())
-            continue;
-        if (!read_from_ssd(batch)) {
-            err = "the RAM's page pool: an SSD read failed";
-            return false;
-        }
-        batch = {};
-    }
+    pages_.set_ranking(ranking, (int64_t) first_page_.size());   // (opened without a cache, it wants none until then)
     return true;
+}
+
+int RamExperts::refill(int max, uint64_t& wait_ms, std::string& err) {
+    const std::unique_lock lock(mu_);
+    Reads reads;
+    refill_reads_ = &reads;
+    const int loaded = pages_.refill(max, wait_ms, err);
+    refill_reads_ = nullptr;
+    if (!read_in(reads)) {
+        err = "the RAM's page pool: an SSD read failed";
+        return -1;
+    }
+    return loaded;
+}
+
+void RamExperts::rank_gpu_experts_last(const std::vector<int32_t>& residency) {
+    std::vector<ExpertKey> ranking = pages_.get_ranking();
+    std::stable_partition(ranking.begin(), ranking.end(), [&](ExpertKey key) {
+        return residency[index_of(key.layer, key.expert)] < 0;
+    });
+    pages_.set_ranking(ranking, (int64_t) first_page_.size());
 }
 
 bool RamExperts::keep_copy(ExpertKey key, const uint8_t* bytes) {

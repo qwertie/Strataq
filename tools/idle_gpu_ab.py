@@ -147,6 +147,7 @@ sys.path.insert(0, str(REPO / "tools"))
 sys.path.insert(0, str(REPO))
 import strata_tokenizer as ST  # noqa: E402
 from strata_common.engine_client import child_env  # noqa: E402
+from strata_common.expert_fill import wait_for_protocol_experts  # noqa: E402
 
 SMP = Sampler()
 CFG, OUT = sys.argv[2], Path(sys.argv[3])
@@ -237,6 +238,8 @@ def start(exe, args, env, log):
                          stderr=lf, text=True, bufsize=1, env=env)
     for line in p.stdout:
         if line.startswith("READY"):
+            wait_for_protocol_experts(lambda command: (p.stdin.write(command + "\n"), p.stdin.flush()),
+                                      p.stdout.readline)
             return p
     raise SystemExit(f"engine ended before READY: {log}")
 

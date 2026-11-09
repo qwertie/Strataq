@@ -35,6 +35,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import strata_tokenizer  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from strata_common.expert_fill import wait_for_experts  # noqa: E402
+
 PROMPTS = {
     "story": "Write a long, detailed story about a lighthouse keeper who counts ships. Use at least 600 words.",
     "code": "Write a Python module with a class for a bank account (deposit, withdraw, transfer, statement), with "
@@ -83,6 +86,7 @@ def measure(a, configs: dict, extra: list[str]) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     e = Engine([a.exe or cfg["exe"], "--serve", *args], cfg.get("cwd"), env, a.out)
     e.until("READY")
+    wait_for_experts(e.ask_memory)
     out = {"case": a.case, "args": args, "tokens": a.tokens, "memory_at_start": e.ask_memory(), "rounds": []}
     print("warm-up", flush=True)
     for name in configs:
@@ -205,7 +209,8 @@ class Engine:
         """Sends `command` and gets its answer's lines up to `end`."""
         self.send(command)
         lines = []
-        while not (line := self.until("MEMORY", "CONVERSATION", "SETTINGS", "SHORTFALL", end)).startswith(end):
+        while not (line := self.until("MEMORY", "EXPERT_FILL", "CONVERSATION", "SETTINGS",
+                                      "SHORTFALL", end)).startswith(end):
             lines.append(line.strip())
         return lines
 

@@ -438,13 +438,22 @@ MTP-only rates were 43.21/37.08. Repetition with MTP plus suffix gave 60.29/67.3
 New three-conversation aggregate rates for neither, suffix, MTP and both were
 48.38, 49.47, 54.48 and 56.05 tok/s, excluding prefill and tokens before the last admission.
 
-Shared startup now fills the permitted GPU expert pools before `READY`; Qwen can select its resident graph
-when that fill completes. The adapter owns prompt scratch, initializes pages on use, and enables the existing
+In these runs, shared startup filled the permitted GPU expert pools before `READY`; Qwen can select its resident
+graph when that fill completes. The adapter owns prompt scratch, initializes pages on use, and enables the existing
 one-row state-commit path. Shared expert touches reuse index nodes; verify-width sizing is shared with the
 original Qwen engine. Full-residency startup was old 39.41-40.28 s and new 39.29-45.65 s.
 The old saved mode maps files, uploads through one-expert host staging, then trims file-backed working-set
 pages and pins the RAM complement. The new engine also uses host staging, into pool pages. Neither streams
 experts during these warmed decode rounds. Startup order is not evidence for the remaining steady-state gap.
+
+Since then the paged engines say `READY` right after the dense weights load, and fill their expert pools while they
+serve. The GPUs' pools come first, in the profile's order. Then the RAM's pool takes the experts the GPUs lack, before
+the others. There is no setting for it. The memory report says how far the fill is (`EXPERT_FILL`, and `"expert_fill"`
+in `GET /v1/memory`), and the speed tools wait for it before they time anything
+([DETAILS.md](DETAILS.md#the-memory-panel)). The adaptive tier puts the experts the conversations use into free pages
+too, and trades experts only when a pool is full. So the fill and the conversations share the free pages, and the fill
+stops when the pools are full. On the Strix Halo Qwen3.8 said `READY` after about 9 s instead of 38 s and DeepSeek
+after 12-19 s instead of 58 s; the measurements are in DETAILS.md.
 
 The owner's task-only watchdog floors were 3 GiB free commit and 4 GiB free physical RAM. All main matrix
 runs passed: minimums 3.538 and 18.356 GiB. The commit limit stayed at 127.295 GiB; observed system charge

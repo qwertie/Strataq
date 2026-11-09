@@ -188,7 +188,7 @@ private:
     /// Updates model ownership while conversations have no GPU pages.
     bool set_layers(const std::vector<int64_t>& cut, std::string& err);
     /// Gives each card's pool the experts it wants that fit (refill), waiting for pages that open soon; then uploads
-    /// the residency tables.
+    /// the residency tables.  move_cut uses it, so that the next step computes the same experts on the GPUs.
     bool fill_cards(std::string& err);
     /// Gives each card's pool the experts it is to hold (ExpertPages::set_ranking): its layers' share of the profile's
     /// first --expert-cache (PagedModel::get_card_ranking), or with `lend`, while the cards lend pages (holder_),
@@ -356,8 +356,9 @@ private:
     /// that the pools do not hold take the pages of the least-routed ones of their layer (at most --adapt-swaps,
     /// each by --adapt-min-gain more routings).  False (ERR printed) when a copy failed.
     bool adapt_experts();
-    /// Puts back a batch of the experts the conversations evicted (the GPUs' first, then the RAM's), or waits until
-    /// pages open to them: the serve loop's work between requests.  False when a copy failed (said on stderr).
+    /// Puts a batch of the experts the pools want into them (the GPUs' first, then the RAM's): those the pools have
+    /// lacked since the start, which open empty, or that conversations evicted; or waits until pages open to them:
+    /// the serve loop's work between requests.  False when a copy failed (said on stderr).
     bool refill_experts();
     /// Tells whether a pool wants experts back (ExpertPages::is_refill_wanted).
     bool is_refill_wanted() const;
@@ -389,7 +390,8 @@ private:
     }
     /// Describes the conversations for LIST_CONVERSATIONS and GET_CONTEXT_WINDOWS.
     std::vector<strata::core::HeldConversation> list_conversations() const;
-    /// Describes the memories for GET_MEMORY_USE.
+    /// Describes the memories for GET_MEMORY_USE, and the experts' fill (EXPERT_FILL): loaded while no pool wants
+    /// experts it can take now (is_refill_wanted), so an eviction or a grown pool also clears it after the start.
     strata::serve::MemoryReport describe_memory() const;
     /// Gets the step's view of the model: PagedModel's rows over the conversations' state.
     strata::spec::StepModel get_step_model();
@@ -431,6 +433,12 @@ private:
     /// decode_step refills experts too, until none are wanted: a pool grew, or is filling after the start
     /// (ExpertPages::open)
     bool refilling_ = true;
+    /// The RAM's pool still ranks the experts in the profile's order, so refill_experts does not fill it yet: once no
+    /// GPU's pool wants more, it moves the GPUs' experts last (RamExperts::rank_gpu_experts_last) and starts.
+    bool ram_ranking_pending_ = true;
+    /// When the engine began to serve with its pools empty, until refill_experts first finds them full and says on
+    /// stderr how long the fill took.
+    std::optional<Clock::time_point> filling_since_;
     std::vector<float> seen_;          ///< the model's usage counts when adapt_experts last decayed them
     int64_t swapped_ = 0;              ///< the experts adapt_experts moved into the GPU's pool, since the last report
     double adapt_ms_ = 0;              ///< the time those took
@@ -616,14 +624,12 @@ bool PagedEngine::init() {
 }
 
 int PagedEngine::serve() {
-    const Clock::time_point fill_start = Clock::now();
-    std::string err;
-    if (!fill_cards(err)) {
-        say("filling the GPU expert pools before READY: %s\n", err.c_str());
+    filling_since_ = Clock::now();
+    residency_changed_ = true;   // no expert has moved yet, but the devices need their first, empty tables
+    if (std::string err; !publish_residency(err)) {
+        say("publishing the initial expert addresses: %s\n", err.c_str());
         return 1;
     }
-    refilling_ = is_refill_wanted();
-    say("GPU expert pools filled before READY in %.0f ms\n", get_ms_since(fill_start));
     model_.print_info(get_most_concurrent(), step_.settings.lookahead > 0 ?
                          std::min(step_.settings.rows, step_.settings.lookahead + 1) : 0);
     print_response("INFO concurrent=%d\n", settings_.step.concurrent);
@@ -1839,15 +1845,24 @@ bool PagedEngine::refill_experts() {
         if (loaded < 0)
             break;
     }
-    if (loaded == 0 && ram_.pages().is_refill_wanted()) {   // the GPUs' first: their experts are the hotter ones
+    if (ram_ranking_pending_ &&
+        std::none_of(cards_.begin(), cards_.end(), [](const auto& card) { return card.experts.is_refill_wanted(); })) {
+        ram_.rank_gpu_experts_last(model_.get_residency());
+        ram_ranking_pending_ = false;
+    }
+    if (loaded == 0 && !ram_ranking_pending_ && ram_.pages().is_refill_wanted()) {   // the GPUs' first: hotter experts
         uint64_t ram_wait_ms = 0;
-        loaded = ram_.pages().refill(kRefillBatch, ram_wait_ms, err);
+        loaded = ram_.refill(kRefillBatch, ram_wait_ms, err);
         if (ram_wait_ms > 0 && (wait_ms == 0 || ram_wait_ms < wait_ms))
             wait_ms = ram_wait_ms;
     }
     if (loaded < 0 || !publish_residency(err)) {
         say("putting experts back in their pools: %s\n", err.c_str());
         return false;
+    }
+    if (filling_since_ && !is_refill_wanted()) {
+        say("experts loaded after READY in %.0f ms\n", get_ms_since(*filling_since_));
+        filling_since_.reset();
     }
     if (wait_ms > 0)
         input_.wait_for_line(std::chrono::milliseconds(wait_ms), [] { return false; });
@@ -1917,6 +1932,8 @@ std::vector<strata::core::HeldConversation> PagedEngine::list_conversations() co
 strata::serve::MemoryReport PagedEngine::describe_memory() const {
     const strata::core::PagePoolReport rr = ram_.pages().pool().report();
     strata::serve::MemoryReport report;
+    report.experts_loaded = !is_refill_wanted();
+    report.experts_pending = ram_.pages().get_missing_count();
     report.pause_directory = std::filesystem::absolute(pause_prefix_).parent_path().string();
     for (const PagedCard& card : cards_) {
         const strata::core::PagePoolReport r = card.experts.pool().report();
@@ -1930,6 +1947,7 @@ strata::serve::MemoryReport PagedEngine::describe_memory() const {
         gpu.setting = r.total.bytes;
         gpu.smallest = get_smallest_gpu(card, settings_.tokens_min);
         gpu.largest = get_largest_gpu(card);
+        report.experts_pending += card.experts.get_missing_count();
     }
     strata::serve::Memory& ram = report.at("ram");
     ram.add_blocks(ram_.pages().pool().get_memory_blocks());

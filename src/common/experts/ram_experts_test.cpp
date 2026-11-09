@@ -33,7 +33,15 @@ uint8_t get_byte(int64_t layer, int64_t expert, uint64_t i) { return (uint8_t) (
 
 /// The experts' bytes as the SSD would give them, counting the reads.
 struct Ssd : ExpertSource {
-    int reads = 0;
+    int reads = 0, batches = 0;
+    bool fail = false;
+    bool copy_blobs(const int32_t* layers, const int32_t* experts, uint8_t* const* dst, size_t n) override {
+        ++batches;
+        for (size_t i = 0; i < n; ++i)
+            if (!copy_blob(layers[i], experts[i], dst[i]))
+                return false;
+        return true;
+    }
     std::vector<uint8_t> buffer = std::vector<uint8_t>(2 * kPage);
     const uint8_t* blob(int64_t layer, int64_t expert) override {
         (void) copy_blob(layer, expert, buffer.data());
@@ -41,6 +49,8 @@ struct Ssd : ExpertSource {
     }
     bool copy_blob(int64_t layer, int64_t expert, uint8_t* dst) override {
         ++reads;
+        if (fail)
+            return false;
         for (uint64_t i = 0; i < kBlobs[(size_t) layer]; ++i)
             dst[i] = get_byte(layer, expert, i);
         return true;
@@ -72,6 +82,10 @@ int main() {
     std::string err;
     // room for 12 pages: experts 0-2 of every layer (12 pages)
     check(ram.open(ssd, 12 * kPage + 2 * 2 * kPage, 2, layout, config, kBlobs, kExperts, ranking, err), err.c_str());
+    check(ssd.reads == 0 && ram.pages().is_refill_wanted(), "open performs no expert reads");
+    uint64_t startup_wait = 0;
+    check(ram.refill(16, startup_wait, err) == 9, "refill brings in the experts that fit");
+    check(ssd.batches == 1, "a refill submits its experts in one SSD read");
     check(ram.holds(1, 2) && !ram.holds(0, 3) && ram.pages().pool().report().experts.pages == 12,
           "the pool holds the ranking's first experts");
     {
@@ -79,17 +93,38 @@ int main() {
         RamExperts colder;
         check(colder.open(colder_ssd, 12 * kPage + 2 * 2 * kPage, 2, layout, config, kBlobs, kExperts, ranking, err),
               err.c_str());
+        uint64_t ms = 0;
+        check(colder.refill(16, ms, err) == 9, "the colder pool fills on request");
         PagePool& pool = colder.pages().pool();
         check(pool.grow_conversation(9, 8).empty(), "a paused conversation evicts experts");
         pool.remove_conversation(9);
         for (int32_t e = 3; e < 6; ++e)   // colder experts than those it evicted take the pages it left
             for (int32_t l = 0; l < 3; ++l)
                 (void) colder.pages().admit(l, e);
-        uint64_t ms = 0;
         check(pool.find_expert({0, 3}) != no_page && colder.pages().is_refill_wanted() &&
-                  colder.pages().refill(16, ms, err) == 0 && pool.find_expert({0, 3}) != no_page &&
+                  colder.refill(16, ms, err) == 0 && pool.find_expert({0, 3}) != no_page &&
                   !colder.pages().is_refill_wanted(),
               "a refill evicts no expert: it waits for free pages");
+    }
+    {
+        Ssd later_ssd;
+        RamExperts later;
+        check(later.open(later_ssd, 12 * kPage + 4 * kPage, 2, layout, config, kBlobs,
+                         kExperts, ranking, err), err.c_str());
+        check(later_ssd.reads == 0, "the startup pool is empty");
+        std::vector<int32_t> residency(3 * kExperts, -1);
+        residency[0] = 0;
+        later.rank_gpu_experts_last(residency);
+        uint64_t ms = 0;
+        check(later.refill(1, ms, err) == 1 && later.holds(1, 0) && !later.holds(0, 0),
+              "RAM fills experts absent from the GPU first");
+        check(!later.holds(1, 5) && later.pages().replace(1, 0, 5, err) && later.holds(1, 0) && later.holds(1, 5) &&
+                  is_expert(later.blob(1, 5), 1, 5),
+              "while the pool has free pages, an expert brought in pushes none out");
+        check(is_expert(later.blob(2, 7), 2, 7), "a conversation can read before refill completes");
+        later_ssd.fail = true;
+        check(later.refill(2, ms, err) == -1 && !later.holds(2, 0) && !later.holds(0, 1),
+              "a failed SSD batch publishes none of its experts");
     }
     check(is_expert(ram.blob(1, 2), 1, 2) && !ram.transient(1, 2), "an expert in the pool is its bytes there");
     const int filled = ssd.reads;
@@ -116,7 +151,7 @@ int main() {
     ram.keep_copy({0, 7}, gpu.data());   // a GPU's evicted expert, colder than those the conversation took
     check(ram.holds(0, 7) && is_expert(ram.blob(0, 7), 0, 7), "an expert a GPU evicts is copied in when there is room");
     uint64_t wait_ms = 0;
-    check(ram.pages().is_refill_wanted() && ram.pages().refill(16, wait_ms, err) >= 1, "the evicted experts come back");
+    check(ram.pages().is_refill_wanted() && ram.refill(16, wait_ms, err) >= 1, "the evicted experts come back");
     std::this_thread::sleep_for(std::chrono::milliseconds(2));   // the pool's clock counts milliseconds
     ram.begin_layer(1, nullptr, 0);
     check(!ram.holds(1, 5) && is_expert(ram.blob(1, 5), 1, 5) && ram.holds(1, 5),
@@ -140,7 +175,7 @@ int main() {
     // a second chunk: the experts that did not fit come in; a paused conversation in it moves when it is given back
     check(ram.resize(ram.ring_bytes() + 24 * kPage).refusal.empty() && pool.report().total.pages == 24,
           "growing adds a chunk");
-    while (ram.pages().is_refill_wanted() && ram.pages().refill(16, wait_ms, err) > 0) {
+    while (ram.pages().is_refill_wanted() && ram.refill(16, wait_ms, err) > 0) {
     }
     check(pool.report().experts.pages > 12, "the experts that did not fit come in");
     check(pool.grow_conversation(9, 8).empty(), "a conversation takes pages in the larger pool");
@@ -170,7 +205,7 @@ int main() {
     for (int32_t e = 0; e < kExperts; ++e)
         others_left = others_left && !ram.holds(0, e) && !ram.holds(2, e);
     check(others_left && !ram.holds(1, 7), "the experts outside the new ranking's first leave");
-    while (ram.pages().is_refill_wanted() && ram.pages().refill(16, wait_ms, err) > 0) {
+    while (ram.pages().is_refill_wanted() && ram.refill(16, wait_ms, err) > 0) {
     }
     check(ram.holds(1, 0) && ram.holds(1, 3) && !ram.holds(1, 4) && pool.report().experts.pages == 8,
           "the new ranking's first come in");

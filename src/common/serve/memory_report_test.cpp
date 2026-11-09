@@ -54,6 +54,14 @@ int main() {
               "END_MEMORY\n",
           "a line per conversation");
     check(format_memory_report(MemoryReport{}, {}) == "SETTINGS\nEND_MEMORY\n", "an engine that knows nothing");
+    MemoryReport fill;
+    fill.experts_loaded = false;
+    fill.experts_pending = 42;
+    check(format_memory_report(fill, {}) == "EXPERT_FILL loaded=0 pending=42\nSETTINGS\nEND_MEMORY\n",
+          "an engine filling its expert pools says how far it is");
+    fill.experts_loaded = true;
+    check(format_memory_report(fill, {}).find("EXPERT_FILL loaded=1 pending=42") == 0,
+          "loaded while experts wait for pages that conversations hold");
     MemoryReport pool;
     Memory& card = pool.gpu(1);
     card.add("experts", 9);
