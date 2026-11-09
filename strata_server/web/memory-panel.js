@@ -62,6 +62,9 @@ const SETTINGS = {context: "Per-conversation token limit", concurrent: "Conversa
                   slots: "Maximum conversations at once"};
 /** The settings that are switches: the engine reports them as 1 or 0 and takes "on" or "off". */
 const SWITCHES = ["drafter", "save_on_shutdown"];
+/** Guidance shared by the per-conversation limit's tooltip and capacity error. */
+const CONTEXT_CAPACITY_HELP = "To raise this limit, increase --max-context in the model's engine arguments, " +
+  "then reload the model.";
 /** Settings the engine reports that the panel shows elsewhere (the bars) or not at all. */
 const UNLISTED = new RegExp("^memory_mib\\.|^(token_bytes|conversation_bytes|context_capacity|" +
   "has_drafter|suffix_draft|lookup_chain|slots|ssd_pause_mib)$");
@@ -305,7 +308,8 @@ async function applyControls(element, panel, save) {
     const n = s[key], lo = smallest(s), hi = largest(s);
     if (!Number.isInteger(n) || n < lo || n > hi) {
       panel.notice = {text: `${SETTINGS[key]}: choose a whole number ` +
-        (hi === Infinity ? `of at least ${fmt(lo)}.` : `from ${fmt(lo)} to ${fmt(hi)}.`),
+        (hi === Infinity ? `of at least ${fmt(lo)}.` : `from ${fmt(lo)} to ${fmt(hi)}.`) +
+        (key === "context" && n > hi ? ` ${CONTEXT_CAPACITY_HELP}` : ""),
         error: true, until: Infinity};
       return render(element, panel);
     }
@@ -452,8 +456,7 @@ function getControlHelp(key, settings, details = {}) {
     return "This option controls the multi-token prediction (MTP) mode that can speed up generation using rows " +
       "that aren't in use by active conversations.";
   if (key === "context")
-    return `Loaded capacity: ${fmt(settings.context_capacity)} tokens. ` +
-      "Increasing that capacity requires a model reload.";
+    return `Loaded capacity: ${fmt(settings.context_capacity)} tokens. ${CONTEXT_CAPACITY_HELP}`;
   if (key === "conversation_idle_seconds")
     return "Idle GPU conversations this old may move to RAM or SSD when experts or another conversation need space. " +
       "Prompt-processing and decoding requests are protected; age alone does not evict anything.";

@@ -479,9 +479,17 @@ test('token settings are staged together and validated against the complete draf
 test('the per-conversation widget respects the capacity loaded into the engine', () => {
   const view = {...live, settings: {...live.settings, context: 204800, context_capacity: 204800, tokens_max: 401000}};
   const {calls, onChange} = recorder(), {element, fire} = mount(view, onChange);
+  const help = "To raise this limit, increase --max-context in the model's engine arguments, then reload the model.";
+  const capacity = (204800).toLocaleString();
+  assert.equal(element.querySelector('[data-setting="context"]').title, `Loaded capacity: ${capacity} tokens. ${help}`);
   fire('change', {target: control('[data-setting]', {dataset: {setting: 'context'}, value: '300000'})});
   apply(fire);
-  assert.match(element.innerHTML, /Per-conversation token limit: choose a whole number from 1 to 204.800/);
+  assert.equal(element.querySelector('.mem-notice.mem-error').textContent,
+    `Per-conversation token limit: choose a whole number from 1 to ${capacity}. ${help}`);
+  fire('change', {target: control('[data-setting]', {dataset: {setting: 'context'}, value: '0'})});
+  apply(fire);
+  assert.equal(element.querySelector('.mem-notice.mem-error').textContent,
+    `Per-conversation token limit: choose a whole number from 1 to ${capacity}.`);
   assert.deepEqual(calls, []);
 });
 
