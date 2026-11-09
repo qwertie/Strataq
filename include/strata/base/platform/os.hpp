@@ -25,6 +25,7 @@
 #endif
 #include <windows.h>
 #include <psapi.h>   // (K32QueryWorkingSetEx: kernel32's, no psapi.lib)
+#include <tlhelp32.h>   // (CreateToolhelp32Snapshot: kernel32's)
 #include <timeapi.h>
 #ifdef _MSC_VER
 #pragma comment(lib, "winmm.lib")
@@ -249,15 +250,30 @@ inline uint64_t get_process_id() {
 #endif
 }
 /// Tells whether a process of id `pid` runs now (one of another user counts too).  On Windows, which reuses ids
-/// soon, a process that began after `began_by` only has the id of the one asked about, so it does not count.
+/// soon, a process that began after `began_by` only has the id of the one asked about, so it does not count; nor does
+/// one that has exited but whose process object another program's handle keeps (it can refuse to be opened).
 inline bool is_process_running(
     uint64_t pid, std::chrono::system_clock::time_point began_by = std::chrono::system_clock::time_point::max()) {
     if (pid == 0 || pid > (uint64_t) INT32_MAX)   // (no process has it; kill(0) would ask about the process group)
         return false;
 #if defined(_WIN32)
     HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD) pid);
-    if (h == nullptr)
-        return GetLastError() == ERROR_ACCESS_DENIED;
+    if (h == nullptr) {
+        if (GetLastError() != ERROR_ACCESS_DENIED)
+            return false;
+        // (a protected process, or an exited one kept by a handle: only a live one is in the process list; its start
+        // is unknown here, so it counts)
+        const HANDLE list = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (list == INVALID_HANDLE_VALUE)
+            return true;
+        PROCESSENTRY32W entry{};
+        entry.dwSize = sizeof entry;
+        bool listed = false;
+        for (BOOL more = Process32FirstW(list, &entry); more && !listed; more = Process32NextW(list, &entry))
+            listed = entry.th32ProcessID == (DWORD) pid;
+        CloseHandle(list);
+        return listed;
+    }
     DWORD code = 0;
     FILETIME created, exited, kernel, user;
     bool running = GetExitCodeProcess(h, &code) && code == STILL_ACTIVE;

@@ -22,7 +22,7 @@
 // now (the GPUs'; the server adds the machine's RAM).  unified=1: a GPU whose memory is the system RAM (an integrated
 // GPU such as Strix Halo's).  <use>: the bytes the engine holds there for one use - `weights` (the dense weights),
 // `experts` (trunk), `drafter_experts` (draft model), `conversations` (the conversations it holds: sessions
-// allocated for their whole context, or pool pages),
+// allocated for their whole context, or pool pages), `paused_unusable` (pause files the engine cannot load),
 // `paused` (parked conversations), `drafter`, `scratch`, `engram` (DeepSeek's n-gram table).  paused_count: the
 // parked conversations there; paused_budget: the most they may take.  pool_pages: the pages of a page pool there
 // (strata-q38's), of which allocated_pages hold experts or conversations and fragmented_pages are free in runs

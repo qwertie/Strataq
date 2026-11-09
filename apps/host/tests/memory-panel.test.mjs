@@ -294,6 +294,16 @@ test('the SSD\'s divider is the end of the room for paused conversations', async
   assert.deepEqual(calls, [[{ ssd_pause_mib: 4096 }, 'session']]);
 });
 
+test('unusable pause files are a segment of their own inside the SSD\'s paused budget', () => {
+  const ssd = { id: 'ssd', name: null, total: null, free: null, unified: false, paused_count: 1,
+    paused_budget: 8 * GIB, uses: { experts: 8 * GIB, paused: 2 * GIB, paused_unusable: 2 * GIB } };
+  const { element } = mount({ ...live, memories: [ssd] }, recorder().onChange);
+  const segments = [...element.innerHTML.matchAll(/class="mem-seg" data-use="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(segments, ['experts', 'paused', 'paused_unusable']);
+  assert.match(element.innerHTML, /Unusable pause files 2\.00 GiB/);
+  assert.match(element.innerHTML, /data-divider="ssd"[^>]*style="left:100%"/);   // budget = both, 16 GiB in all
+});
+
 
 test('live concurrency uses the step capacity and available rows', () => {
   const view = { ...live, settings: { ...live.settings, concurrent: 1, slots: 8, rows: 3, ssd_pause_mib: 10243 } };

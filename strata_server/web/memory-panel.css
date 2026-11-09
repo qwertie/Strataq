@@ -13,6 +13,10 @@
 .mem-bars [data-use="experts"] { background-color: var(--st-accent); }
 .mem-bars [data-use="conversations"] { background-color: var(--st-info); }
 .mem-bars [data-use="paused"] { background-color: var(--st-warn); }
+.mem-bars [data-use="paused_unusable"] {   /* pause files this engine cannot load: paused, struck through */
+  background-color: var(--st-warn);
+  background-image: repeating-linear-gradient(45deg, transparent 0 3px, rgba(0, 0, 0, .45) 3px 5px);
+}
 .mem-bars [data-use="drafter"] { background-color: var(--st-danger); }
 .mem-bars [data-use="weights"], .mem-bars [data-use="engram"] { background-color: var(--st-ink-soft); }
 .mem-bars [data-use="free"], .mem-bars [data-use="pool_free"] { background-color: transparent; }

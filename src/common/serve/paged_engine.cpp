@@ -130,6 +130,14 @@ struct Paused {
     std::string file;                 ///< on the SSD: its pause file (get_pause_file); empty: in the RAM's pool
 };
 
+/// A file in the pause folder that adopt_pause_files could not take (another model's or other settings', damaged, or
+/// unreadable).  It counts toward --ssd-pause-mib, and trim_ssd deletes it before forgetting any paused conversation.
+struct UnusablePauseFile {
+    std::string path;
+    uint64_t bytes = 0;
+    std::filesystem::file_time_type written;   ///< when it was last written: the oldest goes first
+};
+
 /// Keeps admission metadata without allocating conversation state while capacity is occupied.
 struct PendingRequest {
     std::string line, id;
@@ -230,7 +238,8 @@ private:
     void restore_session(const std::string& path);
     /// Claims compatible orphaned SSD pauses, the most recently active ranked highest, even beyond --ssd-pause-mib
     /// (trim_ssd waits for the next pause), and says why it leaves each other pause file in `dir` (unreadable,
-    /// foreign, or its engine still runs); those stay untouched.
+    /// foreign, or its engine still runs).  Those of an engine that still runs stay untouched; the others go into
+    /// unusable_.
     void adopt_pause_files(const std::string& dir);
     /// Moves every conversation in the GPUs' and the RAM's pools to the SSD, the highest ranked first (find_lowest's
     /// order) up to --ssd-pause-mib, and lets go of the files so that ~PagedEngine leaves them for the next start
@@ -318,12 +327,15 @@ private:
     bool move_to_ssd(std::vector<Paused>::iterator p);
     /// Moves the lowest-priority conversations paused in RAM to the SSD while those in RAM take more than the budget.
     void trim_ram();
-    /// Forgets the lowest-priority paused conversations while those on the SSD take more than --ssd-pause-mib.
+    /// Deletes the unusable pause files, the oldest first, then forgets the lowest-priority paused conversations, while
+    /// the SSD holds more than --ssd-pause-mib of them.
     void trim_ssd();
     /// Gives back a paused conversation's pages in RAM, or deletes its files.
     void drop_pages(const Paused& p);
     /// Gets the bytes of the paused conversations in RAM (`in_ram`) or on the SSD.
     uint64_t get_paused_bytes(bool in_ram) const;
+    /// Gets the bytes --ssd-pause-mib limits: the paused conversations' files and the unusable pause files.
+    uint64_t get_ssd_pause_bytes() const;
     /// Gets the bytes the conversations paused in RAM may take: one conversation of --tokens-max tokens.
     uint64_t get_ram_pause_budget() const;
     /// Gets the pause file of the conversation of Paused::serial `serial`.
@@ -400,6 +412,7 @@ private:
     std::vector<size_t> at_;
     std::vector<PendingRequest> pending_; ///< Requests waiting for scheduler or GPU capacity.
     std::vector<Paused> paused_;       ///< the conversations paused out of the GPU's pool
+    std::vector<UnusablePauseFile> unusable_;   ///< the oldest first
     uint64_t serial_ = 0;              ///< the last paused conversation's Paused::serial
     std::string pause_prefix_;         ///< a paused conversation's file is this, its serial and ".bin"
     /// what pause files are bound to (find_identity): computed at the first pause to the SSD or SAVE, which reads the
@@ -795,6 +808,11 @@ void PagedEngine::adopt_pause_files(const std::string& dir) {
     for (const std::string& path : stale) {
         const auto skip = [&](const std::string& why) {
             say("pause file %s not adopted: %s\n", path.c_str(), why.c_str());
+            std::error_code size_ec, time_ec;
+            UnusablePauseFile f{path, std::filesystem::file_size(path, size_ec),
+                                std::filesystem::last_write_time(path, time_ec)};
+            if (!size_ec && !time_ec)
+                unusable_.push_back(std::move(f));
         };
         try {
             std::string err;
@@ -832,6 +850,8 @@ void PagedEngine::adopt_pause_files(const std::string& dir) {
             skip(e.what());
         }
     }
+    std::sort(unusable_.begin(), unusable_.end(),
+              [](const UnusablePauseFile& a, const UnusablePauseFile& b) { return a.written < b.written; });
     // the most recently active rank highest, so that trim_ssd forgets the oldest first
     std::sort(paused_.begin() + (std::ptrdiff_t) first, paused_.end(),
               [](const Paused& a, const Paused& b) { return a.head.last_tokens_at < b.head.last_tokens_at; });
@@ -843,7 +863,7 @@ void PagedEngine::adopt_pause_files(const std::string& dir) {
     if (paused_.size() > first)
         say("adopted %zu paused conversations (%.1f GiB) from %s%s\n", paused_.size() - first,
             (double) bytes / 1073741824.0, dir.c_str(),
-            get_paused_bytes(false) > ((uint64_t) settings_.ssd_pause_mib << 20)
+            get_ssd_pause_bytes() > ((uint64_t) settings_.ssd_pause_mib << 20)
                 ? ", more than --ssd-pause-mib: the lowest ranked go at the next pause"
                 : "");
 }
@@ -1682,6 +1702,15 @@ void PagedEngine::trim_ram() {
 
 void PagedEngine::trim_ssd() {
     const uint64_t budget = (uint64_t) settings_.ssd_pause_mib << 20;
+    while (!unusable_.empty() && get_ssd_pause_bytes() > budget) {
+        const UnusablePauseFile& f = unusable_.front();
+        std::error_code ec;
+        std::filesystem::remove(f.path, ec);
+        say("the unusable pause file %s %s (--ssd-pause-mib %lld)\n", f.path.c_str(),
+            ec ? ("cannot be deleted, so it no longer counts: " + ec.message()).c_str() : "is deleted",
+            (long long) settings_.ssd_pause_mib);
+        unusable_.erase(unusable_.begin());
+    }
     while (get_paused_bytes(false) > budget) {
         const auto p = find_lowest(false);
         say("a paused conversation of %zu tokens is forgotten (--ssd-pause-mib %lld)\n", p->head.live.size(),
@@ -1704,6 +1733,13 @@ uint64_t PagedEngine::get_paused_bytes(bool in_ram) const {
     for (const Paused& p : paused_)
         if (p.file.empty() == in_ram)
             bytes += p.bytes;
+    return bytes;
+}
+
+uint64_t PagedEngine::get_ssd_pause_bytes() const {
+    uint64_t bytes = get_paused_bytes(false);
+    for (const UnusablePauseFile& f : unusable_)
+        bytes += f.bytes;
     return bytes;
 }
 
@@ -1925,6 +1961,9 @@ strata::serve::MemoryReport PagedEngine::describe_memory() const {
             strata::core::get_expert_memory_label((int32_t) l, facts_.expert_bytes[(size_t) l])}, on_ssd}});
     }
     ssd.paused_budget = (uint64_t) settings_.ssd_pause_mib << 20;
+    for (const UnusablePauseFile& f : unusable_)
+        ssd.add_blocks({{{"paused_unusable", "Unusable pause files",
+                          std::filesystem::path(f.path).filename().string()}, f.bytes}});
     const int64_t probe = std::max<int64_t>(facts_.context, 1);   // tokens whose pages give the average
     uint64_t fixed = 0, grown = 0;   // a conversation's pages on every card: at no token, at `probe` tokens
     for (const PagedCard& card : cards_) {

@@ -880,7 +880,6 @@ uint64_t session_config_fingerprint(const SessionConfig& c) {
     b.str("engine", c.engine_version);
     b.str("backend", c.backend);
     b.str("kv", c.kv);
-    b.i64("max_context", c.max_context);
     b.i64("kv_resident", c.kv_resident);
     b.i64("mtp_window", c.mtp_window);
     b.i64("kv_rot", c.kv_rot ? 1 : 0);

@@ -879,13 +879,19 @@ bool PagedQwen::restore_running_state(const std::vector<uint8_t>& state, const P
     positions.clear();
     if (at < state.size()) {
         const uint64_t n = read_size(state, at);
-        if (!m_.o.vision || n != m_.mrope_host.size() || n > (state.size() - at) / sizeof(int32_t) ||
+        if (!m_.o.vision || n == 0 || n % 3 != 0 || n > (state.size() - at) / sizeof(int32_t) ||
             at + n * sizeof(int32_t) != state.size()) {
             err = "the paused conversation's image positions are invalid";
             return false;
         }
-        positions.resize((size_t) n);
-        std::memcpy(positions.data(), state.data() + at, (size_t) n * sizeof(int32_t));
+        // The table has a cell per position of the context it was saved with (open_pause_file checked that the
+        // tokens fit this one): past the prompt each cell is the previous one plus 1 (read_prompt_images), so a
+        // longer context continues that run.
+        positions.resize(m_.mrope_host.size());
+        const size_t kept = std::min((size_t) n, positions.size());
+        std::memcpy(positions.data(), state.data() + at, kept * sizeof(int32_t));
+        for (size_t i = kept; i < positions.size(); ++i)
+            positions[i] = positions[i - 3] + 1;
     }
     return true;
 }

@@ -202,6 +202,7 @@ int main() {
     std::sort(stale.begin(), stale.end());
     check(find_stale_pause_files(dir.string()) == stale,
           "a file whose process id was reused by a later process is offered for adoption; an unstamped one is not");
+    check(strata::platform::is_process_running(4), "a live process that refuses to be opened (System) still runs");
 #endif
     check(find_stale_pause_files((dir / "missing").string()).empty(),
           "a missing pause directory does not fail discovery");

@@ -14,7 +14,8 @@
 /** Names shown for the uses a memory's bar is divided into (`uses` keys and the segments the panel adds). */
 const USES = {weights: "Weights", experts: "Experts", redundant_experts: "Experts also in VRAM",
               conversations: "Conversations", pool_free: "Free in the pool",
-              paused: "Paused conversations", drafter: "Drafter", drafter_experts: "Drafter experts",
+              paused: "Paused conversations", paused_unusable: "Unusable pause files", drafter: "Drafter",
+              drafter_experts: "Drafter experts",
               scratch: "Scratch", engram: "Engram",
               borrowed: "GPU (borrowed from RAM)", other: "Other", other_apps: "Other apps", free: "Free"};
 /** What each use of a bar is, in plain words: the tooltip of its segment and its legend entry. */
@@ -28,6 +29,9 @@ const USE_HELP = {
   conversations: "What the model remembers of the conversations it is working on (their context)",
   pool_free: "Room the engine has set aside here that nothing uses yet; experts or conversations take it as needed",
   paused: "Conversations put aside for now, kept here until they continue",
+  paused_unusable: "Paused conversations this model cannot continue: saved by another model or with other " +
+    "settings, or damaged. They count toward the SSD allowance and are deleted first, the oldest first, when " +
+    "paused conversations need the room",
   drafter_experts: "Expert weights used by the model that guesses words ahead",
   drafter: "The small model that guesses the next words ahead, so that answers come faster",
   scratch: "Working space the engine needs while it computes",
@@ -38,7 +42,9 @@ const USE_HELP = {
   free: "Not in use by anything",
 };
 /** Pool categories used by engines that do not report an explicit adjustable byte interval. */
-const POOL_USES = ["experts", "redundant_experts", "conversations", "paused", "pool_free"];
+const POOL_USES = ["experts", "redundant_experts", "conversations", "paused", "paused_unusable", "pool_free"];
+/** The SSD's uses that its paused budget (`ssd_pause_mib`) limits. */
+const SSD_BUDGET_USES = ["paused", "paused_unusable"];
 /** Size in bytes (32 GiB) at which a memory's bar fills the width. */
 const FULL_BAR = 32 * 1073741824;
 /** Bytes in a MiB, the unit the memory settings are sent in. */
@@ -497,7 +503,8 @@ function layOut(x) {
     parts.push({use: "other_apps", bytes: outside});
   // a memory of unknown size (the SSD) is drawn against what it holds plus the room left in its paused budget
   const used = parts.reduce((a, p) => a + (p.drawn ?? p.bytes), 0);
-  const total = x.total || Math.max(used, used - (x.uses.paused || 0) + (x.paused_budget || 0));
+  const budgeted = SSD_BUDGET_USES.reduce((a, use) => a + (x.uses[use] || 0), 0);
+  const total = x.total || Math.max(used, used - budgeted + (x.paused_budget || 0));
   return {parts, scale, total};
 
   /** Ranks fixed allocations before the pool and its unused pages. */
@@ -512,7 +519,8 @@ function layOut(x) {
  * @returns {Divider | null} */
 function findDivider(x) {
   const {parts, scale, total} = layOut(x), ssd = x.id === "ssd";
-  const from = ssd ? x.paused_budget : x.setting, first = parts.findIndex((p) => ssd ? p.use === "paused" : p.pool);
+  const from = ssd ? x.paused_budget : x.setting;
+  const first = parts.findIndex((p) => ssd ? SSD_BUDGET_USES.includes(p.use) : p.pool);
   if (from == null || !total || (first < 0 && !ssd && x.pool_offset == null))
     return null;
   const start = !ssd && first < 0 && x.pool_offset != null ? x.pool_offset * scale :

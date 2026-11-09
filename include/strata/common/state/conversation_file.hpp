@@ -67,12 +67,13 @@ struct SessionRope {
 };
 
 // Every engine setting that changes what the saved state means.  Sampling, seeds, draft tuning, the expert tier and
-// the prompt-reading chunk are not here: they change what is computed next, not what the saved cells hold.
+// the prompt-reading chunk are not here: they change what is computed next, not what the saved cells hold.  Nor is the
+// context (--max-context): it sizes buffers, not the cells, and a reader refuses a file of more tokens than it holds.
 struct SessionConfig {
     std::string engine_version;     // a file is bound to one engine version
     std::string backend;            // "cuda" or "hip": no cross-backend restore
     std::string kv;                 // --kv
-    int64_t max_context = 0, kv_resident = 0, mtp_window = 0;
+    int64_t kv_resident = 0, mtp_window = 0;
     bool kv_rot = false;            // STRATA_KV_ROT
     SessionRope rope;
     // the control vectors as loaded: a digest of the tables the engine uploaded (every file's content x its exact
