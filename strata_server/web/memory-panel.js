@@ -74,8 +74,7 @@ const UNLISTED = new RegExp("^memory_mib\\.|^(token_bytes|conversation_bytes|con
  * @type {[key: string, smallest: (s: Record<string, number>) => number,
  *   largest: (s: Record<string, number>) => number][]}
  */
-const CONTROLS = [["context", () => 1, (s) => s.context_capacity ?? s.context ?? Infinity],
-                  ["concurrent", () => 1, (s) => Math.min(s.slots ?? 8, s.rows ?? 8, s.vram_conversations ?? Infinity)],
+const CONTROLS = [["concurrent", () => 1, (s) => Math.min(s.slots ?? 8, s.rows ?? 8, s.vram_conversations ?? Infinity)],
                   ["vram_conversations", () => 1, (s) => s.slots ?? 8],
                   ["conversation_idle_seconds", () => 0, () => Infinity],
                   ["decode_share_percent", () => 0, () => Infinity],
@@ -83,7 +82,8 @@ const CONTROLS = [["context", () => 1, (s) => s.context_capacity ?? s.context ??
                   ["rows", (s) => s.concurrent ?? 1, () => 8],
                   ["lookahead", () => 0, (s) => (s.rows ?? 1) - 1],
                   ["tokens_min", () => 0, (s) => s.tokens_max ?? Infinity],
-                  ["tokens_max", (s) => s.tokens_min ?? 0, () => Infinity]];
+                  ["tokens_max", (s) => s.tokens_min ?? 0, () => Infinity],
+                  ["context", () => 1, (s) => s.context_capacity ?? s.context ?? Infinity]];
 /** HTML entities for the characters esc replaces. @type {Record<string, string>} */
 const ESCAPES = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"};
 /** Names shown for where a conversation is held (its `place`). */
