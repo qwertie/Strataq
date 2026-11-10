@@ -16,6 +16,7 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #if defined(_WIN32)
 #include <io.h>
@@ -39,6 +40,7 @@ std::string_view get_handler_command(std::string_view command) {
 
 struct Input::Shared {
     std::atomic<bool> stop{false};
+    std::atomic<bool> stop_all{false};   ///< is_stop_requested(id) for every id
     std::mutex mu;
     std::condition_variable cv;
     std::deque<std::string> lines;
@@ -46,6 +48,7 @@ struct Input::Shared {
     std::unordered_map<std::string, size_t> requests;
     std::unordered_set<std::string> cancelled;
     bool eof = false;
+    std::vector<long long> stopped_ids;   ///< the ids of the `STOP <id>` lines not yet forgotten
     size_t seen = 0;   ///< the queue's length when take_slot_controls last looked (wait_for_line's "new line")
 };
 
@@ -81,6 +84,10 @@ Input::Input(bool quit_ends_request) : shared_(std::make_shared<Shared>()) {
                 buf.append(chunk, (size_t) n);
             }
         };
+        auto stop_every_request = [&] {
+            st->stop.store(true);
+            st->stop_all.store(true);
+        };
         while (getline_fd(l)) {
             if (!l.empty() && l.back() == '\r') l.pop_back();
             if (l.rfind("CANCEL ", 0) == 0) {
@@ -90,12 +97,18 @@ Input::Input(bool quit_ends_request) : shared_(std::make_shared<Shared>()) {
                     st->cancelled.insert(id);
                 continue;
             }
-            if (l == "STOP" || (quit_ends_request && l.rfind("STOP ", 0) == 0)) {
+            if (l == "STOP") {
+                stop_every_request();
+                continue;
+            }
+            if (quit_ends_request && l.rfind("STOP ", 0) == 0) {
                 st->stop.store(true);
+                std::lock_guard<std::mutex> lk(st->mu);
+                st->stopped_ids.push_back(std::atoll(l.c_str() + 5));
                 continue;
             }
             if (quit_ends_request && l == "QUIT")
-                st->stop.store(true);
+                stop_every_request();
             std::lock_guard<std::mutex> lk(st->mu);
             RequestLine request;
             if (parse_request_line(l, request) && !request.request_id.empty())
@@ -106,7 +119,7 @@ Input::Input(bool quit_ends_request) : shared_(std::make_shared<Shared>()) {
         std::lock_guard<std::mutex> lk(st->mu);
         st->eof = true;
         if (quit_ends_request)
-            st->stop.store(true);
+            stop_every_request();
         st->cv.notify_one();
     }).detach();
 }
@@ -170,6 +183,19 @@ void Input::finish_request(const std::string& id) {
 }
 
 void Input::clear_stop() { shared_->stop.store(false); }
+
+bool Input::is_stop_requested(long long request_id) const {
+    if (shared_->stop_all.load()) return true;
+    std::lock_guard<std::mutex> lk(shared_->mu);
+    const auto& ids = shared_->stopped_ids;
+    return std::find(ids.begin(), ids.end(), request_id) != ids.end();
+}
+
+void Input::forget_stop(long long request_id) {
+    std::lock_guard<std::mutex> lk(shared_->mu);
+    auto& ids = shared_->stopped_ids;
+    ids.erase(std::remove(ids.begin(), ids.end(), request_id), ids.end());
+}
 
 void Input::take_slot_controls(const std::function<void(int)>& stop_slot, const std::function<bool(int)>& yield) {
     std::lock_guard<std::mutex> lk(shared_->mu);

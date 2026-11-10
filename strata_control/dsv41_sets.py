@@ -1,4 +1,4 @@
-"""The official DeepSeek-V4.1-Flash GGUF sets (IST-DAS 1.75 / 2.00 / 2.25 bpw), recognised by their pinned file names and sizes.
+"""The official DeepSeek-V4.1-Flash GGUF sets (ISTA-DAS 1.75 / 2.00 / 2.25 bpw), recognised by their pinned file names and sizes.
 
 The Terminal's setup downloads them (catalog.MULTI_FILE_FAMILIES, DSV41_ISTA_FILES) and accepts the files of their earlier
 layouts (DSV41_OLDER_FILES: ...-0000N-of-00004.gguf, model-2.00bpw-0000N-of-00004.gguf, engram-IQ4_NL.gguf). The app's
@@ -9,6 +9,9 @@ sizes alone: no tensor is read and no 40 GB file is hashed in a preview (setup c
 The tables are the catalog's (strata_common/catalog.py, never copied), so a new size added there is recognised here.  Shard 1 of
 the 4-shard layout is also recognised at the size of ISTA-DASLab's 2026-10-26 re-publication (a larger chat template:
 DSV41_NEW_SHARD1), and Unsloth's own low-bit sets (UD-IQ1_S, UD-IQ1_M) with the Engram as their shard 5.
+
+The ISTA-DAS Coder (catalog.DSV41_CODER, data/dsv41/coder-set.json) is one more set of the same kind: its metadata shard and model
+shards under the repository's names, matched by name AND size ("generic"), and ISTA-DAS's Engram file.
 """
 from __future__ import annotations
 
@@ -21,17 +24,17 @@ FAMILY = "deepseek41"
 
 @functools.cache
 def tables() -> dict:
-    """{"sets": {model: {"label", "layouts": [{name: bytes}, ...], "engram_alt": {name: bytes}}}, "engram": {name: bytes},
+    """{"sets": {model: {"label", "generic", "layouts": [{name: bytes}, ...], "engram_alt": {name: bytes}}}, "engram": {name: bytes},
     "new1": {name: bytes}} for the sets setup packs (the official ones and Unsloth's low-bit ones); their layouts newest first
     (catalog.make_ista_set); "engram_alt": a set's own shard that is the Engram; "new1": the other size a shard 1 may have."""
     family = catalog.MULTI_FILE_FAMILIES[FAMILY]
     sizes = {name: pin[0] for name, pin in catalog.DSV41_ALL_FILES.items()}
     result: dict = {"sets": {}, "engram": {}, "new1": {name: pin[0] for name, pin in catalog.DSV41_NEW_SHARD1.items()}}
     for model, entry in family["models"].items():
-        if entry.get("recipe") not in ("ista", "udlow"):
+        if entry.get("recipe") not in ("ista", "udlow", "coder"):
             continue                                # Unsloth's 508 GB set is not an "already have it" case of the app
         alt = entry.get("engram_shard")
-        result["sets"][model] = {"label": entry.get("label", model),
+        result["sets"][model] = {"label": entry.get("label", model), "generic": bool(entry.get("generic_names")),
                                  "layouts": [{name: sizes[name] for name in layout} for layout in entry["layouts"]],
                                  "engram_alt": {alt: sizes[alt]} if alt else {}}
     for name in (catalog.DSV41_ISTA_ENGRAM, catalog.DSV41_FIRST_NAMES[catalog.DSV41_ISTA_ENGRAM]):
@@ -55,6 +58,8 @@ def match(files: dict[str, int]) -> list[dict]:
             if not present:
                 continue
             ok_sizes = {n: {pinned[n], known["new1"].get(n, pinned[n])} for n in pinned}
+            if entry["generic"] and not any(files[n] in ok_sizes[n] for n in present):
+                continue                                # a file of another size under these names is another model's, not a cut copy of this one
             wrong = [n for n in present if files[n] not in ok_sizes[n]]
             missing = [n for n in pinned if n not in files]
             if not missing and not wrong and model in whole:

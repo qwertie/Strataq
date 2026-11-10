@@ -8,8 +8,8 @@ a change over.
 ## Where we are
 
 - The `upstream` remote is `https://github.com/Niko1221/Strata.git`.
-- **Last upstream commit carried over: `c62d5e3a`** (2026-10-31, "DeepSeek plan: the NVIDIA cards it counts are the
-  ones setup runs …", version 0.2.9). Update this line whenever you finish a batch.
+- **Last upstream commit carried over: `504b1433`** (2026-11-09, "test: the old-launcher test reads the Terminal
+  version from strata_cli …", version 0.2.13.1). Update this line whenever you finish a batch.
 
 ## Steps
 
@@ -72,10 +72,12 @@ code updates its rows here. Rows are grouped by step; `{a,b}` lists several file
 | `model_config_files` in `setup.py`, `config_files` in `strata_control/models_move.py` | `strata_control/discovery.py`: `config_files` | A2 | done |
 | the RAM probes: `_memory_status`, `ram_gb` in `setup.py`; `memory` in `strata_control/tune_machine.py`; `_CpuRamFallback.ram` in `serve/telemetry.py`; `ram_bytes` in `strata_cli/bench_facts.py`; `own_ram_gb` in `tools/strata_mcp.py`; `total_ram_gib` in `tools/strata_bench.py` | `strata_base/memory.py` (`read_ram`, `windows_memory_status`); the old names that remain call it | A2 | done |
 | `_feed_source`, `default_feed`, `DEFAULT_FEED`, `ENV_FEED` in `strata_cli/update_cmd.py` | `strata_control/updater.py`: `feed_source`, `default_feed`, `DEFAULT_FEED`, `ENV_FEED` | A2 | done |
-| the DeepSeek engine upgrade: `upgrade_dsv41_engine` in `setup.py` and the body of `Runner.upgrade_dsv41_engine` in `strata_cli/launch/runner.py` | `strata_control/dsv41_engine.py`: `try_upgrade` | A2 | done |
+| the DeepSeek engine upgrade: `upgrade_dsv41_engine` in `setup.py` and the body of `Runner.upgrade_dsv41_engine` in `strata_cli/launch/runner.py` | gone: upstream 0.2.13 dropped the upgrade at launch (`Runner.upgrade_dsv41_engine` only adds a notice), so `try_upgrade` was deleted | A2 | done |
 | the address test in `local_feed` in `setup.py` | `strata_base/transfer.py`: `is_local` | A2 | done |
 | the model catalog in `setup.py` (`MODELS`, `FAMILIES`, `CONTEXTS`, `OWN_PATH_FAMILIES`, `MULTI_FILE_FAMILIES`, the `*_FILES` and `*_SHARDS` pins, `NVFP4_REPOS`, `REPO_PINS`, `HF_REVISIONS`, `hf`, `hf_endpoint`); its copies: `FALLBACK_*` in `tools/strata_mcp.py` and `strata_cli/launch/settings.py`, the sizes in `PINNED_PROJECTORS` in `strata_control/models.py` and the DeepSeek file sizes in `strata_control/dsv41_fit.py` | `strata_common/catalog.py` (`setup.py` imports the names it had) | A2 | done |
 | `SPLIT_MIN_VRAM_GB`, `SPLIT_PROMPT_VRAM_GB` in `setup.py` | `strata_common/gpu_fit.py` | A2 | done |
+| `strata_control/sysinfo.py` (added upstream after c62d5e3a) | `strata_base/sysinfo.py`: standard library only, and `strata_common` reads it | merge of upstream 0.2.13.1 | done |
+| `strata_control/{vram_fit,intel_spec,dsv41_paths,cfg_paths,dsv41_flags}.py` (added upstream after c62d5e3a) | `strata_common/`: the engine client, `drafting`, `profiles` and `engine_component` read them | merge of upstream 0.2.13.1 | done |
 | the state-file writers that write a temporary file and rename it: `_atomic` in `strata_control/{profiles,presets}.py`, `_atomic_write` in `strata_control/tune_apply.py`, `_private_write` in `strata_cli/launch/store.py`, `_write` in `strata_control/preset_marks.py`, the bodies of `_replace_bytes` in `strata_control/calibration.py`, `write_private` in `strata_cli/launch/runner.py` and `UpdateState.save` in `strata_control/updater.py` | `strata_base/atomic.py`: `write_bytes`; the old names that remain call it | A2 | done |
 | the same for text: `save` in `strata_control/{time_skip,tuning}.py`, `_save_state` in `strata_control/components.py`, `save` in `serve/runconfig.py`, `write_config` in `setup.py`, `_write_status` in `strata_cli/tune_commands.py`, the pointer in `strata_control/updater.py` | `strata_base/atomic.py`: `write_text` | A2 | done |
 | `_digest` in `strata_control/calibration.py`; the hashing in `ComponentFile.verify_file` (`strata_control/components.py`) and `verify_engine_archive` (`setup.py`) | `strata_base/hashing.py`: `sha256_file` | A2 | done |
@@ -138,6 +140,15 @@ code updates its rows here. Rows are grouped by step; `{a,b}` lists several file
 | `src/dsv41/ds4_os_apple.h`; `include/strata/qwen35/sampling.hpp`; `sycl/include/strata/{kernels/qsa_prompt_attn_esimd,pipeline_auto}.hpp` | `include/strata/base/platform/os_apple.hpp` (`os.hpp` includes it); `include/strata/models/qwen36/sampling.hpp` (its `apply_penalties` takes `serve::Sampling`); `sycl/include/strata/models/qwen38/{kernels/qsa_prompt_attn_esimd,pipeline_auto}.hpp` | merge of c62d5e3a | done |
 | `include/strata/program/{stage_reserve,adapt_decay}.hpp`, `src/program/adapt_decay_test.cpp` | `include/strata/models/qwen38/`, `src/models/qwen38/` (memory-manager: `models/qwen38` may not include `program/`) | M | done |
 | `include/strata/program/gpu_report.hpp` | `include/strata/base/gpu/gpu_report.hpp` (memory-manager) | M | done |
+| upstream's `include/strata/kernels/qsa_two_pass{,_status}.hpp`, `src/kernels/{gr_v3_screen,mmvf_unr_hash,qsa_two_pass_parity}.cpp`, `src/prefill/qsa_nr_parity.cu` | `include/strata/models/qwen38/kernels/`, `src/models/qwen38/kernels/`, `src/models/qwen38/prefill/` | B1 | done |
+| upstream's `include/strata/prefill/{mmq_ids_margin,moe_iq4_w4a8,pf_fused_override}.hpp` | `include/strata/common/kernels/prefill/` (the common `moe_mmq`/`moe_fused` include them) | B1 | done |
+| `sycl/{include,src}/strata/core/{dflash2,short_cache}*`, `sycl/src/core/{dflash2_ring_test,short_cache_test,verify_refusal_test}.cpp` | `sycl/{include/strata,src}/models/qwen38/` | A3 | done |
+| `sycl/src/kernels/{dq_dense_parity,slot_history_test}.cpp` | `sycl/src/common/kernels/` | A3 | done |
+| `include/strata/dsv41/sampler.hpp`'s penalty window (216252f0) | `include/strata/common/kernels/sampler_penalties.cuh`, shared by the common sampler and DeepSeek's verify | B2 | done |
+| upstream's CMake split by backend (`cmake/backends/*.cmake`, `cmake/strata_gpu_engine.cmake`, 8b166770) | the same files, with the fork's source paths | - | done |
+| `include/strata/program/split_walk.hpp` | `include/strata/common/experts/split_walk.hpp` (memory-manager) | M | done |
+| upstream's `src/core/dflash2_{q4_parity,ring_test}.cpp` | `src/models/qwen38/` | A3 | done |
+| the expert arena's RAM rules in upstream's `include/strata/core/ple_residency.hpp` (`arena_ram_verdict`, `--ram-keep-gib`, from #4846 on) | `include/strata/common/experts/arena_ram.hpp`, which `models/qwen38/ple_residency.hpp` includes | M | done |
 
 ## Log
 
@@ -194,3 +205,38 @@ strata-q38 until they are measured there; the new K/V readers take `units` (the 
 env defaults; `split.py` refuses split serving with a paged engine. Still open: `LP` logprob lines over the
 request-ID protocol (`generate_request` and `paged_engine.cpp`; until then the server refuses logprobs with a paged
 engine), and the Metal DeepSeek build's `FinishIn` layout against memory-manager's `KvRows`.
+
+**0.2.9 to 0.2.13.1, merged 2026-11-09:**
+
+| Upstream | Decision | Here | Notes |
+|---|---|---|---|
+| `c62d5e3a..504b1433` (0.2.9 to 0.2.13.1: 1231 commits) | carry over, all of it | one merge commit on `local` | details below |
+| 8b166770 CMake split by backend | carry over | `cmake/**` | the fork's paths inside the macros |
+| 03627326, cc703b5e `--lookup-max-t`; 1ab4c2ce, 1db96cda, 4c5a5549 `--draft auto`; 6de7c8e3 window rule; c2b9218c deferred DFlash2 draft | carry over | `generate.cpp`, `WindowPlanner` (`set_mtp_rows`, `propose_lookup`, `take_lookup`, `begin(pos, WindowRuleIn)`) | `policy_idle` starts as a copy of `wplan.policy` |
+| 243fdb21 serve stop bound; d486fbe7 STRATA_FOLLOW; 89f4fa18 run manifest; 24c6c2f6 STRATA_ADAPT_FETCH; ecf7424b `g_lend_keep`; b537586e `--ram-keep-gib`; 62e861c9 `pen_from` | carry over | `generate.cpp` | the manifest flush runs in `hooks.before_line` |
+| af7759b6 compiled geometry (`STRATA_GEOMETRY`) | carry over | `common/kernels/cpu/expert.hpp`, `native_expert.hpp`, `moe_fused.hpp` | listed in `KNOWN_UPWARD_INCLUDES` (common sized from `core/geometry.hpp`) |
+| 31c3a16f (#4590 Qwen3.6 penalties) | carry over | `include/strata/models/qwen36/sampling.hpp` | |
+| 216252f0 penalized DeepSeek verify; 29c2d574, 69896982, 169d5d6a DeepSeek `--parallel` | carry over | `vendor/sampler.cu`, `ds4_main.cpp`, `serve::Input` (`is_stop_requested`, `forget_stop` for `STOP <rid>`) | |
+| a280f5bb `ds4_iq_cpu.cpp` (IQ1_S CPU rows) | skip | | not compiled upstream either; `DS4_IQ1S_ROWS` dropped |
+| SYCL `prefill/moe_fused{,_iq}.dp.cpp` | skip (deleted) | | still never built upstream |
+| `src/split/` (the all-cards split engine), `third_party/strata-ggml/` | carry over | where upstream put them | |
+| the `serve/server.py` engine-client hunks (fatal GPU restart e1b27d54, `died_note`, restore points, `--parallel` protocol, split-engine refusals, engine-owned defaults d1121b89) | carry over | `strata_common/engine_client.py` | `request_stats`, `prefill_leg_stats` moved there too |
+| catalog additions (Unsloth v3.1 9ed3c778, ISTA-DAS Coder 85dd0852, 128K default bd7e44c9) | carry over | `strata_common/catalog.py` | `dsv41_engine.try_upgrade` deleted (no callers left) |
+| upstream's new `strata_control` modules used by the shared layer | carry over | `strata_base/sysinfo.py`; `strata_common/{vram_fit,intel_spec,dsv41_paths,cfg_paths,dsv41_flags}.py` | `shape_engine`, `discovery`, `runtime` stay; known upward loads |
+
+**What `memory-manager` must port by hand** when it merges this: upstream's new Qwen3.8 loader code in `generate.cpp`
+(memory rules: `--ram-keep-gib`, `g_lend_keep`, spill gate 2e7db84b, small-card `pf_fused_override` fd59c9c3) goes to
+`Model::load()` / `options.cpp`; the `units` argument for new K/V readers (two-pass QSA, layer-split DFlash2 taps);
+`paged_engine.cpp` and strata-q38 lack `pen_from`, the stop bound, `--lookup-max-t`, DFlash2 and the fatal-GPU `ERR`
+line with exit code 3; strata-ds41 lacks the `--parallel` protocol, restore points and the penalized verify.
+
+**`memory-manager` merged `local` at 0.2.13.1 (4281d7a6) on 2026-11-09.** The loader hand ports are in `Model::load()`
+and `options.cpp` (`--ram-keep-gib` reaches strata-q38's RAM pool; the spill walk, `g_lend_keep`, the compiled
+geometry and DFlash2 loading are shared, DFlash2 and `--lookup-max-t` off in strata-q38; `apply_device_defaults(o,
+paged)` skips the engine-owned Linux defaults for it). Two-pass QSA refuses `units` and the prompt path falls back.
+One conversation's window in `paged_engine.cpp` stays at `kVerifyNarrowT` (8), since `DraftPolicy::kMaxT` is now 16.
+The old DeepSeek engine's `--parallel` runs on `KvRows` (`swap_seq_state`); restore points sit beside
+memory-manager's four checkpoints (slot roles 4 and 5). strata-ds41 keeps `--batch`; PCIe lane, one-GPU decode,
+recent slots and prompt-path slot borrowing stay off for it. Still open for the new engines: the fatal-GPU `ERR`
+line with exit code 3, `pen_from`, the stop bound, DFlash2, `--lookup-max-t`, and for strata-ds41 penalties in its
+joint verify and restore points.

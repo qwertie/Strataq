@@ -9,6 +9,7 @@
 #include "strata/common/experts/expert_swaps.hpp"
 #include "strata/common/experts/ram_tier.hpp"
 #include "strata/common/experts/split_rules.hpp"
+#include "strata/common/kernels/window_limits.hpp"
 #include "strata/common/serve/decode_selection.hpp"
 #include "strata/common/serve/conversation_residency.hpp"
 #include "strata/common/serve/loop.hpp"
@@ -1115,9 +1116,10 @@ bool PagedEngine::serve_request(const std::string& line, bool admit) {
         if (h.dec.draft_enabled && (facts_.has_drafter ||
             (lookup && (settings_.suffix_draft > 0 || settings_.lookup_chain > 0))) &&
             settings_.step.lookahead > 0) {
-            // One conversation's window stays within DraftPolicy::kMaxT rows, what the draft policy, the step's draft
-            // probabilities and the MTP drafter hold; only a step of several conversations uses the rest of max_rows.
-            const int window_rows = std::min(facts_.max_rows, strata::spec::DraftPolicy::kMaxT);
+            // One conversation's window stays within kVerifyNarrowT rows, what the MTP drafter and its saved rows
+            // hold (DraftPolicy::kMaxT is wider, for the old engine's --lookup-max-t); only a step of several
+            // conversations uses the rest of max_rows.
+            const int window_rows = std::min(facts_.max_rows, strata::kernels::kVerifyNarrowT);
             h.dec.planner = std::make_unique<strata::spec::WindowPlanner>(
                 window_rows, settings_.step.model_lookahead < 0 ? window_rows :
                     settings_.step.model_lookahead + 1, lookup ? (int) settings_.suffix_draft : 0,

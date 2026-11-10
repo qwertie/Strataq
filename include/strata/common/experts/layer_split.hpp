@@ -43,6 +43,9 @@ struct SplitProblem {
     std::function<int64_t(int card, int64_t lb, int64_t le)> room;
     /// Tells whether the engine can start on a placement (the old engine: its prompt path's buffers); null: always
     std::function<bool(const std::vector<SplitFill>&)> can_start;
+    /// When no placement can start: true chooses one by decode time alone (SplitPlan::start_unchecked), false gives
+    /// no placement (the old engine first tries a smaller K/V window, split_walk.hpp)
+    bool choose_unchecked = true;
     double miss_ms = 190.0;        ///< the predicted cost of a window whose routed experts no card holds
     /// Weights the profile by the coverage curve 1 - (1 - f)^cover_b of the held share f, not by (rank + 1)^-1.2
     bool coverage_curve = false;

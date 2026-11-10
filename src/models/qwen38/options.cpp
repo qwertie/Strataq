@@ -4,6 +4,7 @@
 #include "strata/base/platform/env.hpp"
 #include "strata/models/qwen38/options.hpp"
 
+#include "strata/base/gpu/emulate.hpp"
 #include "strata/base/gpu/gfx_arch.hpp"
 #include "strata/base/gpu/pinned.hpp"
 #include "strata/base/platform/aux_cpus.hpp"
@@ -13,6 +14,10 @@
 #include "strata/core/nv_defaults.hpp"
 #include "strata/models/qwen38/adapt_decay.hpp"
 #include "strata/models/qwen38/logits_selection.hpp"
+#include "strata/core/defaults_026.hpp"
+#include "strata/core/gfx12_chunk.hpp"
+#include "strata/core/nv_chunk.hpp"
+#include "strata/models/qwen38/ple_residency.hpp"
 
 #include <cuda_runtime.h>
 
@@ -161,6 +166,9 @@ void print_usage() {
                  "  --suffix-draft N     prompt lookup: draft from an earlier repeat of the last N+ tokens of context\n"
                  "                       when it pays (default 3; 0 = MTP only)\n"
                  "  --mtp-max-t M        cap the MTP's windows at M tokens (0 = --spec; longer ones come from suffixes)\n"
+                 "  --lookup-max-t N     prompt-lookup windows up to N (<= 16) tokens (default 12 on one GPU in the 8-row CUDA build, not Metal; 0 = off);\n"
+                 "                       copy-heavy edits gain, each extra window size costs a graph (~20-35 MiB of VRAM)\n"
+                 "  --lookup-sizes A,B   the lookup window sizes past the MTP's (default: MTP+1, MTP+2 and N)\n"
                  "  --spec N             the MTP drafter's verify window: how many tokens it proposes per check (setup\n"
                  "                       writes 4; --suffix-draft lets it grow by 2, up to 8, where a repeat is likely)\n"
                  "  --spec-min-p P       how sure the draft layer must be to extend a verify window by another guess\n"
@@ -173,9 +181,14 @@ void print_usage() {
                  "  --mtp-q4 all|proj|head  opt-in: the draft layer's projections and/or draft head as 4-bit copies\n"
                  "  --mtp-draft-vocab FILE  opt-in: the draft head's token subset (default <mtp>/draft_vocab.bin)\n"
                  "  --draft mtp|dflash2  the draft source (default mtp); dflash2 needs --draft-model PACK (tools/dflash2_pack.py)\n"
-                 "                       and keeps the MTP layer loaded as the fallback (opt-in, Flash-Next, CUDA / HIP)\n"
+                 "                       and loads no MTP layer (--draft-fallback mtp keeps it as the fallback) (opt-in, Flash-Next, CUDA / HIP)\n"
+                 "  --draft-fallback mtp|none  with --draft dflash2 (default none): none = the MTP layer is not loaded at all, DFlash2 is the only drafter and a DFlash2 that cannot start is an error;\n"
+                 "                       mtp = load both, the MTP drafts if DFlash2 cannot start (--draft auto always loads both)\n"
+                 "                       (the MTP layer's ~0.9 GiB of VRAM goes to the expert cache; --mtp DIR is still needed for DIR/draft_vocab.bin)\n"
                  "  --draft-conf P       with --draft dflash2: end the window where the product of the selector's probabilities falls below P (default 0 = --spec-min-p)\n"
-                 "  --draft-cap N        the widest verify window with --draft dflash2 (default by card: 5 on Strix Halo / iGPU, --spec as given elsewhere)\n"
+                 "  --draft auto         (serve) both drafters stay current; a request picks one: draft=mtp|dflash2, else --draft-rule df2|mtp|learn;\n"
+                 "                       MTP requests use --draft-mtp-spec N (default 4) and --draft-mtp-min-p P\n"
+                 "  --draft-cap N        the widest verify window with --draft dflash2 (default by card: 8 on Strix Halo / iGPU and on Blackwell cc 12.0 with 48 GB or more, 6 on other Blackwell, --spec as given elsewhere)\n"
                  "  --control-vector-scaled FILE:SCALE[,...]  a control vector GGUF on the residual stream (llama.cpp's\n"
                  "                       format; --control-vector FILE = scale 1).  --serve: requests switch it (cvec=0|1)\n"
                  "  --control-vector-layer-range A B  the layers it follows (inclusive; default 1 .. the last)\n"
@@ -295,7 +308,12 @@ void print_usage() {
                  "  --resident-experts   the low-RAM PC's resident mode (setup): --mmap-experts --resident-cpu-experts\n"
                  "                       with the copy page-locked when possible, 4 GiB headroom, plain mmap if it\n"
                  "                       does not fit.  Same answers as --mmap-experts for the same placement.\n"
-                 "  --adapt-min-gain F   the adaptive tier swaps an expert in only when its decayed routing count beats\n"
+                 "  --ram-keep-gib W     RAM to leave free for your own work, in GiB (default 0; STRATA_RAM_KEEP_GIB is the\n"
+                 "                       same).  The expert arena is used only if W GiB stay available after it; otherwise\n"
+                 "                       the hottest experts are kept in a RAM copy that leaves max(W, 8 GiB on Windows /\n"
+                 "                       4 GiB elsewhere) free and the rest are read from the files.  0 = the arena whenever\n"
+                 "                       it fits.  STRATA_RESIDENT_HEADROOM_GIB, when set, decides the headroom instead.\n"
+                 "  --adapt-min-gain F  the adaptive tier swaps an expert in only when its decayed routing count beats\n"
                  "                       the one it replaces by more than F (default 1.5; higher = fewer, surer swaps)\n"
                  "  --adapt-async 0|1    --serve with the resident RAM mode or the arena (one GPU): the adaptive\n"
                  "                       tier's swaps advance between verify windows instead of a window waiting for a\n"
@@ -305,8 +323,37 @@ void print_usage() {
                  "                       blocking tier always (also STRATA_ADAPT_ASYNC=0); 1 = always on.\n");
 }
 
+unsigned lookup_size_mask(const Options& o) {
+    if (o.lookup_max_t <= 0) return ~0u;
+    const int s_mtp = o.mtp_max_t > 0 ? std::min(o.mtp_max_t, o.spec) : o.spec;
+    unsigned m = 0;
+    for (int t = 1; t <= s_mtp; ++t) m |= 1u << t;
+    if (o.lookup_sizes.empty()) {
+        for (int t : {s_mtp + 1, s_mtp + 2, o.spec})
+            if (t <= o.spec) m |= 1u << t;
+    } else {
+        size_t at = 0;
+        while (at < o.lookup_sizes.size()) {
+            const int t = std::atoi(o.lookup_sizes.c_str() + at);
+            if (t >= 2 && t <= o.spec) m |= 1u << t;
+            const size_t c = o.lookup_sizes.find(',', at);
+            if (c == std::string::npos) break;
+            at = c + 1;
+        }
+    }
+    return m;
+}
+
+std::string size_list(unsigned m, int max_t) {
+    std::string r;
+    for (int t = 1; t <= max_t; ++t)
+        if ((m >> t) & 1u) r += (r.empty() ? "" : ",") + std::to_string(t);
+    return r;
+}
+
 int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
     bool have_logits_stride = false;
+    bool ram_keep_by_flag = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         auto next = [&](const char* what) -> const char* {
@@ -486,10 +533,7 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
                 o.prefill_auto_cap = strata::platform::host_limits::auto_chunk_cap(win_hip, bare_auto && o.prefill_auto);
                 if (o.prefill_auto_cap > 0) o.prefill_chunk = std::min(o.prefill_chunk, o.prefill_auto_cap);
                 if (strata::platform::host_limits::warn_user_chunk(win_hip, bare_auto, o.prefill_chunk))
-                    std::fprintf(stderr, "strata: WARNING --prefill %s: prompt chunks of 8192 tokens or more crashed the engine "
-                                         "on Windows HIP (RX 7900 XTX: the commit charge jumped ~70 GB, exit code 0xC0000409, "
-                                         "#1630); 7500 and below were stable. Kept as asked; a bare --prefill auto stops at %lld\n",
-                                 v.c_str(), (long long) strata::platform::host_limits::kWinHipAutoChunkCap);
+                    o.prefill_cap_warn = v;   // printed once the device is known (gfx1151 does not print it)
             }
         }
         else if (a == "--prefill-pipe") o.prefill_pipe = std::max(0.0, std::atof(next("--prefill-pipe")));
@@ -565,6 +609,8 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         else if (a == "--pipeline-windows") o.pipeline_windows = std::max(0, std::min(2, std::atoi(next("--pipeline-windows"))));
         else if (a == "--suffix-draft") o.suffix_draft = std::max(0, std::atoi(next("--suffix-draft")));
         else if (a == "--mtp-max-t") o.mtp_max_t = std::max(0, std::atoi(next("--mtp-max-t")));
+        else if (a == "--lookup-max-t") o.lookup_max_t = std::max(0, std::atoi(next("--lookup-max-t")));
+        else if (a == "--lookup-sizes") o.lookup_sizes = next("--lookup-sizes");
         else if (a == "--lookup-chain") o.lookup_chain = std::clamp(std::atoi(next("--lookup-chain")), 0, 7);
         else if (a == "--lookup-chain-min") o.lookup_chain_min = std::max(3, std::atoi(next("--lookup-chain-min")));
         else if (a == "--mtp-hnorm") {
@@ -585,12 +631,23 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         else if (a == "--mtp-draft-vocab") o.mtp_draft_vocab = next("--mtp-draft-vocab");
         else if (a == "--draft") {
             o.draft = next("--draft");
+            if (o.draft == "auto") { o.draft = "dflash2"; o.draft_auto = true; }
             if (o.draft != "dflash2" && o.draft != "mtp") {
-                std::fprintf(stderr, "strata generate: --draft takes mtp or dflash2\n");
+                std::fprintf(stderr, "strata generate: --draft takes mtp, dflash2 or auto\n");
                 std::exit(2);
             }
         }
+        else if (a == "--draft-rule") o.draft_rule = next("--draft-rule");
+        else if (a == "--draft-mtp-spec") { o.draft_mtp_spec = std::max(2, std::atoi(next("--draft-mtp-spec"))); o.draft_mtp_spec_set = true; }
+        else if (a == "--draft-mtp-min-p") o.draft_mtp_min_p = std::clamp(std::atof(next("--draft-mtp-min-p")), 0.0, 1.0);
         else if (a == "--draft-model") o.draft_model = next("--draft-model");
+        else if (a == "--draft-fallback") {
+            o.draft_fallback = next("--draft-fallback");
+            if (o.draft_fallback != "mtp" && o.draft_fallback != "none") {
+                std::fprintf(stderr, "strata generate: --draft-fallback takes mtp or none\n");
+                std::exit(2);
+            }
+        }
         else if (a == "--draft-conf") o.draft_conf = std::clamp(std::atof(next("--draft-conf")), 0.0, 1.0);
         else if (a == "--draft-cap") o.draft_cap = std::max(0, std::atoi(next("--draft-cap")));
         else if (a == "--control-vector") o.cvec_files.push_back({next("--control-vector"), 1.0f});
@@ -649,6 +706,12 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         else if (a == "--shared-expert-arena") o.shared_expert_arena = next("--shared-expert-arena");
         else if (a == "--resident-cpu-experts") o.resident_cpu_experts = o.resident_cpu_explicit = true;
         else if (a == "--resident-experts") take_resident_experts(o);
+        else if (a == "--ram-keep-gib") {
+            const double gib = std::atof(next("--ram-keep-gib"));
+            if (!(gib >= 0.0)) { std::fprintf(stderr, "strata generate: --ram-keep-gib needs N >= 0\n"); return 2; }
+            o.ram_keep = strata::core::ram_keep_from_gib(gib);
+            ram_keep_by_flag = true;
+        }
         else if (a == "--resident-budget-gib") {
             const double gib = std::atof(next("--resident-budget-gib"));
             if (!(gib > 0.0)) { std::fprintf(stderr, "strata generate: --resident-budget-gib needs N > 0\n"); return 2; }
@@ -678,11 +741,21 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         }
         }
     }
+    {   // --ram-keep-gib W (or STRATA_RAM_KEEP_GIB, for a program that cannot pass the flag; the flag wins): the RAM to leave free.  It also
+        // raises the headroom of the explicit RAM modes (--resident-budget-gib, --resident-experts) to at least W, unless
+        // STRATA_RESIDENT_HEADROOM_GIB is set (that value wins).
+        if (!ram_keep_by_flag)
+            if (const char* v = std::getenv("STRATA_RAM_KEEP_GIB"); v != nullptr && v[0] != '\0' && std::atof(v) > 0.0)
+                o.ram_keep = strata::core::ram_keep_from_gib(std::atof(v));
+        const char* hv = std::getenv("STRATA_RESIDENT_HEADROOM_GIB");
+        if (o.ram_keep > 0 && !(hv != nullptr && std::atof(hv) >= 0.0) && o.resident_headroom < o.ram_keep)
+            o.resident_headroom = o.ram_keep;
+    }
     return -1;
 }
 
 
-int apply_device_defaults(Options& o) {
+int apply_device_defaults(Options& o, bool paged) {
 #if defined(STRATA_USE_HIP)
     {   // gfx1151 (Strix Halo): the switches that are exact there are on by default (strata/core/arch_defaults.hpp); before
         // any engine code reads its switches (they are read at first use), and the user's own settings are kept
@@ -700,7 +773,23 @@ int apply_device_defaults(Options& o) {
                         std::strncmp(od.gcnArchName, ad.gcnArchName, 7) != 0) { all_igpu = false; (void) cudaGetLastError(); break; }
                 }
             }
-            strata::core::apply_arch_defaults(ad.gcnArchName, all_igpu);
+            if (!paged) {   // Linux, every visible card gfx12: the chunked GDN scan from the first chunk (owner yes 2026-11-07; was the launcher's GDN_STACK_GFX12).
+                // Before apply_arch_defaults, so its "30,000+ tokens" line is not printed when the variable is set.
+                bool all_gfx12 = true;
+                int nd12 = 0;
+                if (cudaGetDeviceCount(&nd12) != cudaSuccess || nd12 < 1) all_gfx12 = false;
+                for (int d = 0; all_gfx12 && d < nd12 && d < 64; ++d) {
+                    cudaDeviceProp od{};
+                    if (cudaGetDeviceProperties(&od, d) != cudaSuccess || !strata::kernels::gfx_arch_is_gfx12(od.gcnArchName)) all_gfx12 = false;
+                }
+                (void) cudaGetLastError();
+#if defined(_WIN32)
+                strata::core::apply_gdn_chunked_default(false, all_gfx12);
+#else
+                strata::core::apply_gdn_chunked_default(true, all_gfx12);
+#endif
+            }
+            strata::core::apply_arch_defaults(ad.gcnArchName, all_igpu, paged ? 0 : o.batch);
 #if defined(_WIN32)
             const bool win_host = true;
 #else
@@ -714,6 +803,11 @@ int apply_device_defaults(Options& o) {
             // gfx1151 on Windows (#1630 capped a bare `--prefill auto` at 6144 for a 7900 XTX's commit charge): the Strix Halo has its
             // 8192 chunk back.  IQ3_S, 8K prompt: 691 -> 787 tok/s (one chunk streams 1,785 experts instead of 2,782), 64K 713 -> 748;
             // 4K is one chunk already.  STRATA_GFX1151_CHUNK=0 (or STRATA_GFX1151_DEFAULTS=0) keeps 6144.
+            if (win_host && all_igpu && std::strncmp(ad.gcnArchName, "gfx1151", 7) == 0) {   // #1630 was a discrete RX 7900 XTX: no warning about a named chunk here
+                const char* c1w = std::getenv("STRATA_GFX1151_CHUNK");
+                const char* d1w = std::getenv("STRATA_GFX1151_DEFAULTS");
+                if (!(c1w != nullptr && c1w[0] == '0') && !(d1w != nullptr && d1w[0] == '0')) o.prefill_cap_warn_skip = true;
+            }
             if (win_host && all_igpu && o.prefill_auto_bare && o.prefill_auto_cap > 0 && std::strncmp(ad.gcnArchName, "gfx1151", 7) == 0) {
                 const char* c1 = std::getenv("STRATA_GFX1151_CHUNK");
                 const char* d1 = std::getenv("STRATA_GFX1151_DEFAULTS");
@@ -745,6 +839,19 @@ int apply_device_defaults(Options& o) {
         } else (void) cudaGetLastError();
     }
 #endif
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && !defined(STRATA_GPU_METAL) && !defined(_WIN32)
+    // Linux CUDA, 2 or more batch slots: the exact parallel-request stack is the engine's own default (QUAL-PAR bit-exact; it was the launcher's
+    // PARALLEL_STACK_ENV).  Each switch keeps =0 as its off switch and a value the user set is kept.  Before any engine code reads them.
+    if (!paged) {
+        strata::core::apply_parallel_defaults_cuda(true, o.batch);
+        strata::core::apply_gdn_defaults_cuda(true);   // STRATA_GDN_TC=1, STRATA_GDN_CONVL2=2 (owner yes 2026-11-07; was the launcher's GDN_STACK_CUDA)
+    }
+#endif
+    if (!o.prefill_cap_warn.empty() && !o.prefill_cap_warn_skip)
+        std::fprintf(stderr, "strata: WARNING --prefill %s: prompt chunks of 8192 tokens or more crashed the engine "
+                             "on Windows HIP (RX 7900 XTX: the commit charge jumped ~70 GB, exit code 0xC0000409, "
+                             "#1630); 7500 and below were stable. Kept as asked; a bare --prefill auto stops at %lld\n",
+                     o.prefill_cap_warn.c_str(), (long long) strata::platform::host_limits::kWinHipAutoChunkCap);
 #if !defined(STRATA_USE_HIP) && !defined(STRATA_GPU_METAL)
     {   // CUDA sm_86 / sm_60: the switches that are exact AND faster there are on by default (strata/core/nv_defaults.hpp), when every
         // visible card has that one compute capability; before any engine code reads its switches, the user's own settings are kept
@@ -759,6 +866,42 @@ int apply_device_defaults(Options& o) {
                        cudaDeviceGetAttribute(&n, cudaDevAttrComputeCapabilityMinor, d) == cudaSuccess && m == m0 && n == n0;
             }
             if (same) { strata::core::apply_nv_defaults(m0, n0); strata::core::apply_spec_adapt_default(m0, n0); }
+            {   // round 0212: the K-quant MMQ prompt kernels, on by default for compute capability 8.0+ (STRATA_MMQ_KQ=0 or STRATA_NV_KQ_DEFAULT=0 turns them off); the lowest compute capability decides
+                int lo_m = m0, lo_n = n0;
+                for (int d = 1; d < nd; ++d) {
+                    int m = 0, n = 0;
+                    if (cudaDeviceGetAttribute(&m, cudaDevAttrComputeCapabilityMajor, d) == cudaSuccess &&
+                        cudaDeviceGetAttribute(&n, cudaDevAttrComputeCapabilityMinor, d) == cudaSuccess && (m < lo_m || (m == lo_m && n < lo_n))) { lo_m = m; lo_n = n; }
+                }
+                strata::core::apply_nv_kq_default(lo_m, lo_n);
+            }
+        }
+        (void) cudaGetLastError();
+    }
+#endif
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_GPU_METAL)
+    if (o.prefill_auto_bare && o.prefill_auto_cap == 0) {
+        // NVIDIA, compute capability 8.0 and up (round 0212, owner 11-03 "after the full test suite passes on it"): a bare `--prefill auto` may reach
+        // 32768 instead of 8192, by the gfx12 rule below.  The fit scan still picks a smaller chunk when the expert cache cannot lend the buffers, and
+        // the RAM guard further down steps 32768 -> 16384 -> 8192 when the RAM available does not cover the extra loan.  An explicit --prefill N,
+        // auto:N or STRATA_PREFILL_AUTO_MAX is never touched (prefill_auto_bare is false then).  STRATA_NV_CHUNK=0 or STRATA_DEFAULTS=026 keeps 8192,
+        // STRATA_NV_CHUNK=16 keeps 16384.  A layer split takes 8192 back (like gfx12; STRATA_SPLIT_CHUNK16K=1 keeps the raised ceiling).
+        // A6000 UD-Q4_K_XL (13.1K of 24.6K experts in VRAM): 20K +43.4%, 32K +22.5%, 64K +21.3%, 8K 0.0%; cards that hold every expert: flat.
+        const int64_t top = strata::core::nv_chunk_ceiling(std::getenv("STRATA_NV_CHUNK"), strata::qwen_defaults_026());
+        int nd = 0, lo_major = 99;
+        if (top > 0 && cudaGetDeviceCount(&nd) == cudaSuccess && nd > 0) {
+            for (int d = 0; d < nd; ++d) {
+                int m = 0;
+                if (cudaDeviceGetAttribute(&m, cudaDevAttrComputeCapabilityMajor, d) != cudaSuccess) { lo_major = 0; break; }
+                lo_major = std::min(lo_major, (int) strata::cc_major_of(m));
+            }
+            if (strata::core::nv_chunk_card_ok(lo_major)) {
+                o.prefill_auto_max = top;
+                o.prefill_chunk = top;
+                o.prefill_gfx12_16k = true;
+                o.prefill_raise_who = "NVIDIA";
+                std::fprintf(stderr, "strata generate: NVIDIA: --prefill auto may take chunks up to %lld (STRATA_NV_CHUNK=0 keeps 8192, =16 keeps 16384)\n", (long long) top);
+            }
         }
         (void) cudaGetLastError();
     }
@@ -769,15 +912,20 @@ int apply_device_defaults(Options& o) {
         // 64K prompts: +0.5 .. +5.8%, residuals identical to 8192).  The fit scan still picks a smaller chunk when the expert cache cannot lend
         // the buffers.  An explicit --prefill N, auto:N or STRATA_PREFILL_AUTO_MAX is never touched (prefill_auto_bare is false then).
         // STRATA_GFX12_DEFAULTS=0 or STRATA_GFX12_CHUNK=0 keeps 8192.
+        // 0.2.10.1 (owner 11-03, "do all 5"): the ceiling is 32768, not 16384.  A 16384 chunk leaves a 20K prompt as 16384 + a 3.6K tail, and every
+        // chunk of 1,024 tokens or more streams all the experts the card does not hold.  R9700 (p620, IQ3_S, 3 rounds interleaved): 20K +12.1%, 32K +1.3%,
+        // 64K +2.6%, 8K +0.9%; UD-Q4_K_XL 20K +26%; first-token KL against 16384 at most 5e-5 (3 of 6 prompts bitwise).  The loan is only taken for
+        // what a prompt needs, and the RAM guard below steps 32768 -> 16384 -> 8192.  STRATA_GFX12_CHUNK=16 keeps 16384.
         const char* c0 = std::getenv("STRATA_GFX12_CHUNK");
         const char* d0 = std::getenv("STRATA_GFX12_DEFAULTS");
         cudaDeviceProp cp{};
-        if (!(c0 != nullptr && c0[0] == '0') && !(d0 != nullptr && d0[0] == '0') &&
+        if (strata::core::gfx12_chunk_ceiling(c0) > 0 && !(d0 != nullptr && d0[0] == '0') &&
             cudaGetDeviceProperties(&cp, 0) == cudaSuccess && strata::kernels::gfx_arch_is_gfx12(cp.gcnArchName)) {
-            o.prefill_auto_max = 16384;
-            o.prefill_chunk = 16384;
+            const int64_t top = strata::core::gfx12_chunk_ceiling(c0);
+            o.prefill_auto_max = top;
+            o.prefill_chunk = top;
             o.prefill_gfx12_16k = true;
-            std::fprintf(stderr, "strata generate: gfx12: --prefill auto may take chunks up to 16384 (STRATA_GFX12_CHUNK=0 keeps 8192)\n");
+            std::fprintf(stderr, "strata generate: gfx12: --prefill auto may take chunks up to %lld (STRATA_GFX12_CHUNK=16 keeps 16384, =0 keeps 8192)\n", (long long) top);
         }
         (void) cudaGetLastError();
     }

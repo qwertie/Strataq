@@ -8,6 +8,8 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping
 
+from strata_base import loopback
+
 
 def wait_for_experts(read_memory: Callable[[], Mapping | Iterable[str]], timeout: float = 1800,
                      log: Callable[[str], object] = print) -> float:
@@ -40,7 +42,7 @@ def wait_for_http_experts(base: str, key: str = "", timeout: float = 1800,
         headers = {"Authorization": f"Bearer {key}"} if key else {}
         request = urllib.request.Request(base.rstrip("/") + "/v1/memory", headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=min(timeout, 30)) as response:
+            with loopback.urlopen(request, timeout=min(timeout, 30)) as response:
                 return json.load(response)
         except urllib.error.HTTPError as error:
             if error.code == 404:

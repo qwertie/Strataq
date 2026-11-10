@@ -28,3 +28,4 @@ docker/compose/* text eol=lf
 
 # vendored KaTeX (strata_server/web/vendor): the files are hashed byte for byte (PROVENANCE.json), never convert their line endings.
 strata_server/web/vendor/** -text
+third_party/strata-ggml/** text eol=lf

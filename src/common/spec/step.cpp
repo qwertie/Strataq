@@ -209,7 +209,9 @@ void Step::prepare(const std::vector<Decoding*>& active, Work& work, int group, 
                 for (int j = 0; j < n; ++j)
                     if (!context.keep_draft(j, probs[(size_t) j]))
                         break;
-            window = planner.begin(d.pos, n + 1, n > 0, probs.data(), 0.0, d.produced == 0 || want == 0);
+            window = planner.begin(d.pos, {.use_mtp = n > 0, .draft_on = n > 0,
+                                           .first_window = d.produced == 0 || want == 0, .cap = n + 1,
+                                           .start = n + 1, .dprob = probs.data()});
             window.T = std::min(window.T, n + 1);
             planner.pick_lookup(window, guesses.data(), false, want + 1);
             planner.pick_chain(window, guesses.data(), want + 1);

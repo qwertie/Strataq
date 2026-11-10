@@ -28,13 +28,21 @@ class GbkOutput(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "Win32_VideoController is read on Windows only")
     def test_adapter_list_never_gets_none(self):
-        with mock.patch.object(EC.subprocess, "run", return_value=mock.Mock(stdout=None)):
+        with mock.patch.object(EC.subprocess, "run", return_value=mock.Mock(stdout=None)), mock.patch.dict(EC._CIM_CACHE, clear=True):
             self.assertEqual(EC.windows_present_adapters(), [])
         name, pnp, ram = GBK_LINE.decode("utf-8", "replace").split("|")
-        with mock.patch.object(EC.subprocess, "run", return_value=mock.Mock(stdout="|".join((pnp, name, ram)))):
+        with mock.patch.object(EC.subprocess, "run", return_value=mock.Mock(stdout="|".join((pnp, name, ram)))),                 mock.patch.dict(EC._CIM_CACHE, clear=True):                       # (the adapters are asked once per 2 minutes)
             found = EC.windows_present_adapters()
         self.assertEqual(len(found), 1)
         self.assertEqual((found[0]["vendor"], found[0]["device"], found[0]["name"][:9]), ("10de", 0x0A60, "Microsoft"))
+
+    def test_the_tuning_probe_keeps_what_a_child_printed_with_odd_bytes(self):
+        # #4629: the reader thread's UnicodeDecodeError left stdout None
+        from strata_common import tune_machine
+        code = "import sys; sys.stdout.buffer.write(%r)" % (GBK_LINE,)
+        text = tune_machine._run([sys.executable, "-X", "utf8", "-c", code])
+        self.assertIsInstance(text, str)
+        self.assertIn("VEN_10DE", text)
 
     def test_a_mangled_name_still_matches_its_registry_entry_by_pci_id(self):
         present = [{"vendor": "1002", "device": 0x744C, "name": "AMD Radeon(TM) Graphics �", "vram_gb": 0.0}]

@@ -18,7 +18,6 @@ it prints how far the engine's hidden rows and confidences are from it, and with
 from __future__ import annotations
 
 import argparse
-import math
 import pathlib
 import struct
 import sys

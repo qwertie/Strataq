@@ -1,5 +1,7 @@
 #include "strata/base/gpu/managed_memory.hpp"
 #include "strata/models/qwen38/native_head.hpp"
+#include "strata/core/spill_gate.hpp"
+#include "strata/core/run_manifest.hpp"
 #include "strata/common/artifact/gguf_reader.hpp"
 #include "strata/common/kernels/iq_kernels.hpp"
 #include "strata/common/kernels/native_mmvq.hpp"
@@ -23,10 +25,13 @@ void NativeHead::unload() {
     if (weights_) strata::kernels::native_q8_0_sm60_release(weights_);
     if (scratch_)
         strata::core::release_device(scratch_);
-    if (weights_)
+    if (host_)   // the mapped-host fallback (weights_ is its device alias)
+        strata::core::release_host(host_);
+    else if (weights_)
         strata::core::release_device(weights_);
     scratch_ = nullptr;
     weights_ = nullptr;
+    host_ = nullptr;
 }
 
 bool NativeHead::load(const std::vector<std::string>& shards, int64_t n_in, int64_t n_out, std::string& err) {
@@ -57,15 +62,43 @@ bool NativeHead::load(const std::vector<std::string>& shards, int64_t n_in, int6
         }
         void* weights = nullptr;
         void* scratch = nullptr;
-        cudaError_t status = strata::core::allocate_device(&weights, bytes,
-            {"weights", "Device allocations", "Output head and embeddings"});
+        void* host = nullptr;
+        // SHORT OF VRAM: the head in mapped pinned host memory.  The head (about 0.4 GiB) is the one buffer a card that holds its sessions and weights but not this can
+        // spill whole; every logits row then reads it over PCIe (about 18 ms per row at 28 GB/s), so decode is slower, but the start works.  Taken only when the
+        // allocation in VRAM fails (or STRATA_HEAD_HOST=1 asks for it); the GEMV kernels read the same pointer either way.  Q5_K and the plain MMVQ types: the
+        // repacked Q6_K / SM60 layouts rewrite the weights in place and stay in VRAM.
+        const bool ask_host = std::getenv("STRATA_HEAD_HOST") != nullptr;
+        cudaError_t status = ask_host ? cudaErrorMemoryAllocation : strata::core::allocate_device(&weights, bytes, {"weights", "Device allocations", "Output head and embeddings"});
+        bool discrete = false;
+        { int d = 0; cudaDeviceProp pr{}; if (cudaGetDevice(&d) == cudaSuccess && cudaGetDeviceProperties(&pr, d) == cudaSuccess) discrete = strata::spill_allowed(strata::kSpillMetalBuild, pr.integrated != 0); else (void) cudaGetLastError(); }
+        if (status != cudaSuccess && discrete && std::getenv("STRATA_HEAD_HOST_OFF") == nullptr && !strata::kernels::native_q6_k_packed_enabled()) {
+            (void) cudaGetLastError();
+            void* hp = nullptr;
+            void* dp = nullptr;
+            if (strata::core::allocate_host(&hp, bytes, cudaHostAllocMapped | cudaHostAllocPortable, {"weights", "Device allocations", "Output head and embeddings"}) == cudaSuccess &&
+                cudaHostGetDevicePointer(&dp, hp, 0) == cudaSuccess) {
+                std::memcpy(hp, gguf.tensor_data(*tensor), bytes);
+                host = hp;
+                weights = dp;
+                status = cudaSuccess;
+                std::fprintf(stderr, "strata generate: short of GPU memory: the output head (%llu MiB) stays in pinned host memory and is read over PCIe for every logits row: "
+                                     "decode is slower%s", (unsigned long long) (bytes >> 20), "\n");
+            } else {
+                if (hp)
+                    strata::core::release_host(hp);
+                (void) cudaGetLastError();
+            }
+        }
         if (status == cudaSuccess)
             status = strata::core::allocate_device(&scratch, strata::kernels::native_q8_1_bytes((int) n_in, 1),
                 {"weights", "Device allocations", "Output head and embeddings"});
         strata::platform::advise_willneed(gguf.tensor_data(*tensor), bytes);
-        if (status == cudaSuccess)
+        if (status == cudaSuccess && host == nullptr)
             status = cudaMemcpy(weights, gguf.tensor_data(*tensor), bytes, cudaMemcpyHostToDevice);
         if (status != cudaSuccess) {
+            if (host)
+                strata::core::release_host(host);
+            weights = host ? nullptr : weights;
             if (scratch)
                 strata::core::release_device(scratch);
             if (weights)
@@ -74,6 +107,7 @@ bool NativeHead::load(const std::vector<std::string>& shards, int64_t n_in, int6
             return false;
         }
         weights_ = weights;
+        host_ = host;
         { int d = -1; if (cudaGetDevice(&d) == cudaSuccess) device_ = d; }
         scratch_ = scratch;
         bytes_ = bytes;
@@ -84,11 +118,43 @@ bool NativeHead::load(const std::vector<std::string>& shards, int64_t n_in, int6
             strata::kernels::native_q6_k_pack(weights_, n_in_, n_out_, "output head");
         if (type_ == 8)   // STRATA_Q8_SM60=1 (a no-op otherwise); the MTP draft head reads the same matrix
             strata::kernels::native_q8_0_sm60_pack(weights_, n_in_, n_out_, "output head");
+        if (strata::core::manifest::enabled()) {   // STRATA_MANIFEST: what the head holds and where
+            namespace mf = strata::core::manifest;
+            mf::instance().tensors("head", strata::ggml_type_name((uint32_t) type_), 1, bytes);
+            mf::instance().path("head", "output.weight", true,
+                                host_ != nullptr ? "held in mapped pinned host memory (short of VRAM or STRATA_HEAD_HOST)" : "held in VRAM",
+                                std::string("type ") + strata::ggml_type_name((uint32_t) type_) +
+                                    (type_ == 14 && strata::kernels::native_q6_k_packed_enabled() ? ", repacked (STRATA_Q6_PACKED)" : "") +
+                                    (type_ == 8 && std::getenv("STRATA_Q8_SM60") != nullptr ? ", repacked (STRATA_Q8_SM60)" : ""));
+        }
         return true;
     } catch (const std::exception& error) {
         err = std::string("native head: ") + error.what();
         return false;
     }
+}
+
+bool NativeHead::to_host(std::string& err) {
+    if (weights_ == nullptr || host_ != nullptr || (type_ == 14 && strata::kernels::native_q6_k_packed_enabled()) || (type_ == 8 && std::getenv("STRATA_Q8_SM60") != nullptr)) return false;   // (repacked in place: those stay in VRAM)
+    { int d = 0; cudaDeviceProp pr{}; if (cudaGetDevice(&d) != cudaSuccess || cudaGetDeviceProperties(&pr, d) != cudaSuccess || !strata::spill_allowed(strata::kSpillMetalBuild, pr.integrated != 0)) { (void) cudaGetLastError(); return false; } }   // (Q6_K / Q8_0 may be repacked in place: those stay)
+    void* hp = nullptr;
+    void* dp = nullptr;
+    if (strata::core::allocate_host(&hp, bytes_, cudaHostAllocMapped | cudaHostAllocPortable,
+            {"weights", "Device allocations", "Output head and embeddings"}) != cudaSuccess) {
+        (void) cudaGetLastError();
+        err = "native head: no pinned host memory for the head";
+        return false;
+    }
+    if (cudaHostGetDevicePointer(&dp, hp, 0) != cudaSuccess || cudaMemcpy(hp, weights_, bytes_, cudaMemcpyDeviceToHost) != cudaSuccess) {
+        (void) cudaGetLastError();
+        strata::core::release_host(hp);
+        err = "native head: the head could not be moved to host memory";
+        return false;
+    }
+    strata::core::release_device(weights_);
+    weights_ = dp;
+    host_ = hp;
+    return true;
 }
 
 bool NativeHead::run(const float* mixed, float* logits, void* stream, std::string& err) const {

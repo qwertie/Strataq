@@ -274,7 +274,7 @@ SplitPlan plan_layer_split(const SplitProblem& p, const char* log_prefix) {
             }
         }
     }
-    if (best.empty() && gate_on) {
+    if (best.empty() && gate_on && p.choose_unchecked) {
         // recommend, never force: with nothing startable on paper the search runs again without the check
         std::fprintf(stderr, "%sno placement can start the prompt path on the figures here; choosing by decode speed "
                              "alone\n", log_prefix);

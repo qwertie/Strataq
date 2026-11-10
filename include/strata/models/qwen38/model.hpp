@@ -34,6 +34,7 @@
 #include <cuda_runtime.h>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
@@ -140,6 +141,21 @@ public:
     /// Gets the layer split's stage whose card runs the MTP drafter, which binds that stage's weights and head; null
     /// when the drafter is on CUDA0 (no split, or mtp_first).
     GpuStage* get_drafter_stage() const { return last_st != nullptr && !mtp_first ? last_st : nullptr; }
+    /// Gets the draft vocabulary file DFlash2 binds its head from: the subset df2_vocab_resolve chose with DFlash2 alone
+    /// (`df2_solo`), else the MTP's (--mtp-draft-vocab, or <mtp>/draft_vocab.bin).
+    std::string get_df2_vocab_path() const;
+    /// Lets DFlash2 bind the MTP drafter's copy of the draft head instead of its own (`df2_expect_share`); call after
+    /// mtp.bind and before df2.bind.
+    void offer_df2_head();
+    /// Gets the VRAM DFlash2's own draft head and logits take when it binds (0 when it shares the MTP's head).
+    int64_t get_df2_head_bytes() const;
+    /// Gets how many (layer, expert) pairs a live slot of their stage's expert cache holds (a slot past the live ones
+    /// was given back).
+    int64_t count_gpu_held() const;
+    /// P1.8: turns the file tier's Linux defaults (io prefetch, the decode gate) and the routing-aware prefetch off
+    /// while every routed expert is in the GPU caches, and back on when one is not.  Call at a quiet point (a request's
+    /// start, a VRAM resize): nothing in flight.  Only what the policy turned off is turned on again.
+    void refresh_file_tier();
     /// Copies `host_res` to the device table `dst` (CUDA0's or a stage's) and waits for the copy.
     cudaError_t put_residency(int32_t* dst) const;
     /// Gets what a verify window on CUDA0 knows of the expert cache: the residency tables and the slots.
@@ -231,6 +247,7 @@ public:
     std::vector<std::unique_ptr<GpuStage>> stages;   ///< a layer split's later stages, in layer order
     GpuStage* last_st = nullptr;      ///< the last of `stages` (it holds the head), or null without a split
     bool mtp_first = false;           ///< --pipeline-windows: the drafter runs on the first stage's card
+    bool df2_first = false;           ///< a layer split's DFlash2 runs on the first stage's card (STRATA_DF2_STAGE=first)
     std::vector<std::pair<int32_t, int32_t>> profile;          ///< CUDA0's (layer, expert) pairs, hottest first
     std::vector<std::pair<int32_t, int32_t>> profile_loaded;   ///< --expert-profile-save: the whole ranking as loaded
     bool pf_borrow = false;           ///< the prompt path borrows expert-cache slots instead of owning its buffers
@@ -247,12 +264,22 @@ public:
     std::vector<std::vector<std::unique_ptr<strata::core::SessionState>>> bslot_ss;
     strata::core::MtpDrafter mtp;
 #if defined(STRATA_HAVE_DFLASH2)
-    strata::core::Dflash2Drafter df2;   ///< --draft dflash2 (CLI spec loop only)
+    strata::core::Dflash2Drafter df2;   ///< --draft dflash2
     bool use_df2 = false;
+    /// STRATA_BATCH_DF2: one drafter per batch slot (the solo drafter's pack, each its own ring)
+    std::vector<std::unique_ptr<strata::core::Dflash2Drafter>> slot_df2;
+    bool batch_df2 = false;           ///< the slots draft with DFlash2 (set once the slot drafters are allocated)
+#else
+    static constexpr bool use_df2 = false;
+    static constexpr bool batch_df2 = false;
 #endif
+    /// --draft dflash2 without --draft-fallback mtp: no MTP layer is loaded (o.mtp is cleared) and DFlash2 drafts alone
+    bool df2_solo = false;
+    std::string df2_vocab_file;       ///< the draft vocabulary DFlash2 alone binds its head from (get_df2_vocab_path)
+    bool df2_expect_share = false;    ///< DFlash2 will share the MTP drafter's draft head (offer_df2_head)
     /// The draft layer's geometry (the canonical model's MTP head), `static` because MtpDrafter keeps a reference; the
     /// batch slots' draft-KV copies use this one too
-    static inline const strata::core::ModelGeometry draft_geometry{};
+    static inline const strata::core::ModelGeometry draft_geometry = strata::core::kCompiledGeometry;
     std::vector<std::unique_ptr<strata::core::MtpDrafter>> slot_mtp;   ///< --batch-mtp: each batch slot's drafter
     const strata::core::WeightRef* wo = nullptr;   ///< the canonical head's weight (output.weight)
     int64_t n_vocab = 0;
@@ -305,6 +332,15 @@ public:
     bool graph_hits = false;
 
 private:
+    // the file tier's idle policy (refresh_file_tier); STRATA_FILE_TIER_IDLE=0 turns it off
+    bool file_tier_idle_ok = false;
+    bool gpu_holds_all = false;       ///< every routed expert was in the GPU caches at the last check
+    bool io_pf_by_default = false;    ///< the Linux file-tier defaults turned io prefetch on (no STRATA_IO_PREFETCH given)
+    bool io_pf_suspended = false;     ///< the policy turned io prefetch off
+    bool la_started = false;          ///< the routing-aware prefetch (`lookahead`) runs
+    bool la_asked = false;            ///< STRATA_LOOKAHEAD=1 or STRATA_IO_PREFETCH=1: the look-ahead stays on regardless
+    bool fs_ahead = false;            ///< the look-ahead feeds the Foresight swap space (STRATA_FS_SLOTS)
+    bool la_stats = false;            ///< STRATA_LOOKAHEAD_STATS=1: the look-ahead scores its predictions
     strata::core::NativeEmbed native_embed;   ///< the native pack's embedding table, which set_native_embed points to
     std::vector<float> ple_emb_host;          ///< the per-layer embedding row `ss.ple` stages on the host
 };
@@ -312,15 +348,32 @@ private:
 /// Allocates the hand-offs of a layer split's verify windows (`hand`: one per boundary between stages, of `rows` rows
 /// of geometry `g`), zeroed, in mapped page-locked memory that a stage on any card reads; false when one did not fit.
 bool alloc_split_handoffs(const strata::core::ModelGeometry& g, int rows, std::vector<float*>& hand);
+/// How many cache slots a prompt-path loan leaves behind: 128 on a card with room; the cache sizing lowers it to 16 on
+/// a card too short for that (get_auto_lend_pct then lends 100%).
+extern int64_t g_lend_keep;
+/// Round 0216 (STRIX-NEXT): true on an integrated GPU (a Strix Halo) whose expert complement is page-locked in RAM.  There the free figure the
+/// serve checks read counts that pinned memory about twice (the figure is the driver's hipMemGetInfo, src/core/device.cu only lowers it by the DXGI
+/// budget gap: 12,244 MiB after the cache, then 2.0 x the complement + 691 MiB less once it is pinned; RESULTS-STRIX2.md), so it reads 0 on a start
+/// that works and a larger --vram-reserve-mib only moves experts from the cache into the complement.  The checks say so instead of advising a reserve.
+/// Set by Model::pin_resident_experts; read by the serve loop's VRAM checks.
+extern std::atomic<bool> g_uma_pinned_complement;
+/// Tells whether a start short of VRAM may be moved off the GPU (strata/core/spill_gate.hpp): a discrete card only,
+/// not Metal and not an integrated GPU (Strix Halo and the other APUs share the host's RAM).
+bool spill_discrete_gpu();
 /// Gets " (N MiB of M MiB VRAM free on this GPU)" for an allocation's failure message (clears the CUDA error first).
 std::string vram_free_note();
 /// Gets the share (%) of an expert cache's slots the prompt path may borrow with --prefill auto.
 int64_t get_auto_lend_pct();
+/// Ends the process with one line when an integrated GPU (HIP) cannot launch beside the prompt path's own buffers for a
+/// `chunk` above the 16384 default (`borrows`: the chunk borrows cache slots instead; `cache_gib`: the expert cache, for
+/// the message).  Called once the buffers are in place, before any prompt is read.
+void uma_refuse_chunk_if_full(int64_t chunk, bool borrows, double cache_gib);
 /// Prints the process's mapped file pages (the arena) at a step of the startup when STRATA_RSS_TRACE is set (Linux).
 void rss_probe(const char* where);
 /// Prints the VRAM left after a step of the startup when STRATA_TRACE is set (and checks the device with 2).
 void mem_mark(const char* where);
-/// Tells whether PcieAuto also refines a layer split's shares (opt-in, STRATA_PCIE_AUTO_SPLIT=1).
+/// Tells whether PcieAuto also refines a layer split's shares (strata/core/pcie_share_rule.hpp: on for a discrete
+/// CUDA card, opt-in STRATA_PCIE_AUTO_SPLIT=1 on HIP and an integrated GPU).
 bool pcie_auto_split_ok();
 /// Tells whether the HIP defaults of the decode speed push apply to the current card (gfx12; always on CUDA).
 bool decode_defaults_arch_ok();

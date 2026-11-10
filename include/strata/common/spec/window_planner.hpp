@@ -1,12 +1,12 @@
-// include/strata/common/spec/window_planner.hpp - what one verify window holds after its first row: the MTP's drafts,
-// a lookup (suffix) window, or the MTP's drafts with a lookup chain after them; and what the draft policy learns from
-// the window's verdict. Used by the original Qwen decode loops and the shared paged step.
+// include/strata/common/spec/window_planner.hpp - what one verify window holds after its first row: the drafter's
+// drafts (the MTP's or DFlash2's), a lookup (suffix) window, or the drafts with a lookup chain after them; and what
+// the draft policy learns from the window's verdict. Used by the original Qwen decode loops and the shared paged step.
 #pragma once
 
-#include "strata/common/spec/confidence.hpp"
 #include "strata/common/spec/draft_policy.hpp"
 #include "strata/common/spec/draft_source.hpp"
 #include "strata/common/spec/gated_proposal.hpp"
+#include "strata/common/spec/window_rule.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -26,10 +26,12 @@ inline WindowRows get_window_rows(int rows, int model_rows, int suffix_draft, in
 
 /// The make-up of one verify window, chosen by WindowPlanner.
 struct Window {
-    int T = 1;              ///< rows before the chained lookup tokens: the fed-back token, then MTP or lookup drafts
+    int T = 1;              ///< rows before the chained lookup tokens: the fed-back token, then the drafts
     bool first = false;     ///< the request's first window (no drafts of its own; not timed)
-    bool mtp = false;       ///< the MTP drafter is on
-    bool lookup = false;    ///< rows 1 .. T - 1 are WindowPlanner::lookup_drafts, not the MTP's
+    bool mtp = false;       ///< the MTP drafter is loaded (it may only be DFlash2's fallback)
+    bool drafted = false;   ///< a drafter (the MTP or DFlash2) proposed the drafts the window starts from
+    bool lookup = false;    ///< rows 1 .. T - 1 are WindowPlanner::lookup_drafts, not the drafter's
+    int proposed = 0;       ///< tokens in the suffix drafter's last proposal (WindowPlanner::lookup_drafts)
     int match = 0;          ///< the context match behind the suffix drafter's last proposal (tokens)
     int chain = 0;          ///< chained lookup tokens after the T rows (WindowPlanner::chain_drafts)
     int chain_match = 0;
@@ -83,6 +85,8 @@ public:
         chain_rows_ = chain_st_.best_rows;
         return keep;
     }
+    /// Sets the MTP's widest window (--mtp-max-t) from the next round on (--draft auto: each drafter has its own).
+    void set_mtp_rows(int mtp_rows) { mtp_rows_ = mtp_rows; }
     /// Starts a request whose context so far is `tokens`: the tallies restart, the draft sources see the context.
     void start(const std::vector<int64_t>& tokens) {
         lookup = chained = {};
@@ -98,30 +102,46 @@ public:
             for (auto& src : extra_draft_sources()) src->append(&token, 1);
     }
 
-    /// Begins a round at context position `pos`: a window of `rows` rows, or with the MTP the rows its rule keeps of
-    /// the drafts that came with probabilities `probs` (`min_p` = --spec-min-p).
-    Window begin(int64_t pos, int rows, bool use_mtp, const float* probs, double min_p, bool first) {
-        Window w{rows, first, use_mtp};
+    /// Begins a round at context position `pos` with the window `rule` keeps of the drafts (window_rule.hpp); the
+    /// planner fills in the rule's cost-aware parts (`spec_cost`, `chain_rows`).  `rule.dprob` holds a value for each
+    /// of the widest window's rows (the constructor's `rows`).
+    Window begin(int64_t pos, WindowRuleIn rule) {
         policy.set_context(pos);
-        if (use_mtp && cost_aware && !first) w.T = std::clamp(chain_rows_, 1, mtp_rows_);
-        else if (use_mtp && min_p > 0.0)
-            w.T = 1 + count_confident_drafts(probs, mtp_rows_ - 1, min_p);
-        std::copy_n(probs, rows_, probs_.begin());
+        rule.spec_cost = cost_aware;
+        rule.chain_rows = chain_rows_;
+        Window w;
+        w.T = choose_window(rule);
+        w.first = rule.first_window;
+        w.mtp = rule.use_mtp;
+        w.drafted = rule.draft_on;
+        std::copy_n(rule.dprob, rows_, probs_.begin());
         return w;
     }
-    /// Takes a lookup window instead where the policy expects it to pay and its first token agrees with `mtp_drafts`.
-    /// `probabilistic` (the MTP's drafts are sampled, STRATA_SPEC_PROB): the choice must not depend on the draw, so
-    /// `source` chooses for the MTP's widest window and the first tokens need not agree.  `room` caps a
-    /// conversation's share of a joint step; 0 uses the configured window width.
-    void pick_lookup(Window& w, const int32_t* mtp_drafts, bool probabilistic, int room = 0) {
+    /// Gets how many tokens the suffix drafter proposes for a lookup window of at most `look_rows` rows (and at most
+    /// the widest window); they are lookup_drafts() until the next proposal, and their context match is
+    /// sfx.last_match().
+    int propose_lookup(int look_rows) { return sfx.propose(std::min(look_rows, rows_) - 1, sbuf_.data()); }
+    /// Takes a lookup window of at most `look_rows` rows instead where the policy expects it to pay and its first
+    /// token agrees with the drafter's `drafts`.  `probabilistic` (the MTP's drafts are sampled, STRATA_SPEC_PROB):
+    /// the choice must not depend on the draw, so `source` chooses for the MTP's widest window and the first tokens
+    /// need not agree.
+    void pick_lookup(Window& w, const int32_t* drafts, bool probabilistic, int look_rows) {
         if (suffix_draft_ <= 0 || w.first) return;
-        const int k = sfx.propose((room > 0 ? std::min(room, rows_) : rows_) - 1, sbuf_.data());
+        w.proposed = propose_lookup(look_rows);
         w.match = sfx.last_match();
-        if (k <= 0 || (w.mtp && !probabilistic && sbuf_[0] != mtp_drafts[0])) return;
-        const DraftPolicy::Pick pick = probabilistic ? source.choose(mtp_rows_, k, w.match)
-                                                     : policy.choose(w.T, k, w.match);
+        if (w.proposed <= 0 || (w.drafted && !probabilistic && sbuf_[0] != drafts[0])) return;
+        const DraftPolicy::Pick pick = probabilistic ? source.choose(mtp_rows_, w.proposed, w.match)
+                                                     : policy.choose(w.T, w.proposed, w.match);
         w.lookup = pick.lookup;
         if (pick.lookup) w.T = pick.t;
+    }
+    /// Makes `w` the lookup window of `t` rows (of at most `look_rows`, context match `match`) that the policy chose
+    /// before this round's draft, which was skipped for it (window_rule.hpp, skip_draft_for_lookup).
+    void take_lookup(Window& w, int t, int match, int look_rows) {
+        w.proposed = propose_lookup(look_rows);
+        w.lookup = true;
+        w.T = t;
+        w.match = match;
     }
     /// Gets the lookup root of a gated proposal (gated_proposal.hpp) for a window of at most `room` rows: the suffix
     /// drafter's proposal, eligible where `source` would take it.  Only the context decides, never a draw.
@@ -139,15 +159,16 @@ public:
         }
         return root;
     }
-    /// Appends lookup-chain tokens after the MTP's `w.T - 1` drafts that pay, keeping the window within `room` rows.
-    void pick_chain(Window& w, const int32_t* mtp_drafts, int room) {
+    /// Appends lookup-chain tokens that pay after the drafter's `w.T - 1` drafts, keeping the window within `room`
+    /// rows.
+    void pick_chain(Window& w, const int32_t* drafts, int room) {
         static const bool fixed = std::getenv("STRATA_LOOKUP_CHAIN_FIXED") != nullptr;   // no policy gate
         if (lookup_chain_ <= 0 || w.first || w.lookup || w.T >= room) return;
-        // the draft sources' context: its last tokens (at most 64), the MTP's pending drafts last
+        // the draft sources' context: its last tokens (at most 64), the drafter's pending drafts last
         const int pending = w.T - 1;
         const std::vector<int32_t>& h = sfx.history();
         ctail_.assign(h.end() - std::max(0, std::min((int) h.size(), 64 - pending)), h.end());
-        ctail_.insert(ctail_.end(), mtp_drafts, mtp_drafts + pending);
+        ctail_.insert(ctail_.end(), drafts, drafts + pending);
         int source = -1;
         w.chain = propose_from_sources(lookup_src_, ctail_.data(), (int) ctail_.size(), pending,
                                        std::min(lookup_chain_, room - w.T), lookup_chain_min_, cbuf_.data(),
@@ -161,9 +182,14 @@ public:
     /// lookup drafts.
     int accept(const Window& w, const int32_t* window, const int32_t* picks) {
         const int a = accepted_prefix(window + 1, picks, w.rows() - 1);
-        if (w.lookup) lookup.add(w.T - 1, a);
-        if (w.chain > 0) chained.add(w.chain, std::max(0, a - (w.T - 1)));
+        count(w, a);
         return a;
+    }
+    /// Adds `w`'s lookup and lookup-chain drafts to this request's tallies, given that its first `accepted` drafts
+    /// held.
+    void count(const Window& w, int accepted) {
+        if (w.lookup) lookup.add(w.T - 1, accepted);
+        if (w.chain > 0) chained.add(w.chain, std::max(0, accepted - (w.T - 1)));
     }
     /// After the round (`round_ms` long, `eos`: it ended the answer): teaches the policy.
     void observe(const Window& w, int accepted, double round_ms, bool eos) {

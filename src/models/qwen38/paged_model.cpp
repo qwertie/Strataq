@@ -336,7 +336,7 @@ int run_paged_engine(int argc, char** argv) {
     strata::serve::set_paged_runtime_env(settings, !o.layer_split.empty() && hop_refusal.empty());
     prime_gpu_queues();
     const bool shared_stream_override = std::getenv("STRATA_SH_STREAM") != nullptr;
-    if (const int status = apply_device_defaults(o); status >= 0) return status;
+    if (const int status = apply_device_defaults(o, true); status >= 0) return status;
     const int slots = strata::kernels::kVerifyMaxT;
     if (settings.step.concurrent < 0)
         settings.step.concurrent = std::max(o.batch, 1);

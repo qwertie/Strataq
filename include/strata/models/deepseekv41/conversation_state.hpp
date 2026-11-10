@@ -12,7 +12,8 @@
 namespace strata::ds4 {
 
 /// The checkpoints a conversation keeps, by role (Model::checkpoint's `slot`): 0 its last prompt's end, 1 the position
-/// before it, 2 the anchor (Model::pin), 3 the shared start of a prompt (a GEN's pin=N).
+/// before it, 2 the anchor (Model::pin), 3 the shared start of a prompt (strata-ds41's pin=N; the old engine keeps a
+/// shared start as a restore point instead, Model::mark).
 constexpr int kCheckpoints = 4;
 
 /// The state at one position: what the rest of the state (compressed rows, by position) does not give back.
@@ -22,6 +23,8 @@ struct Checkpoint {
     /// per layer, its compressor's partial group: its KV at 2 * layer, its scores at 2 * layer + 1 (empty for a layer
     /// without a compressor)
     std::vector<std::vector<float>> comp;
+    bool shared = false;   ///< (a restore point Model::mark keeps) the end of a shared start, given up last
+    uint64_t used = 0;     ///< (a restore point) its last use, by the model's mark clock
 };
 
 /// A conversation's host side: what the model holds of the conversation it computes, and what each other

@@ -143,6 +143,10 @@ struct Options {
     /// (with a warning) when even the experts no slot holds do not fit.
     bool resident_pin = false;
     uint64_t resident_headroom = 8ull << 30;
+    /// `--ram-keep-gib W` (or STRATA_RAM_KEEP_GIB): the RAM, in bytes, the person wants left free for their own work (0: none).  The expert
+    /// arena is used only if this much stays available after it; the RAM copy that replaces it, and the explicit RAM modes, leave
+    /// max(this, their own headroom) free.  STRATA_RESIDENT_HEADROOM_GIB, when set, still decides the headroom.  ple_residency.hpp.
+    uint64_t ram_keep = 0;
     bool resident_soft = false;
     bool resident_cpu_explicit = false;   ///< #384: --resident-cpu-experts given by itself (not only implied)
     /// CS-T `--resident-budget-gib N`: the resident mode with a RAM budget - the N GiB of experts the GPU cache does
@@ -237,7 +241,12 @@ struct Options {
     /// must not fall back to 2048 ("reserved buffers, keep them small") - apply_device_defaults' gfx1151 rule chose a
     /// chunk that fits this box's carve-out.
     bool prefill_own_keep_chunk = false;
-    bool prefill_gfx12_16k = false;   ///< the gfx12 default raised the auto chunk ceiling to 16384 (a layer split takes 8192 back, 0.1.44)
+    /// #1630's warning for a chunk the user named (8192 or more on a Windows HIP build), held until the device is known: it was printed at argument
+    /// parsing, so it also appeared on the Strix Halo (gfx1151), where 8192 and 16384 are the measured default and a bare auto no longer stops at 6144.
+    std::string prefill_cap_warn;
+    bool prefill_cap_warn_skip = false;   ///< set by the gfx1151 rule below: that card is not the 7900 XTX of #1630
+    bool prefill_gfx12_16k = false;   ///< a default (gfx12 Linux: 32768, 0.2.10.1; NVIDIA cc 8.0+: 32768, round 0212) raised the auto chunk ceiling (a layer split takes 8192 back, 0.1.44)
+    const char* prefill_raise_who = "gfx12";   ///< who raised it, for the log lines ("gfx12" or "NVIDIA")
     /// --prefill-pipe (opt-in): a layer split's prompt chunks sized for its pipeline (Prefill::pipeline_chunk): 0 off,
     /// 1 today's chunk count evened out, a number > 1 the rig's b/a in tokens (setup's --calibrate measures it).
     /// < 0: not given - STRATA_PREFILL_PIPE, else off.
@@ -392,6 +401,14 @@ struct Options {
     /// verify window (the window grows to at most 8).  Greedy verification keeps the output; its own counts are kept.
     int lookup_chain = 0;
     int lookup_chain_min = 3;   ///< --lookup-chain-min M: the shortest match (in tokens, drafts included) it extends on
+    /// --lookup-max-t N (-1 = not given: 12 on a build whose windows hold 8 rows, one GPU, no batch / DFlash2 / lookup chain, owner decision
+    /// 11-01 for #4040; 0 = off, the --spec + 2 rule): prompt-lookup windows up to N tokens (<= kVerifyLongT) while
+    /// the MTP keeps its --spec windows.  A copy-heavy turn (an edit that rewrites a file) accepts nearly every lookup
+    /// draft, so its decode is bound by the window length.  Each window size is a graph of its own (~20-35 MiB of
+    /// VRAM), so only --lookup-sizes get one past the MTP's sizes; a size whose graph finds no VRAM is dropped.
+    int lookup_max_t = -1;
+    /// --lookup-sizes A,B,.. : the lookup window sizes above the MTP's (default with --lookup-max-t N: MTP+1, MTP+2, N)
+    std::string lookup_sizes;
     /// --mtp-hnorm stream (opt-in): the draft layer's pre_fc_norm_hidden normalizes each hyper-connection stream on
     /// its own (llama.cpp's qwen4exp MTP graph) instead of one RMS over all four (the default, tools/mtp_probe.py).
     bool mtp_hnorm_stream = false;
@@ -400,9 +417,19 @@ struct Options {
     /// --mtp-draft-vocab FILE (opt-in): the draft head's token subset from FILE instead of <mtp>/draft_vocab.bin
     std::string mtp_draft_vocab;
     /// --draft dflash2 --draft-model PACK (opt-in, CUDA / HIP): the DFlash2 block drafter for Qwen3.8-Flash-Next (tools/dflash2_pack.py) drafts instead
-    /// of the MTP layer, which stays loaded as the fallback.  Needs --mtp, --spec and a native pack; a missing pack falls back to the MTP.
+    /// of the MTP layer, which is not loaded (--draft-fallback mtp loads it too, as the fallback).  Needs --mtp DIR (its draft_vocab.bin), --spec, --draft-model and a native pack; DFlash2 that cannot start is an error unless the fallback is mtp.
     std::string draft, draft_model;
+    /// --draft-fallback mtp|none (with --draft dflash2): none = the MTP layer is NOT loaded, DFlash2 is the only drafter (the draft vocabulary still comes
+    /// from <mtp>/draft_vocab.bin).  A DFlash2 that cannot start then ends the start with an error: nothing drafts instead.  A per-run choice, not a per-round one.
+    /// Unset: `--draft dflash2` means none (the owner's order: the DFlash2 and the MTP layer are never loaded together unless asked); `--draft auto` needs both.
+    std::string draft_fallback;
     double draft_conf = 0.0;   ///< --draft-conf P: with --draft dflash2 the window ends where the product of the selector's probabilities falls below P (replaces --spec-min-p)
+    /// --draft auto (serve): both drafters stay current and each request picks one (its key draft=mtp|dflash2, else draft_rule); the CLI treats auto as dflash2
+    bool draft_auto = false;
+    std::string draft_rule = "df2";   ///< --draft-rule df2|mtp|learn: what a request without a draft= key gets
+    int draft_mtp_spec = 4;   ///< --draft-mtp-spec N: the widest window of a request that drafts with the MTP layer under --draft auto
+    bool draft_mtp_spec_set = false;   ///< --draft-mtp-spec was given: it is also the window the MTP runs when --draft dflash2 falls back to it (the wider --spec was for DFlash2)
+    double draft_mtp_min_p = -1.0;   ///< --draft-mtp-min-p P: the MTP requests' --spec-min-p under --draft auto (-1 = --spec-min-p)
     int draft_cap = 0;   ///< --draft-cap N: the widest verify window with --draft dflash2 (0 = by card class, see where the drafter loads)
     /// A control vector on the residual stream (strata/models/qwen38/kernels/cvec.hpp), with llama.cpp's flags: the
     /// `experimental-speed-projection` profile passes `--control-vector-scaled FILE:1.0 --control-vector-layer-range
@@ -445,13 +472,20 @@ bool is_launch_blocking();
 void prime_gpu_queues();
 /// Prints the command line's help (every option of `strata` for a Qwen3.8 model) to stderr.
 void print_usage();
+/// Gets the window sizes the draft policy may give a lookup or chained window, as a bit mask (bit t = size t): every
+/// size up to --spec, unless --lookup-max-t is on - then the MTP's own sizes and --lookup-sizes (default MTP+1, MTP+2
+/// and --spec).
+unsigned lookup_size_mask(const Options& o);
+/// Gets the sizes of the mask `m` (lookup_size_mask) up to `max_t` as text, "2,3,8".
+std::string size_list(unsigned m, int max_t);
 using strata::serve::parse_i64_list;
 /// Reads the command line into `o`; `have_tokens` tells whether it gave the prompt (--tokens, --tokens-file).  Returns
 /// -1 to go on, otherwise the exit status for main() (--help, or a bad option, whose reason has been printed).
 int parse_options(int argc, char** argv, Options& o, bool& have_tokens);
 /// Turns on the switches that are exact and faster on the GPUs found (gfx1151, gfx12, sm_86 ...), keeping the user's
 /// own settings; call after parse_options, before the model loads.  Returns -1 to go on, otherwise the exit status
-/// (a gfx906 build on a card it cannot run).
-int apply_device_defaults(Options& o);
+/// (a gfx906 build on a card it cannot run).  `paged` (strata-q38) leaves out the old engine's batch-slot and GDN
+/// switches, which are not measured there.
+int apply_device_defaults(Options& o, bool paged);
 
 }  // namespace strata::qwen38

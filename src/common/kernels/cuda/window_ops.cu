@@ -1,6 +1,7 @@
 #include "strata/common/kernels/window_ops.hpp"
 #include "strata/common/kernels/pdl.hpp"
 #include "strata/base/gpu/emulate.hpp"
+#include "strata/base/gpu/sm120_series.hpp"
 
 #include <cuda_runtime.h>
 
@@ -78,10 +79,16 @@ bool pdl_supported() {
     if (cudaGetDevice(&dev) != cudaSuccess || dev < 0 || dev >= 64) { cudaGetLastError(); return false; }
     int s = state[dev].load(std::memory_order_relaxed);
     if (s == 0) {
-        static const bool env_on = [] { const char* v = std::getenv("STRATA_DF_PDL"); return v != nullptr && std::atoi(v) != 0; }();   // opt-in until the A/B says otherwise
-        int major = 0;
+        // STRATA_DF_PDL: 1 / 2 = on for every window graph, 0 = off; unset = on for a compute capability 12.0 card (STRATA_SM120_PERF=0 turns
+        // that off), where the verifier asks for it for the all-resident graph only (BW-MEASURE, E21: +0.3..+0.5% decode there, bit-identical;
+        // -1.6% .. -4.5% in the doorbell graph of a partly resident cache)
+        static const int env_mode = [] { const char* v = std::getenv("STRATA_DF_PDL"); return v == nullptr ? -1 : (std::atoi(v) != 0 ? 1 : 0); }();
+        int major = 0, minor = 0;
         cudaFuncAttributes fa{};
-        const bool on = env_on && cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, dev) == cudaSuccess &&
+        const bool on_attr = cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, dev) == cudaSuccess &&
+                             cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, dev) == cudaSuccess;
+        const bool env_on = env_mode == 1 || (env_mode < 0 && on_attr && strata::sm120_default(major, minor));
+        const bool on = env_on && on_attr &&
                         strata::cc_major_of(major) >= 9 &&
                         cudaFuncGetAttributes(&fa, gpu_stamp_kernel<true>) == cudaSuccess && fa.ptxVersion >= 90 &&
                         fa.binaryVersion >= 90;

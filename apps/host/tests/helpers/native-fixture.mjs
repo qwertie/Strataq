@@ -1,7 +1,9 @@
 import {EventEmitter} from 'node:events';
-import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync,realpathSync} from 'node:fs';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
+import {tmpdir as osTmpdir} from 'node:os';
+// the canonical scratch root: on a Mac the temp folder is /var/folders/..., which resolves to /private/var/...; the paths the host reports are the resolved ones
+const tmpdir=()=>realpathSync(osTmpdir());
 import {NATIVE_FIELDS} from '../../server/native-settings.mjs';
 import {createNativeControl} from '../../server/native-control.mjs';
 export function nativeFixture({modelsDirectory,tuneHandler,engineStatus}={}){
@@ -12,7 +14,7 @@ export function nativeFixture({modelsDirectory,tuneHandler,engineStatus}={}){
  writeFileSync(join(repo,'strata_server/server.py'),NATIVE_FIELDS.map(f=>f.id).join('\n')+'\n/v1/responses');
  const catalog={families:[{family:'qwen',title:'Qwen3.8-Flash-Next',about:'Native fixture',images:true,sizes:[{id:'iq2_xs',model:'IQ2_XS',download_gb:68,ram_needed_gb:48,about:'Compact',on_this_pc:'fits',installed:true},{id:'iq3_s',model:'IQ3_S',download_gb:84,ram_needed_gb:62,about:'Quality',on_this_pc:'fits',installed:true}]}],contexts:[32768,131072],recommendation:{family:'qwen',model:'IQ2_XS',context:32768}};
  const installed={models:['iq2_xs','iq3_s'].map(model=>({model,config:`strata-${model}.json`,model_name:`Qwen ${model}`,context:32768,images:'gpu',ready:true,kv:'int8'})),data_folder:join(root,'Strata-data'),engine:{version:'v0.1.40'}};
- for(const model of installed.models)writeFileSync(join(repo,model.config),JSON.stringify({model:model.model,gpu:0,args:['--max-context','32768'],env:{PATH:'/native/bin',STRATA_TOKEN:'private'},vision:{gpu:0},aliases:['chat'],unknown_native_key:{preserve:true}}));
+ for(const model of installed.models)writeFileSync(join(repo,model.config),JSON.stringify({model:model.model,exe:'component:strata-engine',gpu:0,args:['--max-context','32768'],env:{PATH:'/native/bin',STRATA_TOKEN:'private'},vision:{gpu:0},aliases:['chat'],unknown_native_key:{preserve:true}}));
  const calls=[],children=[],requests=[],rpcCalls=[];let programWait=false,hardware={ram_gb:128,gpus:[{index:0,name:'NVIDIA RTX 4090',vram_gb:24},{index:1,name:'NVIDIA RTX 3090',vram_gb:24}]},external=[];
  const spawnProcess=(command,args,options)=>{
   calls.push({command,args,options});const child=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.exitCode=null;child.kill=()=>{child.exitCode=0;queueMicrotask(()=>child.emit('exit',0));return true;};

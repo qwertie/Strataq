@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -45,9 +44,11 @@ class Target:
     @property
     def output_cap(self) -> int:
         """The longest reply a config lets the app ask for: the tested 4,096 up to the tested window, then an eighth of
-        the window (65,536 at 512K).  Thinking counts against it, so a flat 4,096 cut off long replies on a wide
-        window (a whole file written in one tool call), and the app threw the reply away and asked again.  The server
-        still fits each request's cap to the room its prompt leaves."""
+        the window (65,536 at 512K).  Thinking counts against it, and an app asks its compaction summary for exactly
+        this much: at 4,096 on a wide window the summary ended at the limit and OpenCode failed the step ("Compaction
+        summary reached the output token limit", #5006), and a whole file written in one tool call was cut off the same
+        way.  The input limit and the compaction point stay as tested; the server still fits each request's cap to the
+        room its prompt leaves."""
         return max(OUTPUT_CAP, self.context // 8)
 
 
@@ -308,7 +309,9 @@ def write_file(spec: dict, *, backup: bool = True) -> dict:
     if existed and spec.get("merge") and spec["kind"] == "json":
         try:
             old = json.loads(path.read_text(encoding="utf-8-sig"))
-            text = json.dumps(_merge(old, json.loads(text)), indent=2)
+            merged = _merge(old, json.loads(text))
+            _keep_output_cap(old, merged)
+            text = json.dumps(merged, indent=2)
         except ValueError:
             pass                                    # an old file that is not JSON is replaced (a backup was made)
     path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
@@ -318,6 +321,25 @@ def write_file(spec: dict, *, backup: bool = True) -> dict:
         pass
     return {"path": str(path), "backup": str(bak) if bak else None,
             "action": "merged" if existed and spec.get("merge") and spec["kind"] == "json" else ("replaced" if existed else "created")}
+
+
+def _keep_output_cap(old, merged) -> None:
+    """The output cap in a config being rewritten (in place on `merged`): a value the person set stays, so does a larger one from a newer Strata. The value
+    older Strata versions wrote on every window (OUTPUT_CAP, 4,096) is the generated default and is replaced, or the files written before #5006 would keep
+    the cap that breaks compaction for ever. OpenCode's limit.output and Claude Code's CLAUDE_CODE_MAX_OUTPUT_TOKENS."""
+    if not (isinstance(old, dict) and isinstance(merged, dict)):
+        return
+    models = ((old.get("provider") or {}).get("strata") or {}).get("models")
+    new_models = ((merged.get("provider") or {}).get("strata") or {}).get("models")
+    if isinstance(models, dict) and isinstance(new_models, dict):
+        for name, entry in models.items():
+            was = ((entry or {}).get("limit") or {}).get("output") if isinstance(entry, dict) else None
+            limit = (new_models.get(name) or {}).get("limit") if isinstance(new_models.get(name), dict) else None
+            if isinstance(was, int) and not isinstance(was, bool) and was != OUTPUT_CAP and isinstance(limit, dict):
+                limit["output"] = was
+    was_env = (old.get("env") or {}).get("CLAUDE_CODE_MAX_OUTPUT_TOKENS") if isinstance(old.get("env"), dict) else None
+    if isinstance(merged.get("env"), dict) and was_env is not None and str(was_env) != str(OUTPUT_CAP):
+        merged["env"]["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = was_env
 
 
 def _merge(old, new):

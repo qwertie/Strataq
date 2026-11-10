@@ -46,6 +46,7 @@ NETWORK_ALLOWED = {
     ("strata_server/mcp.py", "urlopen"): "the MCP servers the user configured, at request time",
     ("strata_control/tune_api.py", "urlopen"): "the loopback engine/server of a tuning job the user started",
     ("strata_control/tune_session.py", "urlopen"): "the loopback engine (127.0.0.1) the auto-tuner a user started measures",
+    ("strata_common/expert_fill.py", "urlopen"): "the benchmark's own server (GET /v1/memory) while a paged engine loads its experts",
     ("strata_base/loopback.py", "urlopen"): "the one opener for this computer's own servers (no proxy); any other address is passed on unchanged",
     ("strata_control/components.py", "urlopen"): "the component fetcher: only `strata install`/UPDATE call it",
     ("strata_control/dsv41_engine.py", "urlopen"): "the DeepSeek engine's one 10-second 'is the feed reachable' check, called only by strata launch and "

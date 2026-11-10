@@ -16,7 +16,7 @@ from __future__ import annotations
 import collections
 import ctypes
 import os
-import platform
+from strata_base import sysinfo
 import re
 import subprocess
 import sys
@@ -599,7 +599,8 @@ def _cpu_topology(root: str = "/sys/devices/system"):
         packages = set()
         for f in glob.glob(os.path.join(root, "cpu", "cpu[0-9]*", "topology", "physical_package_id")):
             try:
-                packages.add(open(f, encoding="utf-8").read().strip())
+                with open(f, encoding="utf-8") as fh:
+                    packages.add(fh.read().strip())
             except OSError:
                 continue
         nodes = len(glob.glob(os.path.join(root, "node", "node[0-9]*")))
@@ -617,10 +618,11 @@ def _cpu_name():
         except OSError:
             pass
     elif os.path.exists("/proc/cpuinfo"):
-        for line in open("/proc/cpuinfo", encoding="utf-8", errors="replace"):
-            if line.startswith("model name"):
-                return line.split(":", 1)[1].strip()
-    return platform.processor() or None
+        with open("/proc/cpuinfo", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if line.startswith("model name"):
+                    return line.split(":", 1)[1].strip()
+    return sysinfo.processor() or None
 
 
 class _CpuRamFallback:
@@ -636,7 +638,8 @@ class _CpuRamFallback:
                 return idle.value, kern.value + user.value           # kernel time includes idle
             return None
         try:
-            f = [int(x) for x in open("/proc/stat").readline().split()[1:]]
+            with open("/proc/stat") as fh:
+                f = [int(x) for x in fh.readline().split()[1:]]
             return f[3] + f[4], sum(f)
         except (OSError, ValueError):
             return None

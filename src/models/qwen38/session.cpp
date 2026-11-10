@@ -28,8 +28,6 @@
 #define STRATA_SPIN_PAUSE() strata_cpu_pause()
 
 namespace strata::core {
-static_assert(kernels::cpu::H == kCompiledGeometry.n_embd && kernels::cpu::FF == kCompiledGeometry.n_ff,
-              "the CPU expert path (common/kernels/cpu/expert.hpp) is compiled for core/geometry.hpp");
 
 namespace {
 
