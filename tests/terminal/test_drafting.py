@@ -1048,16 +1048,6 @@ class TheDownloadPlanListsIt(unittest.TestCase):
                 other = Runner(S.LaunchSettings(family="coder", model="IQ3_XXS", context=32768, vision="off", drafting="dflash2"), catalog=catalog(HW_12))
                 self.assertNotIn("dflash2", [p["kind"] for p in other.download_plan()["parts"]], "not for this model: hidden, not offered")
 
-def qwen38_engine_source():
-    """Gets the text of the old Qwen3.8 engine's main program and its loader (src/models/qwen38/model.cpp), which
-    together print what the Terminal reads from the engine."""
-    return "".join((ROOT / path).read_text(encoding="utf-8") for path in ("src/program/generate.cpp",
-                                                                           "src/models/qwen38/model.cpp"))
-
-
-if __name__ == "__main__":
-    unittest.main()
-
 
 class ControlReportsWhetherTheEngineServesIt(unittest.TestCase):
     def test_the_plan_says_it_so_the_app_can_hide_the_choice(self):
@@ -1067,3 +1057,13 @@ class ControlReportsWhetherTheEngineServesIt(unittest.TestCase):
                 self.assertEqual(code, 0, err)
                 self.assertIs(json.loads(out)["serves"], served)
 
+
+def qwen38_engine_source():
+    """Gets the source of the Qwen3.8 engine's main program and of its loader (src/models/qwen38/model.cpp), which
+    together hold the messages drafting.py looks for in the engine program."""
+    return "".join((ROOT / path).read_text(encoding="utf-8") for path in ("src/program/generate.cpp",
+                                                                           "src/models/qwen38/model.cpp"))
+
+
+if __name__ == "__main__":
+    unittest.main()

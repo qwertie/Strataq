@@ -238,5 +238,5 @@ One conversation's window in `paged_engine.cpp` stays at `kVerifyNarrowT` (8), s
 The old DeepSeek engine's `--parallel` runs on `KvRows` (`swap_seq_state`); restore points sit beside
 memory-manager's four checkpoints (slot roles 4 and 5). strata-ds41 keeps `--batch`; PCIe lane, one-GPU decode,
 recent slots and prompt-path slot borrowing stay off for it. Still open for the new engines: the fatal-GPU `ERR`
-line with exit code 3, `pen_from`, the stop bound, DFlash2, `--lookup-max-t`, and for strata-ds41 penalties in its
-joint verify and restore points.
+line with exit code 3, the penalty window over the answer alone (strata-q38 counts the prompt too) and `pen_from`, the
+stop bound, DFlash2, `--lookup-max-t`, and for strata-ds41 penalties in its joint verify and restore points.

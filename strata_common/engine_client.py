@@ -1553,6 +1553,7 @@ class StrataEngine:
                 **({"conversations": held} if held else {}),
                 **({"shortfall": shortfall} if shortfall else {}),
                 **({"pause_directory": pause_directory} if pause_directory else {})}
+
     def pen_from_key(self, orig_len: int, prompt_len: int) -> str:
         """` pen_from=N` for a leg that continues a request (prompt + what it generated): where the reply began, Strata's penalty window start. The all-cards split engine
         (sFNX) counts its penalty window over the last penalty_last_n tokens of the whole context, so the continued prompt gives it the same window and the engine refuses the
@@ -2409,7 +2410,8 @@ class StrataEngine:
         prompt, left = list(ids), int(max_new)
         orig_len = len(prompt)  # a leg that continues (prompt + what it generated) names where the reply began: pen_from, the penalty window's start
         reused0 = None      # the first read's reused tokens: a continued leg's count includes this request's own output
-        carry = {}          # #1869: the figures of the legs that ended in a hand-back to the solo path (the final DONE adds to them)
+        carry = {}          # #1869: the figures of the legs that ended in a hand-back to the solo path or a preemption
+        #                     (the final DONE adds to them)
         yielded_legs = []    # prompt reads that gave way before producing output
         ok = yield from self._take_control(cancel, len(prompt), new=True,
                                            prompt=prompt if (COALESCE_PREFILL > 1 and not embeddings) else None)
@@ -2740,7 +2742,7 @@ class StrataEngine:
                 if ((finish == "preempted" or (going_solo and finish == "cancel")) and not cancel.is_set()
                         and len(out) < int(max_new) and not (out and out[-1] in EOS_IDS)):
                     # A preempted request waits again with its existing output, including a zero-token admission.
-                    carry_leg(carry, self.last)         # #1869: the solo path's DONE replaces these figures
+                    carry_leg(carry, self.last)         # #1869: the next leg's DONE replaces these figures
                     if slot is not None:
                         self.slot_live[slot] = None
                         self.slot_used[slot] = time.time()

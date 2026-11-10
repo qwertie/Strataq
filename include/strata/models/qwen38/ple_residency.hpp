@@ -3,8 +3,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <optional>
-#include <sstream>
-#include <string>
 
 #include "strata/common/experts/arena_ram.hpp"
 #include "strata/common/state/conversation_memory.hpp"

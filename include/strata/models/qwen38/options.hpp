@@ -145,7 +145,7 @@ struct Options {
     uint64_t resident_headroom = 8ull << 30;
     /// `--ram-keep-gib W` (or STRATA_RAM_KEEP_GIB): the RAM, in bytes, the person wants left free for their own work (0: none).  The expert
     /// arena is used only if this much stays available after it; the RAM copy that replaces it, and the explicit RAM modes, leave
-    /// max(this, their own headroom) free.  STRATA_RESIDENT_HEADROOM_GIB, when set, still decides the headroom.  ple_residency.hpp.
+    /// max(this, their own headroom) free.  STRATA_RESIDENT_HEADROOM_GIB, when set, still decides the headroom.  arena_ram.hpp.
     uint64_t ram_keep = 0;
     bool resident_soft = false;
     bool resident_cpu_explicit = false;   ///< #384: --resident-cpu-experts given by itself (not only implied)

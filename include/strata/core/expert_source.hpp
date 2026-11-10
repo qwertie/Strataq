@@ -1210,14 +1210,14 @@ public:
     /// it released (0: nothing to give); `open` then reads the available RAM again.  Unset: nothing is given back.
     std::function<uint64_t()> give_back_ram;
     /// #4846 (owner 11-01): set before `open` when a RAM shortage that survives the wait and the give-back must not be loaded into
-    /// (arena_ram_verdict, ple_residency.hpp).  `open` then registers and allocates nothing, returns false with `ram_short()` true and the
+    /// (arena_ram_verdict, arena_ram.hpp).  `open` then registers and allocates nothing, returns false with `ram_short()` true and the
     /// numbers in `err`; the caller uses the --mmap-experts source for this run.  Unset: the shortage is only warned about, as before.
     bool fall_back_when_ram_short = false;
-    /// --ram-keep-gib W, in bytes (0: none): the arena is chosen only if this much RAM stays available after it (ple_residency.hpp,
+    /// --ram-keep-gib W, in bytes (0: none): the arena is chosen only if this much RAM stays available after it (arena_ram.hpp,
     /// arena_need_with_keep).  Set before `open`.  With the fallback not allowed the shortfall is only warned about, as for any other.
     uint64_t ram_keep_bytes = 0;
     /// The headroom the arena must find under a HARD memory limit (cgroup, container, job object) beyond its own size when the fallback is
-    /// allowed: the RAM copy's headroom (ple_residency.hpp, arena_hard_limit_need).  0: none.  Set before `open`.
+    /// allowed: the RAM copy's headroom (arena_ram.hpp, arena_hard_limit_need).  0: none.  Set before `open`.
     uint64_t hard_limit_headroom_bytes = 0;
     /// #5327: `open` also says the "loads anyway" warning on stdout when this is set (`--serve`: a service setup keeps stdout in its log and
     /// never sees stderr; the lines come before READY, which the server ignores).  Unset (a plain `generate` run): stderr only, so the token

@@ -49,10 +49,11 @@ function strayWords(args, valued) {
   return stray;
 }
 
-test('the DeepSeek option list is a subset of what ds4_main.cpp parses (it cannot drift ahead of the engine)', () => {
-  const source = fileURLToPath(new URL('../../../src/models/deepseekv41/ds4_main.cpp', import.meta.url));
-  if (!existsSync(source)) return;                                   // a package without the engine source
-  const parsed = new Set([...readFileSync(source, 'utf8').matchAll(/a == "(-{1,2}[a-z][a-z0-9-]*)"/g)].map(m => m[1]));
+test('the DeepSeek option list is a subset of what ds4_main.cpp and ds4_options.cpp parse (it cannot drift ahead of the engine)', () => {
+  const sources = ['ds4_main.cpp', 'ds4_options.cpp'].map(f => fileURLToPath(new URL(`../../../src/models/deepseekv41/${f}`, import.meta.url)));
+  if (!sources.every(existsSync)) return;                            // a package without the engine source
+  const text = sources.map(f => readFileSync(f, 'utf8')).join('\n');
+  const parsed = new Set([...text.matchAll(/a == "(-{1,2}[a-z][a-z0-9-]*)"/g)].map(m => m[1]));
   assert.ok(parsed.has('--eos') && parsed.has('--reserve-mib'), 'the pattern found the engine option parser');
   for (const flag of [...DS_VALUE_FLAGS, ...DS_SWITCH_FLAGS, ...Object.values(DS_RENAMED)]) assert.ok(parsed.has(flag), `${flag} is not an option of strata-dsv41`);
   for (const flag of Object.keys(DS_RENAMED)) assert.ok(!parsed.has(flag), `${flag} is the Qwen engine's name, strata-dsv41 rejects it`);

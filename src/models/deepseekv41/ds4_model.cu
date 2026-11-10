@@ -14623,16 +14623,23 @@ struct Model::Impl {
 
     // Swaps layer member (L0, mi)'s state - its ring, its compressor's partial group, the compressed KV and index
     // keys it reads - with conversation sq's (--parallel: a multi step's run of rows, run_attention); the second call
-    // swaps them back
-    void swap_seq_state(Layer& L0, int mi, int sq) {
+    // swaps them back.  par (forward_par): only the member's own device's copies, since the devices' threads run at
+    // once and each reads only its own; otherwise every device's, which replicate() writes
+    void swap_seq_state(Layer& L0, int mi, int sq, bool par) {
         SeqState& q = sqs[(size_t) sq];
         Layer& l = member(L0, mi);
         const size_t k = (size_t) sq_base[(size_t) L0.il] + (size_t) mi;
         std::swap(l.win, q.win[k]);
         std::swap(l.c_kv, q.c_kv[k]);
         std::swap(l.c_score, q.c_score[k]);
-        if (l.src >= 0) std::swap(srcs[(size_t) l.src].ckv, q.ckv[(size_t) l.src]);
-        if (l.ik_src >= 0) std::swap(srcs[(size_t) l.ik_src].ik, q.ik[(size_t) l.ik_src]);
+        for (size_t di = 0; di < devs.size(); ++di) {
+            if (par && di != (size_t) l.dev)
+                continue;
+            if (l.src >= 0)
+                std::swap(srcs[(size_t) l.src].ckv[di], q.ckv[(size_t) l.src][di]);
+            if (l.ik_src >= 0)
+                std::swap(srcs[(size_t) l.ik_src].ik[di], q.ik[(size_t) l.ik_src][di]);
+        }
     }
     // a multi step's new compressed rows (each row's own conversation's, a group its position completed) to the other
     // groups' readers: gathered in d.mstage, one hand-off - what a window's source puts in one piece (put_new_rows)
@@ -14858,7 +14865,7 @@ struct Model::Impl {
                     ++n;
                 active_row = row;
                 if (multi)
-                    swap_seq_state(L0, mi, wp.rseq[row]);
+                    swap_seq_state(L0, mi, wp.rseq[row], wp.par);
                 else
                     select_row(row);
                 for (int i = 0; i < 7; ++i)
@@ -14879,7 +14886,7 @@ struct Model::Impl {
                 const bool ok = multi ? run_attention_state(L0, mi, wp.rpos[row], n, wp, err, row)
                                       : run_attention_state(L0, mi, row_positions[row], n, row_plans[row], err);
                 if (multi)
-                    swap_seq_state(L0, mi, wp.rseq[row]);
+                    swap_seq_state(L0, mi, wp.rseq[row], wp.par);
                 l.ring_bak = ring_bak;
                 l.c_snap = c_snap;
                 l.c_rows = c_rows;

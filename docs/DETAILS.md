@@ -586,7 +586,8 @@ applies at the next start. Network, key, MCP and program keys are not editable t
   `penalty_last_n` (64 when a penalty is set and the request gives none) is a window over the tokens of the current answer: the
   prompt, including earlier assistant turns in it, is not counted, so the numbers or a quoted earlier answer in a new task are not
   penalised. `STRATA_PENALTY_PROMPT=1` counts the last `penalty_last_n` tokens of prompt and answer together, the old window.
-  This holds for the Qwen3.8 and Qwen3.6-35B-A3B engines on CUDA, HIP, Metal and SYCL.
+  This holds for Qwen3.8's original engine and the Qwen3.6-35B-A3B engine on CUDA, HIP, Metal and SYCL; strata-q38
+  still counts the prompt too.
 - `priority` (a whole number, default 0; OpenAI and Anthropic bodies alike) orders the requests strata-q38 runs at once
   ("parallel"): a higher one gets a step's extra draft rows first, and a request that finds every slot busy takes the
   slot of the running request of the lowest priority below its own. That request is paused (its conversation goes to

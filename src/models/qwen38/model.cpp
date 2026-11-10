@@ -3241,7 +3241,7 @@ int Model::load() {
     bool ram_fallback_taken = false, ram_fallback_failed = false, ram_fallback_resident = false;
     const bool ram_fallback_resident_off = [] { const char* v = std::getenv("STRATA_ARENA_FALLBACK_RESIDENT"); return v != nullptr && v[0] == '0'; }();
     // The RAM-copy fallback leaves max(--ram-keep-gib, the safety headroom: 8 GiB on Windows, where the page trim of the copy needs the
-    // room, 4 GiB elsewhere) free; STRATA_RESIDENT_HEADROOM_GIB, when set, decides instead.  ple_residency.hpp.
+    // room, 4 GiB elsewhere) free; STRATA_RESIDENT_HEADROOM_GIB, when set, decides instead.  arena_ram.hpp.
 #if defined(_WIN32)
     constexpr bool kWindowsHost = true;
 #else
