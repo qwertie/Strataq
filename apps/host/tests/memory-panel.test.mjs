@@ -325,6 +325,15 @@ test('draft experts have their own segment and legend without changing the pool 
   assert.ok(Math.abs(widths(row).reduce((sum, width) => sum + width, 0) - 100) < 1e-9);
 });
 
+test('pages lent to a prompt\'s buffers are a pool segment of their own with a legend entry', () => {
+  const card = { id: 'gpu0', name: 'GPU', total: 16 * 2 ** 30, free: 4 * 2 ** 30,
+    uses: { experts: 8 * 2 ** 30, prompt_buffers: 2 * 2 ** 30, pool_free: 2 ** 30 } };
+  const [row] = rows(draw({ available: true, memories: [card], settings: {} }));
+  assert.match(row, /data-use="prompt_buffers"/);
+  assert.match(row, /Prompt buffers 2.00 GiB/);
+  assert.match(row, /title="[^"]*while a prompt is read/);
+});
+
 
 test('arbitrary categories retain sublabels in both tooltips; other apps follow free space', () => {
   const memory = {id: 'gpu0', total: 8 * GIB, free: GIB, other_apps: GIB,

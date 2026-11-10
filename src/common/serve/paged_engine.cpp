@@ -298,6 +298,23 @@ private:
     /// holds.
     int64_t take_conversation(size_t target, const std::vector<int64_t>& ids, const ImageKeys& images,
                               int64_t priority);
+    /// Lends the model's prompt path its buffers for reading `tokens` prompt tokens: from the top of each card's pool
+    /// and of the RAM's (PagePool::lend), for the largest chunk up to the model's ceiling that they can lend now.  The
+    /// prompt's conversation holds its pages already (make_room), so the lend leaves no free pages for it.  True when
+    /// lent or when the read borrows nothing; false (and `err`) when not even the smallest chunk's buffers can be lent,
+    /// or the model failed.  give_back_prompt_buffers gives them back.
+    bool lend_prompt_buffers(int64_t tokens, std::string& err);
+    /// Lends the buffers `need` (per card) and `host` (all cards' together, from RAM) for chunks of `chunk` tokens,
+    /// and lays the prompt path out in them.  False with `err` empty when a pool could not lend them (all given back),
+    /// with `err` when the model failed.
+    bool try_lend_prompt(int64_t chunk, const std::vector<PromptBuffers>& need, uint64_t host, std::string& err);
+    /// Gives back the buffers lend_prompt_buffers lent, once the prompt path no longer reads them.
+    void give_back_prompt_buffers();
+    /// Gives back a prompt's buffers when it goes out of scope (serve_request's read ends).
+    struct PromptLoan {
+        PagedEngine& engine;
+        ~PromptLoan() { engine.give_back_prompt_buffers(); }
+    };
     /// Gives `h` the pages for `tokens` tokens on every card, pausing idle conversations (the lowest priority, then
     /// the least recently used, first) while a pool has no room, and tells the kernels about the experts that left
     /// those pages.
@@ -434,6 +451,7 @@ private:
     strata::serve::Loop* command_loop_ = nullptr; ///< The active serve loop, used at prompt-chunk boundaries.
     std::string fatal_error_; ///< Stops serving when the model cannot recover its layer ownership.
     bool residency_changed_ = false;   ///< the model's residency table changed since the devices' were uploaded
+    bool prompt_lent_ = false;         ///< the pools lend the prompt path its buffers (lend_prompt_buffers)
     /// Per layer, the card whose pool holds the layer's experts that its own card's does not (the model's hop
     /// holders), or -1; empty while the cards lend no pages (one card, or --remote-experts off)
     std::vector<int32_t> holder_;
@@ -446,9 +464,11 @@ private:
     /// The GPUs' part of the start-up fill is over: the RAM's pool has stopped wanting the experts they took, and
     /// fills.
     bool gpus_filled_ = false;
-    /// When the engine began to serve with its pools empty, while the start-up fill runs; fill_experts resets it, and
-    /// says on stderr how long the fill took.
+    /// When the engine began to serve with its pools empty, while the start-up fill runs, or when a prompt last gave
+    /// back the buffers it borrowed, while the experts their lends evicted come back (`refilling_`); fill_experts
+    /// resets it, and says on stderr how long the fill took.
     std::optional<Clock::time_point> filling_since_;
+    bool refilling_ = false;
     /// the model's usage counts when adapt_experts last decayed them, or serve() seeded them: a count above its entry
     /// is a use since then
     std::vector<float> seen_;
@@ -1089,6 +1109,11 @@ bool PagedEngine::serve_request(const std::string& line, bool admit) {
         print_response("ERR %s\n", err.c_str());
         return true;
     }
+    const PromptLoan loan{*this};
+    if (n - 1 > resume && !lend_prompt_buffers(n - 1 - resume, err)) {   // refused: the engine stays up
+        print_response("ERR %s\n", err.c_str());
+        return true;
+    }
     if (n - 1 > resume) {
         bool fatal = false;
         const bool ok = read_prompt(h, ids, resume, n - 1, t0, read_to, fatal, err);
@@ -1545,6 +1570,115 @@ bool PagedEngine::make_room(Held& h, int64_t tokens, std::string& err, std::opti
     return true;
 }
 
+bool PagedEngine::lend_prompt_buffers(int64_t tokens, std::string& err) {
+    const int64_t ceiling = model_.get_prompt_ceiling();
+    if (ceiling <= 0)
+        return true;
+    if (!model_.wait_state(err))   // (a lend copies pages that the model's writes in flight may still change)
+        return false;
+    const int64_t step = kPromptChunkStep, smallest = std::min(ceiling, step);
+    for (int64_t chunk = std::min(ceiling, (tokens + step - 1) / step * step); chunk > 0;
+         chunk = (chunk - 1) / step * step) {
+        std::vector<PromptBuffers> need;
+        uint64_t host = 0;
+        bool any = false, fits = true;
+        for (const PagedCard& card : cards_) {
+            const PromptBuffers& b = need.emplace_back(model_.get_prompt_buffers(card, chunk, tokens));
+            host += b.host;
+            any = any || b.device > 0 || b.host > 0;
+            fits = fits && (b.device == 0 || card.experts.can_lend(b.device));
+        }
+        if (!any)
+            return true;
+        if (fits && (host == 0 || ram_.pages().can_lend(host)) && try_lend_prompt(chunk, need, host, err))
+            return true;
+        if (!err.empty())
+            return false;
+    }
+    const PromptBuffers least = model_.get_prompt_buffers(cards_.front(), smallest, tokens);
+    const auto gib = [](uint64_t bytes) { return (double) bytes / 1073741824.0; };
+    char text[320];
+    std::snprintf(text, sizeof text, "the pools cannot lend the prompt's buffers now, not even for chunks of %lld "
+                  "tokens (%.2f GiB of %s's pool of %.2f GiB, %.2f GiB of the RAM's of %.2f GiB)",
+                  (long long) smallest, gib(least.device), cards_.front().id.c_str(),
+                  gib(cards_.front().experts.pool().report().total.bytes), gib(least.host),
+                  gib(ram_.pages().pool().report().total.bytes));
+    err = text;
+    return false;
+}
+
+bool PagedEngine::try_lend_prompt(int64_t chunk, const std::vector<PromptBuffers>& need, uint64_t host,
+                                  std::string& err) {
+    const Clock::time_point t0 = Clock::now();
+    std::vector<uint8_t*> device(cards_.size(), nullptr);
+    uint8_t* ram = nullptr;
+    uint32_t moved = 0, evicted = 0;
+    const auto count = [&](const strata::core::PoolLend& lend) {
+        moved += lend.experts_moved;
+        evicted += lend.experts_evicted;
+    };
+    uint64_t lent = 0;
+    bool refused = false;
+    prompt_lent_ = true;   // (from here give_back_prompt_buffers gives back what is lent)
+    for (PagedCard& card : cards_) {
+        if (need[card.index].device == 0)
+            continue;
+        const strata::core::OnDevice on(card.dev);
+        strata::core::PoolLend lend;
+        device[card.index] = card.experts.lend(need[card.index].device, lend);
+        count(lend);
+        lent += need[card.index].device;
+        for (const std::unique_ptr<Held>& h : held_)   // a lend moved these conversations' blocks
+            if (PagedPart& part = *h->parts[card.index];
+                part.is_ready() && std::find(lend.moved.begin(), lend.moved.end(), part.id()) != lend.moved.end() &&
+                !part.refresh(err))
+                return false;
+        if ((refused = device[card.index] == nullptr))
+            break;
+    }
+    if (!refused && host > 0) {
+        strata::core::PoolLend lend;
+        refused = (ram = ram_.lend(host, lend)) == nullptr;
+        count(lend);
+    }
+    if (refused)
+        give_back_prompt_buffers();
+    if (!publish_residency(err) || refused)
+        return false;
+    uint64_t at = 0;
+    for (const PagedCard& card : cards_) {
+        const strata::core::OnDevice on(card.dev);
+        if (!model_.lay_out_prompt(card, chunk, device[card.index], need[card.index].host > 0 ? ram + at : nullptr,
+                                   err))
+            return false;
+        at += need[card.index].host;
+    }
+    say("the pools lent %.2f GiB of VRAM and %.2f GiB of RAM to the prompt path for chunks of %lld tokens in %.0f ms "
+        "(%u experts moved, %u evicted)\n", (double) lent / 1073741824.0, (double) host / 1073741824.0,
+        (long long) chunk, get_ms_since(t0), moved, evicted);
+    return true;
+}
+
+void PagedEngine::give_back_prompt_buffers() {
+    if (!prompt_lent_)
+        return;
+    prompt_lent_ = false;
+    // (the drafter may still read the prompt path's rows on its own stream)
+    if (std::string err; !model_.wait_state(err))
+        say("before the prompt's buffers go back: %s\n", err.c_str());
+    for (PagedCard& card : cards_) {
+        const strata::core::OnDevice on(card.dev);
+        if (std::string err; !model_.lay_out_prompt(card, 0, nullptr, nullptr, err))
+            say("the prompt path of %s: %s\n", card.id.c_str(), err.c_str());
+        card.experts.give_back();
+    }
+    ram_.give_back();
+    if ((!filling_since_ || refilling_) && is_fill_wanted()) {   // the experts the lend evicted come back between steps
+        filling_since_ = Clock::now();
+        refilling_ = true;
+    }
+}
+
 Held* PagedEngine::find_decoding_victim(const Held* keep, std::optional<int64_t> priority) {
     Held* victim = nullptr;
     for (const auto& h : held_)
@@ -1906,8 +2040,10 @@ bool PagedEngine::fill_experts() {
         return false;
     }
     if (!is_fill_wanted()) {
-        say("experts loaded after READY in %.0f ms\n", get_ms_since(*filling_since_));
+        say(refilling_ ? "the experts a prompt's buffers evicted are back after %.0f ms\n"
+                       : "experts loaded after READY in %.0f ms\n", get_ms_since(*filling_since_));
         filling_since_.reset();
+        refilling_ = false;
     }
     if (wait_ms > 0)
         input_.wait_for_line(std::chrono::milliseconds(wait_ms), [] { return false; });

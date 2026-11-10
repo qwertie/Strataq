@@ -418,7 +418,7 @@ bool g_cache_vmm = false;   // set_vmm
 void ExpertCache::set_vmm(bool enabled) { g_cache_vmm = enabled; }
 
 bool ExpertCache::open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int64_t blob_bytes,
-                       std::string& err) {
+                       std::string& err, uint8_t* arena) {
     close();
     if (n_slots <= 0) {
         err = "ExpertCache: n_slots must be positive";
@@ -438,7 +438,7 @@ bool ExpertCache::open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int6
     // `device_slot()` walks off the end. So the free-VRAM figure is read and compared BEFORE the allocation,
     // and the two numbers are named in the refusal.
     size_t free_b = 0, total_b = 0;
-    if (cudaMemGetInfo(&free_b, &total_b) == cudaSuccess) {
+    if (arena == nullptr && cudaMemGetInfo(&free_b, &total_b) == cudaSuccess) {
         free_b = device_free_bytes();   // unified memory: what the OS can give back counts (see the header)
         if ((uint64_t) free_b < want) {
             char buf[320];
@@ -460,7 +460,10 @@ bool ExpertCache::open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int6
         seg_req_ = 0;
     }
 #endif
-    if (seg_req_ > 0) {   // #533: --vram-elastic: physical segments behind one address range (zeroed below)
+    external_ = arena != nullptr;
+    if (external_) {
+        base_ = arena;
+    } else if (seg_req_ > 0) {   // #533: --vram-elastic: physical segments behind one address range (zeroed below)
         if (!open_segmented(want, err)) return false;
     } else if (g_cache_vmm && vmm_available()) {
         // the elastic K/V: every chunk mapped now; the K/V may later take some of them (and give them back)
@@ -565,6 +568,9 @@ void ExpertCache::close() {
     } else if (vmm_) {
         vmm_.reset();   // unmaps and frees every chunk it still holds
         base_ = nullptr;
+    } else if (external_) {
+        base_ = nullptr;
+        external_ = false;
     } else if (base_ != nullptr) {
         strata::core::release_device(base_);
         base_ = nullptr;

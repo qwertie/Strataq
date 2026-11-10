@@ -475,7 +475,7 @@ bool g_cache_vmm = false;   // set_vmm
 void ExpertCache::set_vmm(bool enabled) { g_cache_vmm = enabled; }
 
 bool ExpertCache::open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int64_t blob_bytes,
-                       std::string& err) {
+                       std::string& err, uint8_t* arena) {
     close();
     if (n_slots <= 0) {
         err = "ExpertCache: n_slots must be positive";
@@ -500,7 +500,7 @@ bool ExpertCache::open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int6
     device information which may not be supported by all compilers or runtimes.
     You may need to adjust the code.
     */
-    if (DPCT_CHECK_ERROR(
+    if (arena == nullptr && DPCT_CHECK_ERROR(
             dpct::get_current_device().get_memory_info(free_b, total_b)) == 0) {
         free_b = device_free_bytes();   // unified memory: what the OS can give back counts (see the header)
         if ((uint64_t) free_b < want) {
@@ -516,7 +516,10 @@ bool ExpertCache::open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int6
         }
     }
 
-    if (seg_req_ > 0) {   // #533: --vram-elastic: physical segments behind one address range (zeroed below)
+    external_ = arena != nullptr;
+    if (external_) {
+        base_ = arena;
+    } else if (seg_req_ > 0) {   // #533: --vram-elastic: physical segments behind one address range (zeroed below)
         if (!open_segmented(want, err)) return false;
     } else if (g_cache_vmm && vmm_available()) {
         // the elastic K/V: every chunk mapped now; the K/V may later take some of them (and give them back)
@@ -632,6 +635,9 @@ void ExpertCache::close() {
         vmm_.reset();   // unmaps and frees every chunk it still holds
         strata::device_alloc_unregister(base_);
         base_ = nullptr;
+    } else if (external_) {
+        base_ = nullptr;
+        external_ = false;
     } else if (base_ != nullptr) {
         strata::device_alloc_unregister(base_);
         sycl::free(base_, dpct::get_in_order_queue());

@@ -15,7 +15,7 @@
 const USES = {weights: "Weights", experts: "Experts", redundant_experts: "Experts also in VRAM",
               conversations: "Conversations", pool_free: "Free in the pool",
               paused: "Paused conversations", paused_unusable: "Unusable pause files", drafter: "Drafter",
-              drafter_experts: "Drafter experts",
+              drafter_experts: "Drafter experts", prompt_buffers: "Prompt buffers",
               scratch: "Scratch", engram: "Engram",
               borrowed: "GPU (borrowed from RAM)", other: "Other", other_apps: "Other apps", free: "Free"};
 /** What each use of a bar is, in plain words: the tooltip of its segment and its legend entry. */
@@ -28,6 +28,8 @@ const USE_HELP = {
     "or copying weights back from VRAM when an expert is evicted.",
   conversations: "What the model remembers of the conversations it is working on (their context)",
   pool_free: "Room the engine has set aside here that nothing uses yet; experts or conversations take it as needed",
+  prompt_buffers: "Working space lent from the pool while a prompt is read; experts and conversations get it back " +
+    "when the prompt has been read",
   paused: "Conversations put aside for now, kept here until they continue",
   paused_unusable: "Paused conversations this model cannot continue: saved by another model or with other " +
     "settings, or damaged. They count toward the SSD allowance and are deleted first, the oldest first, when " +
@@ -42,7 +44,8 @@ const USE_HELP = {
   free: "Not in use by anything",
 };
 /** Pool categories used by engines that do not report an explicit adjustable byte interval. */
-const POOL_USES = ["experts", "redundant_experts", "conversations", "paused", "paused_unusable", "pool_free"];
+const POOL_USES = ["experts", "redundant_experts", "conversations", "paused", "paused_unusable", "prompt_buffers",
+                   "pool_free"];
 /** The SSD's uses that its paused budget (`ssd_pause_mib`) limits. */
 const SSD_BUDGET_USES = ["paused", "paused_unusable"];
 /** Size in bytes (32 GiB) at which a memory's bar fills the width. */

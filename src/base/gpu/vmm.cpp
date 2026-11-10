@@ -72,16 +72,18 @@ const Api& api() {
 
 bool vmm_available() { return api().ok; }
 uint64_t vmm_granularity() { return api().ok ? api().gran : 0; }
+uint64_t vmm_min_granularity() { return api().ok ? api().gran : 0; }
 
-VmmChunk vmm_chunk_new() {
+VmmChunk vmm_chunk_new(uint64_t bytes) {
     const Api& a = api();
-    if (!a.ok) return 0;
+    int dev = 0;
+    if (!a.ok || cudaGetDevice(&dev) != cudaSuccess) return 0;
     CUmemAllocationProp prop{};
     prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
     prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    prop.location.id = a.dev;
+    prop.location.id = dev;
     CUmemGenericAllocationHandle h = 0;
-    if (a.create(&h, (size_t) a.gran, &prop, 0) != CUDA_SUCCESS) return 0;
+    if (a.create(&h, (size_t) (bytes != 0 ? bytes : a.gran), &prop, 0) != CUDA_SUCCESS) return 0;
     return (VmmChunk) h;
 }
 
@@ -89,13 +91,14 @@ void vmm_chunk_free(VmmChunk h) {
     if (h != 0 && api().ok) api().release((CUmemGenericAllocationHandle) h);
 }
 
-bool VmmRange::reserve(uint64_t bytes) {
+bool VmmRange::reserve(uint64_t bytes, uint64_t chunk_bytes) {
     release();
     const Api& a = api();
-    if (!a.ok || bytes == 0) return false;
-    const uint64_t n = (bytes + a.gran - 1) / a.gran;
+    chunk_ = chunk_bytes != 0 ? chunk_bytes : a.gran;
+    if (!a.ok || bytes == 0 || chunk_ % a.gran != 0 || cudaGetDevice(&dev_) != cudaSuccess) return false;
+    const uint64_t n = (bytes + chunk_ - 1) / chunk_;
     CUdeviceptr p = 0;
-    if (a.reserve(&p, (size_t) (n * a.gran), 0, 0, 0) != CUDA_SUCCESS) return false;
+    if (a.reserve(&p, (size_t) (n * chunk_), 0, 0, 0) != CUDA_SUCCESS) return false;
     base_ = (unsigned long long) p;
     h_.assign((size_t) n, 0);
     return true;
@@ -105,7 +108,7 @@ void VmmRange::release() {
     if (base_ == 0) return;
     const Api& a = api();
     for (int64_t i = 0; i < chunks(); ++i) vmm_chunk_free(unmap(i));
-    a.free_va((CUdeviceptr) base_, (size_t) ((uint64_t) h_.size() * a.gran));
+    a.free_va((CUdeviceptr) base_, (size_t) ((uint64_t) h_.size() * chunk_));
     base_ = 0;
     h_.clear();
 }
@@ -118,7 +121,7 @@ int64_t VmmRange::mapped_count() const {
 
 bool VmmRange::map_one(int64_t i, VmmChunk h) {
     const Api& a = api();
-    if (a.map((CUdeviceptr) (base_ + (uint64_t) i * a.gran), (size_t) a.gran, 0, (CUmemGenericAllocationHandle) h, 0) !=
+    if (a.map((CUdeviceptr) (base_ + (uint64_t) i * chunk_), (size_t) chunk_, 0, (CUmemGenericAllocationHandle) h, 0) !=
         CUDA_SUCCESS)
         return false;
     h_[(size_t) i] = h;
@@ -130,9 +133,9 @@ bool VmmRange::set_access(int64_t lo, int64_t hi) {
     const Api& a = api();
     CUmemAccessDesc d{};
     d.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    d.location.id = a.dev;
+    d.location.id = dev_;
     d.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    return a.access((CUdeviceptr) (base_ + (uint64_t) lo * a.gran), (size_t) ((uint64_t) (hi - lo) * a.gran), &d, 1) ==
+    return a.access((CUdeviceptr) (base_ + (uint64_t) lo * chunk_), (size_t) ((uint64_t) (hi - lo) * chunk_), &d, 1) ==
            CUDA_SUCCESS;
 }
 
@@ -146,7 +149,7 @@ VmmChunk VmmRange::unmap(int64_t i) {
     if (!mapped(i)) return 0;
     const Api& a = api();
     const VmmChunk h = h_[(size_t) i];
-    if (a.unmap((CUdeviceptr) (base_ + (uint64_t) i * a.gran), (size_t) a.gran) != CUDA_SUCCESS) return 0;
+    if (a.unmap((CUdeviceptr) (base_ + (uint64_t) i * chunk_), (size_t) chunk_) != CUDA_SUCCESS) return 0;
     h_[(size_t) i] = 0;
     return h;
 }
@@ -171,7 +174,7 @@ namespace strata::core {
 namespace {
 struct Api {
     bool ok = false;
-    uint64_t gran = 0;
+    uint64_t gran = 0, min_gran = 0;
     int dev = -1;
 };
 void fail(const char* what, hipError_t e) {
@@ -207,6 +210,7 @@ const Api& api() {
         }
         // gfx1201 reports a 4 KiB minimum granularity; the elastic range works in 2 MiB chunks like CUDA's (any multiple of the minimum)
         const uint64_t want = 2ull << 20;
+        a.min_gran = g;
         a.gran = g >= want ? g : (want + g - 1) / g * g;
         a.ok = true;
     });
@@ -216,13 +220,18 @@ const Api& api() {
 
 bool vmm_available() { return api().ok; }
 uint64_t vmm_granularity() { return api().ok ? api().gran : 0; }
+uint64_t vmm_min_granularity() { return api().ok ? api().min_gran : 0; }
 
-VmmChunk vmm_chunk_new() {
+VmmChunk vmm_chunk_new(uint64_t bytes) {
     const Api& a = api();
-    if (!a.ok) return 0;
-    const hipMemAllocationProp prop = alloc_prop(a.dev);
+    int dev = 0;
+    if (!a.ok || hipGetDevice(&dev) != hipSuccess) return 0;
+    const hipMemAllocationProp prop = alloc_prop(dev);
     hipMemGenericAllocationHandle_t h = nullptr;
-    if (const hipError_t e = hipMemCreate(&h, (size_t) a.gran, &prop, 0); e != hipSuccess) { fail("hipMemCreate", e); return 0; }
+    if (const hipError_t e = hipMemCreate(&h, (size_t) (bytes != 0 ? bytes : a.gran), &prop, 0); e != hipSuccess) {
+        fail("hipMemCreate", e);
+        return 0;
+    }
     return (VmmChunk) (uintptr_t) h;
 }
 
@@ -230,13 +239,14 @@ void vmm_chunk_free(VmmChunk h) {
     if (h != 0 && api().ok) (void) hipMemRelease((hipMemGenericAllocationHandle_t) (uintptr_t) h);
 }
 
-bool VmmRange::reserve(uint64_t bytes) {
+bool VmmRange::reserve(uint64_t bytes, uint64_t chunk_bytes) {
     release();
     const Api& a = api();
-    if (!a.ok || bytes == 0) return false;
-    const uint64_t n = (bytes + a.gran - 1) / a.gran;
+    chunk_ = chunk_bytes != 0 ? chunk_bytes : a.gran;
+    if (!a.ok || bytes == 0 || chunk_ % a.min_gran != 0 || hipGetDevice(&dev_) != hipSuccess) return false;
+    const uint64_t n = (bytes + chunk_ - 1) / chunk_;
     void* p = nullptr;
-    if (const hipError_t e = hipMemAddressReserve(&p, (size_t) (n * a.gran), 0, nullptr, 0); e != hipSuccess) { fail("hipMemAddressReserve", e); return false; }
+    if (const hipError_t e = hipMemAddressReserve(&p, (size_t) (n * chunk_), 0, nullptr, 0); e != hipSuccess) { fail("hipMemAddressReserve", e); return false; }
     base_ = (unsigned long long) (uintptr_t) p;
     h_.assign((size_t) n, 0);
     return true;
@@ -246,7 +256,7 @@ void VmmRange::release() {
     if (base_ == 0) return;
     const Api& a = api();
     for (int64_t i = 0; i < chunks(); ++i) vmm_chunk_free(unmap(i));
-    (void) hipMemAddressFree((void*) (uintptr_t) base_, (size_t) ((uint64_t) h_.size() * a.gran));
+    (void) hipMemAddressFree((void*) (uintptr_t) base_, (size_t) ((uint64_t) h_.size() * chunk_));
     base_ = 0;
     h_.clear();
 }
@@ -259,7 +269,7 @@ int64_t VmmRange::mapped_count() const {
 
 bool VmmRange::map_one(int64_t i, VmmChunk h) {
     const Api& a = api();
-    if (const hipError_t e = hipMemMap((void*) (uintptr_t) (base_ + (uint64_t) i * a.gran), (size_t) a.gran, 0,
+    if (const hipError_t e = hipMemMap((void*) (uintptr_t) (base_ + (uint64_t) i * chunk_), (size_t) chunk_, 0,
                                       (hipMemGenericAllocationHandle_t) (uintptr_t) h, 0);
         e != hipSuccess) {
         fail("hipMemMap", e);
@@ -274,9 +284,9 @@ bool VmmRange::set_access(int64_t lo, int64_t hi) {
     const Api& a = api();
     hipMemAccessDesc d{};
     d.location.type = hipMemLocationTypeDevice;
-    d.location.id = a.dev;
+    d.location.id = dev_;
     d.flags = hipMemAccessFlagsProtReadWrite;
-    const hipError_t e = hipMemSetAccess((void*) (uintptr_t) (base_ + (uint64_t) lo * a.gran), (size_t) ((uint64_t) (hi - lo) * a.gran),
+    const hipError_t e = hipMemSetAccess((void*) (uintptr_t) (base_ + (uint64_t) lo * chunk_), (size_t) ((uint64_t) (hi - lo) * chunk_),
                                          &d, 1);
     const bool ok = e == hipSuccess;
     if (!ok) fail("hipMemSetAccess", e);
@@ -293,7 +303,7 @@ VmmChunk VmmRange::unmap(int64_t i) {
     if (!mapped(i)) return 0;
     const Api& a = api();
     const VmmChunk h = h_[(size_t) i];
-    if (hipMemUnmap((void*) (uintptr_t) (base_ + (uint64_t) i * a.gran), (size_t) a.gran) != hipSuccess) { (void) hipGetLastError(); return 0; }
+    if (hipMemUnmap((void*) (uintptr_t) (base_ + (uint64_t) i * chunk_), (size_t) chunk_) != hipSuccess) { (void) hipGetLastError(); return 0; }
     h_[(size_t) i] = 0;
     return h;
 }
@@ -304,9 +314,10 @@ VmmChunk VmmRange::unmap(int64_t i) {
 namespace strata::core {
 bool vmm_available() { return false; }
 uint64_t vmm_granularity() { return 0; }
-VmmChunk vmm_chunk_new() { return 0; }
+uint64_t vmm_min_granularity() { return 0; }
+VmmChunk vmm_chunk_new(uint64_t) { return 0; }
 void vmm_chunk_free(VmmChunk) {}
-bool VmmRange::reserve(uint64_t) { return false; }
+bool VmmRange::reserve(uint64_t, uint64_t) { return false; }
 void VmmRange::release() {}
 int64_t VmmRange::mapped_count() const { return 0; }
 bool VmmRange::map_one(int64_t, VmmChunk) { return false; }

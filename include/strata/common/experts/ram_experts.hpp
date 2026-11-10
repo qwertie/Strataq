@@ -51,6 +51,17 @@ public:
     /// and has room for it among colder experts of its size; tells whether it did.  An expert of a layer past the
     /// pool's (DeepSeek's drafter, whose experts only the GPU's pool holds) is never copied.
     bool keep_copy(ExpertKey key, const uint8_t* bytes);
+    /// Lends a run at the top of the pool for a prompt path's host buffers (ExpertPages::lend); a moved expert is read
+    /// from its new pages.  Gets the run's address, or null (`lend.refusal` says why).
+    uint8_t* lend(uint64_t bytes, PoolLend& lend) {
+        const std::unique_lock lock(mu_);
+        return pages_.lend(bytes, lend);
+    }
+    /// Gives back the run `lend` lent.
+    void give_back() {
+        const std::unique_lock lock(mu_);
+        pages_.give_back();
+    }
     /// Tells whether the pool holds expert (`layer`, `expert`).
     bool holds(int64_t layer, int64_t expert) const { return first_page_[index_of(layer, expert)] != kNotResident; }
     /// Gets the experts in the pool, which the paused conversations share.

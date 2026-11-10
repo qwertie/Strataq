@@ -655,7 +655,7 @@ int run_paged_engine(int argc, char** argv) {
     const std::vector<uint64_t> trunk(blobs.begin(), blobs.begin() + g.nl);   // (the RAM's pool: the trunk's experts)
     if (!strata::serve::open_ram_pool(kProgram, settings, files, kRamHeadroom, kCpuLaneExperts, layout, card, trunk,
                                       g.n_exp, get_ranking(m, 0, g.nl, false), card.experts.pool().page_address(0),
-                                      ram, copy_back, err)) {
+                                      0, ram, copy_back, err)) {
         std::fprintf(stderr, "%s: %s\n", kProgram.c_str(), err.c_str());
         return 1;
     }
@@ -1376,7 +1376,8 @@ bool open_card_pool(const Model& m, const PagedSettings& s, const strata::core::
             strata::core::get_expert_memory_label(key.layer, bytes)};
     };
     const strata::core::OnDevice on(card.dev);
-    if (!card.experts.open(strata::serve::get_gpu_chunk_memory(card.dev), bytes, layout, config, blobs,
+    if (!card.experts.open(strata::serve::get_gpu_chunk_memory(card.dev, config.chunk_bytes), bytes, layout, config,
+                           blobs,
                            m.geometry().n_exp, max_experts, ranking, err))
         return false;
     card.experts.set_ranking(ranking, max_experts);   // (opened without a cache, it wants none of them until then)

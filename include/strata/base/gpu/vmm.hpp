@@ -1,8 +1,10 @@
 #pragma once
-// CUDA virtual memory (the elastic K/V, --kv-grow): an address range reserved once, whose physical memory is mapped and
-// unmapped in chunks of the device's granularity (2 MiB).  The K/V pools grow with the context by taking chunks the
-// expert cache gives up, and neither moves: every captured graph and stored pointer stays valid.  The driver calls
-// are reached through the runtime's entry-point query, so nothing links the driver library.  Not under HIP.
+// GPU virtual memory (CUDA, and HIP from ROCm 6): an address range reserved once, whose physical memory is mapped and
+// unmapped in chunks of a whole number of the device's granularity (2 MiB by default).  The elastic K/V (--kv-grow)
+// grows with the context by taking chunks the expert cache gives up, and the paged engines' page pools grow and shrink
+// at the top of one range, so that a pool's chunks are back to back (get_gpu_chunk_memory); nothing moves, so every
+// captured graph and stored pointer stays valid.  CUDA's driver calls are reached through the runtime's entry-point
+// query, so nothing links the driver library.
 
 #include <cstdint>
 #include <vector>
@@ -25,10 +27,13 @@ template <class F> bool find_driver_entry(const char* name, F& f) {
 
 /// The current device supports it and the entry points resolved.
 bool vmm_available();
-/// The chunk size (0 when not available).
+/// The default chunk size, a whole number of the device's granularity (0 when not available).
 uint64_t vmm_granularity();
-/// A new physical chunk on the current device (0: out of memory), and its release.
-VmmChunk vmm_chunk_new();
+/// Gets the smallest size a physical chunk may be a whole number of: the device's granularity (0 when not available).
+uint64_t vmm_min_granularity();
+/// A new physical chunk of `bytes` (a whole number of vmm_min_granularity; 0: vmm_granularity) on the current device
+/// (0: out of memory), and its release.
+VmmChunk vmm_chunk_new(uint64_t bytes = 0);
 void vmm_chunk_free(VmmChunk h);
 
 class VmmRange {
@@ -38,11 +43,13 @@ public:
     VmmRange(const VmmRange&) = delete;
     VmmRange& operator=(const VmmRange&) = delete;
 
-    /// Reserves `bytes` (rounded up to whole chunks) of addresses, nothing mapped.
-    bool reserve(uint64_t bytes);
+    /// Reserves `bytes` (rounded up to whole chunks) of addresses on the current device, nothing mapped, in chunks of
+    /// `chunk_bytes` (a whole number of vmm_min_granularity; 0: vmm_granularity).
+    bool reserve(uint64_t bytes, uint64_t chunk_bytes = 0);
     /// Unmaps and frees every chunk, then the addresses.
     void release();
     uint8_t* base() const { return (uint8_t*) (uintptr_t) base_; }
+    uint64_t chunk_bytes() const { return chunk_; }
     int64_t chunks() const { return (int64_t) h_.size(); }
     bool mapped(int64_t i) const { return i >= 0 && i < chunks() && h_[(std::size_t) i] != 0; }
     int64_t mapped_count() const;
@@ -59,6 +66,8 @@ private:
     /// chunk counts as mapped without access.
     bool commit_run(int64_t lo, int64_t hi);
     unsigned long long base_ = 0;
+    uint64_t chunk_ = 0;        ///< the bytes of each chunk
+    int dev_ = 0;               ///< the device the range was reserved on, which gets access to its chunks
     std::vector<VmmChunk> h_;   // per chunk: its physical chunk, 0 = unmapped
 };
 
@@ -73,7 +82,7 @@ template <class Take> bool VmmRange::map_range(int64_t lo, int64_t hi, Take take
             continue;
         }
         VmmChunk h = take();
-        if (h == 0) h = vmm_chunk_new();
+        if (h == 0) h = vmm_chunk_new(chunk_);
         if (h == 0 || !map_one(i, h)) {
             if (h != 0) vmm_chunk_free(h);
             if (run >= 0) commit_run(run, i);

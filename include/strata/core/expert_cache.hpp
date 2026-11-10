@@ -60,7 +60,10 @@ public:
     /// **CHECKS THE ALLOCATION AGAINST WHAT THE CARD ACTUALLY HAS** rather than assuming the planner was right.
     /// A cache that silently allocates less than it was asked for would report a hit rate for slots it does
     /// not have, which is the shape of error this project keeps paying for.
-    bool open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int64_t blob_bytes, std::string& err);
+    /// `arena`: the caller's device memory for the slots (n_slots x blob_bytes), which close leaves alone (the paged
+    /// engines' page pool on a GPU with virtual memory: its first chunk); null: the cache allocates its own.
+    bool open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int64_t blob_bytes, std::string& err,
+              uint8_t* arena = nullptr);
     /// Plan v0.3 P6: slots of the given sizes, back to back (a native pack's blobs differ per layer, and a
     /// profile-filled tier never moves an expert to another layer's slot, so each slot keeps its first size).
     bool open_sized(const std::vector<int64_t>& slot_bytes, int64_t n_layers, int64_t n_expert, std::string& err);
@@ -148,6 +151,11 @@ public:
             return;
         residency_[(size_t) (layer * n_expert_ + expert)] = kNotResident;
         --admitted_;
+    }
+
+    /// With an admitter: gives an expert the slot its bytes were copied to (ExpertPages: a lend moved it).
+    void relocate(int64_t layer, int64_t expert, int32_t slot) {
+        residency_[(size_t) (layer * n_expert_ + expert)] = slot;
     }
 
     /// Publish a same-layer replacement after its slot copy has completed.
@@ -258,6 +266,7 @@ private:
     std::vector<int64_t> seg_size_;     ///< #533: each segment's size (the last one may be shorter)
     int64_t mapped_segs_ = 0;           ///< #533: segments [0, mapped_segs_) are backed
     std::unique_ptr<VmmRange> vmm_;    ///< the arena's range when it is in VMM (set_vmm)
+    bool external_ = false;            ///< the arena is open's caller's
     std::vector<int32_t> residency_;   ///< [n_layers * n_expert] -> slot or kNotResident
     int64_t slots_ = 0;
     int64_t n_layers_ = 0;

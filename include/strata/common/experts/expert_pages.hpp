@@ -3,13 +3,13 @@
 // M5).
 //
 // For a GPU, the cache's arena is opened as uniform slots of one page each and is the pool's first chunk; the other
-// chunks are allocated above it at whole pages from its start, so that every page is a slot: the kernels find an
-// expert at the arena plus its slot times the page size, as in any cache of uniform slots, and an expert takes
-// several consecutive pages (ExpertCache::set_expert_bytes).  Experts come in through ExpertCache::admit, in the
-// expert profile's order, and leave when a growing conversation takes their pages or a shrink gives back their
-// chunk.  The RAM's pool (RamExperts) is made of page-locked host memory the same way, without a cache, its slots
-// the pool's page numbers.  Before an expert's pages go to another use, the `leaving` hook may copy it elsewhere (a
-// GPU's expert back to RAM).
+// chunks are allocated above it at whole pages from its start (on a GPU with virtual memory, right after it), so that
+// every page is a slot: the kernels find an expert at the arena plus its slot times the page size, as in any cache of
+// uniform slots, and an expert takes several consecutive pages (ExpertCache::set_expert_bytes).  Experts come in
+// through ExpertCache::admit, in the expert profile's order, and leave when a growing conversation takes their pages,
+// a prompt borrows them for its buffers (`lend`) or a shrink gives back their chunk.  The RAM's pool (RamExperts) is
+// made of page-locked host memory the same way, without a cache, its slots the pool's page numbers.  Before an
+// expert's pages go to another use, the `leaving` hook may copy it elsewhere (a GPU's expert back to RAM).
 #pragma once
 
 #include "strata/common/state/page_pool.hpp"
@@ -34,6 +34,8 @@ struct ChunkMemory {
     /// Copies `bytes` inside the memory and waits for the copy (a shrink moves conversation pages out of a chunk);
     /// false when it failed.
     std::function<bool(uint8_t* to, const uint8_t* from, uint64_t bytes)> copy;
+    /// Each chunk `alloc` gives starts where the last one ended (one virtual range), so runs may cross chunks.
+    bool contiguous = false;
 };
 
 /// Experts in the pages of a page pool made over one arena: a GPU's expert cache (whose slots are the pages) or host
@@ -81,6 +83,17 @@ public:
     void set_ranking(const std::vector<ExpertKey>& ranking, int64_t max_experts);
     /// Gets the experts in rank order, hottest first: set_ranking's, then those admit took from outside it.
     const std::vector<ExpertKey>& get_ranking() const { return ranked_; }
+    /// Lends a run at the top of the pool for a prompt's buffers (PagePool::lend): `bytes` in whole pages, leaving no
+    /// free pages for conversations (the prompt's own took theirs first); an expert it moves stays in the pool (the
+    /// `moved` hook), one it evicts leaves it (`leaving` and `moved`) until `refill` brings it back.  Gets the run's
+    /// address, or null (`lend.refusal` says why).
+    uint8_t* lend(uint64_t bytes, PoolLend& lend);
+    /// Tells whether `lend(bytes, ...)` may succeed now (PagePool::can_lend).
+    bool can_lend(uint64_t bytes) const;
+    /// Gives back the run `lend` lent.
+    void give_back() { pool_->give_back(); }
+    /// Tells whether the pool's chunks are back to back in one virtual range (ChunkMemory::contiguous).
+    bool is_contiguous() const { return memory_.contiguous; }
     /// Gets the slot of a pool's page: what the cache's residency and the kernels use.
     int32_t get_slot(PageId page) const;
     void set_hooks(Hooks hooks) { hooks_ = std::move(hooks); }
@@ -126,6 +139,7 @@ private:
     uint8_t* alloc_chunk(uint64_t bytes);
     void free_chunk(uint8_t* chunk);
     void on_evicted(ExpertKey key, PageId first);
+    void on_relocated(ExpertKey key, PageId to);
     void want_missing();
     int32_t admit_free(ExpertKey key);
     size_t index_of(ExpertKey key) const { return (size_t) key.layer * (size_t) n_expert_ + (size_t) key.expert; }

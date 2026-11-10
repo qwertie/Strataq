@@ -48,6 +48,9 @@ struct PagePoolConfig {
     std::vector<uint32_t> expert_ranking;
     std::string label = "Expert and conversation pool";   ///< the name of this pool in allocation details
     std::vector<uint64_t> expert_bytes;   ///< actual weight bytes per layer, before rounding to pages
+    /// The allocator's chunks may be one memory: a chunk it gives where the previous one ended (a GPU's virtual range,
+    /// ChunkMemory::contiguous) is joined to it, so that runs may cross their bound.  Off, each run stays in its chunk.
+    bool join_chunks = false;
     /// Supplies engine-specific category and purpose labels; empty uses the layer and expert size.
     std::function<MemoryLabel(ExpertKey, uint64_t)> label_expert;
 };
@@ -65,8 +68,11 @@ struct PagePoolHooks {
     /// Tells the expert's owner that its pages (from the given first one) go to another use, before the new user gets
     /// them, so that the owner can copy the expert to RAM or drop it.
     std::function<void(ExpertKey, PageId)> evicted = [](ExpertKey, PageId) {};
-    /// Copies a whole page when a shrink moves a conversation's page out of a chunk; returns false when it cannot.
-    std::function<bool(PageId to, PageId from)> copy = [](PageId, PageId) { return false; };
+    /// Copies `pages` consecutive pages inside one chunk (or joined ones), when a shrink or a lend moves a
+    /// conversation's block or an expert; returns false when it cannot.
+    std::function<bool(PageId to, PageId from, uint32_t pages)> copy = [](PageId, PageId, uint32_t) { return false; };
+    /// Tells the expert's owner that a lend copied its pages to `to` (PagePool::lend), so that it reads them there.
+    std::function<void(ExpertKey, PageId to)> relocated = [](ExpertKey, PageId) {};
 };
 
 /// A pool's pages by use, for the GET_MEMORY_USE command.
@@ -78,6 +84,7 @@ struct PagePoolReport {
     Use active;    ///< the growing regions (K/V) of active conversations
     Use fixed;     ///< the fixed regions of active conversations: recurrent state, the drafter's state
     Use paused;    ///< all pages of paused conversations
+    Use lent;      ///< the run lent to a prompt's buffers (PagePool::lend)
     Use free;      ///< the rest, with the pages of conversations' holes that no block holds yet
     Use total;
     Use allocated;    ///< all but the free runs: experts, blocks, and the pages of holes no block holds yet
@@ -93,6 +100,15 @@ struct PoolResize {
     /// Conversations holding pages in the chunks a shrink would give back, when the rest of the pool has no room for
     /// those pages: pausing (and removing) some of them, or any others, makes the room.
     std::vector<ConversationId> to_pause;
+};
+
+/// Outcome of PagePool::lend.
+struct PoolLend {
+    PageId first = no_page;   ///< the lent run's first page; no_page when it lent nothing
+    std::string refusal;      ///< why it lent nothing; empty when it lent
+    /// Conversations whose blocks it copied elsewhere (read their conversation_blocks again)
+    std::vector<ConversationId> moved;
+    uint32_t experts_moved = 0, experts_evicted = 0;   ///< the experts it copied elsewhere, and those it evicted
 };
 
 /// Gets the page size for experts whose sizes are `blob_bytes` (one per layer; the experts of a layer are all one
@@ -112,16 +128,18 @@ std::string get_expert_memory_label(int32_t layer, uint64_t bytes);
 /// engine sizing a pool before making it calls this too.
 uint32_t choose_block_pages(const StateRegion& region, uint64_t page_bytes);
 
-/// The pages of one memory, in runs of consecutive pages inside one chunk: each run is free, holds one expert, holds
-/// one block of a conversation, or is a hole (an evicted expert's pages that one conversation fills with its blocks).
+/// The pages of one memory, in runs of consecutive pages: each run is free, holds one expert, holds one block of a
+/// conversation, is a hole (an evicted expert's pages that one conversation fills with its blocks) or is lent to a
+/// prompt's buffers.  A run stays inside one chunk, unless the chunks are joined (PagePoolConfig::join_chunks).
 /// Pages may be small (every expert a whole number of them), so a pool may hold millions; the pool keeps runs, not
 /// pages, and never walks the pages.
 ///
 /// The bottom of the pool is the conversations' end: their blocks take the lowest free run that fits, so the token
 /// minimum's reserve, which experts leave free, is filled first.  Each expert size has a home point, the middle of
-/// the room the expert ranking gives that size above the reserve; an expert takes the free run of its size nearest
-/// its home, so experts of one size sit together and the pages an expert leaves fit the next one of its size.  When
-/// none fits, the least-used expert of its size (used before it) gives up its run: exactly one eviction.  A
+/// the room the expert ranking gives that size, the rooms one after another from the reserve up, so that pages no
+/// expert needs are left at the top, where `lend` lends a prompt's buffers.  An expert takes the free run of its size
+/// nearest its home, so experts of one size sit together and the pages an expert leaves fit the next one of its size.
+/// When none fits, the least-used expert of its size (used before it) gives up its run: exactly one eviction.  A
 /// conversation past its free runs evicts the least-used expert of any size and fills that hole with its blocks
 /// before it takes another; the hole goes back whole when its last block leaves.  A fixed region (a conversation's
 /// recurrent state) needs one long run: the lowest free one, else the lowest stretch of experts it evicts.  Not
@@ -138,9 +156,23 @@ public:
     /// Takes or gives back chunks so that the pool holds `bytes` (rounded down to whole chunks), and places the
     /// experts' home points for the new size.  A shrink gives back the last chunks: their experts are evicted and
     /// their conversation blocks copied below (so read conversation_blocks again).  It is refused, changing nothing,
-    /// when an active conversation or the token minimum would not fit, and stops (having moved some blocks) when a
-    /// block has no room.
+    /// while a run is lent or when an active conversation or the token minimum would not fit, and stops (having moved
+    /// some blocks) when a block has no room.
     PoolResize resize(uint64_t bytes);
+    /// Lends the top `pages` pages of the pool (one run, inside the joined chunks at its top) for a prompt's buffers
+    /// until give_back.  Makes them free first: an expert there is copied into free pages elsewhere (above the
+    /// reserve, else in the reserve's free pages) while that leaves `keep_free` free pages besides what the
+    /// conversations' blocks there need, else evicted; a conversation's block there is copied elsewhere, evicting
+    /// experts as its growth would.  Refused, lending nothing (but keeping the moves made), when a run is lent already,
+    /// the joined chunks at the top are fewer pages, or a block has no room.
+    PoolLend lend(uint32_t pages, uint64_t keep_free);
+    /// Tells whether `lend(pages, ...)` may succeed: the joined chunks at the top hold them and the conversations'
+    /// blocks there fit elsewhere (a fixed region may still find no run long enough).
+    bool can_lend(uint32_t pages) const;
+    /// Frees the lent run; experts may take its pages at once.
+    void give_back();
+    /// Gets the pages of the lent run (0: none).
+    uint32_t lent_pages() const { return lent_pages_; }
     /// Changes the token limits; returns why not (changing nothing) or an empty string.
     std::string set_token_limits(int64_t min, int64_t max);
     /// Gives the conversations the regions of `layout` from now on, while the pool holds none (strata-q38 moves a
@@ -218,8 +250,8 @@ private:
         PageId take(uint32_t n, PageId end);
         void give(PageId first, uint32_t n);
     };
-    enum class RunUse : uint8_t { free, expert, conversation, hole };
-    /// Consecutive pages inside one chunk with one use.  A free run is as long as it can be: a run released next to
+    enum class RunUse : uint8_t { free, expert, conversation, hole, lent };
+    /// Consecutive pages with one use, inside one chunk or joined ones.  A free run is as long as it can be: a run released next to
     /// a free one joins it.
     struct Run {
         uint32_t pages = 0;
@@ -241,8 +273,13 @@ private:
     };
 
     bool is_fixed(size_t region) const { return layout_.regions[region].kind == RegionKind::fixed; }
-    bool is_chunk_start(PageId page) const { return page % pages_per_chunk_ == 0; }
+    /// Tells whether `page` begins a chunk that is not joined to the one before, where every run must begin.
+    bool is_chunk_start(PageId page) const {
+        const size_t c = page / pages_per_chunk_;
+        return page % pages_per_chunk_ == 0 && (c >= joined_.size() || !joined_[c]);
+    }
     PageId page_count() const { return (PageId) (chunks_.size() * pages_per_chunk_); }
+    PageId get_top_stretch() const;
     std::string place_blocks();
     void place_homes();
     PoolResize shrink(size_t chunks);
@@ -253,6 +290,7 @@ private:
     uint64_t reserved_pages() const;
     void open_due();
     bool is_open(const Run& r) const { return r.open_at <= now_; }
+    PageId find_expert_place(uint32_t pages, uint64_t keep) const;
     PageId find_near(uint32_t pages, PageId home, PageId floor) const;
     PageId find_lowest(uint32_t pages, PageId end) const;
     PageId find_stretch(uint32_t pages, PageId end) const;
@@ -266,6 +304,11 @@ private:
     void list_expert(const Run& r, PageId first);
     void unlist_expert(const Run& r, PageId first);
     void release(PageId first, uint64_t open_at);
+    void claim_free(PageId from, PageId end);
+    void release_lent(PageId from, PageId end);
+    bool is_lending(PageId first) const;
+    /// Gets the pages conversations' blocks hold in run `r` (a block's run, or a hole's used pages).
+    static uint32_t get_block_pages(const Run& r) { return r.use == RunUse::hole ? r.pages - r.room.pages : r.pages; }
     void index_free(Runs::iterator it);
     void unindex_free(Runs::iterator it);
     Runs::iterator get_run_at(PageId page);
@@ -279,6 +322,12 @@ private:
     uint32_t smallest_block_ = UINT32_MAX;   ///< the pages of the smallest block of a growing region
     uint32_t smallest_expert_ = 0;           ///< the pages of the ranking's smallest expert (0: no ranking)
     std::vector<void*> chunks_;
+    std::vector<bool> joined_;   ///< per chunk: it starts where the previous one ended
+    PageId lent_first_ = no_page;
+    uint32_t lent_pages_ = 0;
+    /// While `lend` clears a run: its first page, so that a block moved out takes no hole of the run (no_page:
+    /// not lending)
+    PageId lending_from_ = no_page;
     Runs runs_;   ///< tiles every chunk
     std::set<PageId> free_runs_;                          ///< every free run's first page
     std::set<std::pair<uint32_t, PageId>> open_runs_;     ///< the free runs open to experts, by (pages, first page)

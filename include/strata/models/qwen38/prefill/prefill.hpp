@@ -85,8 +85,17 @@ public:
     void set_session(core::SessionState& ss);
 
     /// With borrowed buffers: lay them out again for chunks of `chunk` tokens (at most `init`'s) in `borrow` - a
-    /// request lends only the slots its prompt needs.  The stream must be idle (between prompts).
-    bool relayout(int64_t chunk, void* borrow, uint64_t borrow_bytes, std::string& err);
+    /// request lends only the slots its prompt needs - and, with set_host_borrowed, the host buffers in `host`
+    /// (host_bytes_needed's bytes).  The stream must be idle (between prompts).
+    bool relayout(int64_t chunk, void* borrow, uint64_t borrow_bytes, std::string& err, void* host = nullptr,
+                  uint64_t host_bytes = 0);
+    /// Before `init`: the host buffers that grow with the chunk (the PLE rows' uploads, a layer split's hand-offs)
+    /// and the stager's ring come from `relayout`'s host region instead of page-locked allocations of their own, so
+    /// that they exist only while a prompt is read.  strata-q38 lends them from the RAM's page pool.
+    void set_host_borrowed(bool on) { host_borrowed_ = on; }
+    /// Host bytes `relayout` takes from its host region with set_host_borrowed for chunks of `chunk` tokens, on a
+    /// stage that hands its rows to another (`hand_off`) or not.
+    static uint64_t host_bytes_needed(int64_t chunk, bool hand_off);
     int64_t chunk() const;
 
     /// The share of the streamed experts' bytes DMA-able straight from pinned RAM (1 = all).  Sizes the streamed
@@ -339,6 +348,7 @@ private:
     bool lm_mid_ = false;
     bool lm_force_ = false;        ///< run_multi: the walk even for a short total
     bool lm_by_default_ = false;   ///< the walk is on because nothing was set (a wider VRAM margin, the measured super-chunk size)
+    bool host_borrowed_ = false;                     ///< set_host_borrowed (survives `reset`)
     int ring_room_ = 0;                              ///< set_ring_room (this instance's, and it survives `reset`)
     void* ring_room_base_ = nullptr;                 ///< set_ring_room_base: the bytes the room's slots are
     uint64_t ring_room_bytes_ = 0;

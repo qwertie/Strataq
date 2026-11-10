@@ -51,5 +51,6 @@
             padding: 0; text-decoration: underline; cursor: pointer; }
 
 .mem-bars [data-use="drafter_experts"] { background-color: var(--st-danger); }
+.mem-bars [data-use="prompt_buffers"] { background-color: color-mix(in srgb, var(--st-info) 50%, var(--st-danger)); }
 .mem-bars [data-use="redundant_experts"] { background-color: color-mix(in srgb, var(--st-accent) 50%, black); }
 .mem-conversations .mem-over-budget { color: var(--st-danger-text); }

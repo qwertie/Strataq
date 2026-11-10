@@ -1599,8 +1599,12 @@ bool Prefill::carve(size_t T, void* alloc) {
 }
 
 bool Prefill::relayout(int64_t chunk, void *borrow, uint64_t borrow_bytes,
-                       std::string &err) try {
+                       std::string &err, void *, uint64_t) try {
     Impl& m = *impl_;
+    if (host_borrowed_) {   // (the paged engines, which lend host buffers, are not built for SYCL)
+        err = "prefill: borrowed host buffers are not supported on SYCL";
+        return false;
+    }
     if (!m.borrowed || borrow == nullptr || chunk <= 0 || chunk > m.T_max) {
         err = "prefill: relayout needs borrowed buffers and a chunk of at most " + std::to_string(m.T_max);
         return false;

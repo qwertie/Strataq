@@ -79,6 +79,17 @@ void ExpertPages::want_missing() {
     blocked_at_free_ = UINT64_MAX;
 }
 
+uint8_t* ExpertPages::lend(uint64_t bytes, PoolLend& lend) {
+    const uint64_t page = pool_->page_bytes();
+    lend = pool_->lend((uint32_t) ((bytes + page - 1) / page), 0);
+    return lend.first == no_page ? nullptr : pool_->page_address(lend.first);
+}
+
+bool ExpertPages::can_lend(uint64_t bytes) const {
+    const uint64_t page = pool_->page_bytes();
+    return pool_->can_lend((uint32_t) ((bytes + page - 1) / page));
+}
+
 int32_t ExpertPages::get_slot(PageId page) const {
     if (cache_ == nullptr)
         return (int32_t) page;
@@ -92,6 +103,7 @@ bool ExpertPages::open_pool(ChunkMemory memory, uint64_t bytes, const StateLayou
                             const std::vector<ExpertKey>& ranking, std::string& err) {
     const uint64_t page = config.page_bytes;
     config.expert_bytes = blob_bytes;
+    config.join_chunks = memory.contiguous;
     memory_ = std::move(memory);
     n_expert_ = n_expert;
     max_experts_ = max_experts;
@@ -110,9 +122,10 @@ bool ExpertPages::open_pool(ChunkMemory memory, uint64_t bytes, const StateLayou
     hooks.alloc = [this](size_t n) -> void* { return alloc_chunk(n); };
     hooks.free = [this](void* chunk) { free_chunk((uint8_t*) chunk); };
     hooks.evicted = [this](ExpertKey key, PageId first) { on_evicted(key, first); };
-    hooks.copy = [this, page](PageId to, PageId from) {
-        return memory_.copy(pool_->page_address(to), pool_->page_address(from), page);
+    hooks.copy = [this, page](PageId to, PageId from, uint32_t pages) {
+        return memory_.copy(pool_->page_address(to), pool_->page_address(from), pages * page);
     };
+    hooks.relocated = [this](ExpertKey key, PageId to) { on_relocated(key, to); };
     now_ = hooks.now;
     t0_ = std::max<uint64_t>(now_(), rank_.size() + 1);
     try {
@@ -236,7 +249,7 @@ int32_t ExpertPages::admit_free(ExpertKey key) {
 uint8_t* ExpertPages::alloc_chunk(uint64_t bytes) {
     if (cache_ != nullptr && raw_.empty() && (pool_ == nullptr || pool_->report().total.pages == 0))
         return arena_;
-    const uint64_t page = pool_->page_bytes(), extra = cache_ != nullptr ? page : 0;
+    const uint64_t page = pool_->page_bytes(), extra = cache_ != nullptr && !memory_.contiguous ? page : 0;
     std::vector<uint8_t*> below;
     uint8_t* chunk = nullptr;
     for (int tries = 0; chunk == nullptr && tries < kChunkTries; ++tries) {
@@ -268,6 +281,15 @@ void ExpertPages::free_chunk(uint8_t* chunk) {
         memory_.free(it->second);
         raw_.erase(it);
     }
+}
+
+/// Tells the cache and the engine that a lend copied an expert to the pages from `to`.
+void ExpertPages::on_relocated(ExpertKey key, PageId to) {
+    const int32_t slot = get_slot(to);
+    if (cache_ != nullptr)
+        cache_->relocate(key.layer, key.expert, slot);
+    if (hooks_.moved)
+        hooks_.moved(key, slot);
 }
 
 /// Forgets an expert whose pages (from `first`) the pool gives to another use, and keeps it for `refill`.

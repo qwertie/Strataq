@@ -69,6 +69,9 @@ constexpr double kRefillBudgetMs = 10.0;
 /// chunk's end, so each chunk ends in a run too short for any expert: 0.36% of the Strix Halo's GPU pool in chunks of
 /// this size (docs/MEMORY_MANAGER_PLAN.md, M2f).
 constexpr uint64_t kChunkBytes = 256ull << 20;
+/// The smallest prompt chunk the engine lends buffers for, and the step between the chunks it tries
+/// (lend_prompt_buffers in paged_engine.cpp).
+constexpr int64_t kPromptChunkStep = 256;
 
 /// The paged engine's own options.
 struct PagedSettings {
@@ -127,19 +130,22 @@ void set_paged_runtime_env(const PagedSettings& s, bool hops_possible);
 /// its speed from its multiprocessors and clock (layer_ms); says the link on stderr after `program`.  Call before the
 /// card's pool takes the memory the measuring copies need.
 void measure_card(PagedCard& card, const std::string& program, uint64_t expert_bytes);
-/// Gets GPU `dev`'s chunk allocator. Disable `zeroed` only when the adapter initializes every page before use.
-strata::core::ChunkMemory get_gpu_chunk_memory(int dev, bool zeroed = true);
+/// Gets GPU `dev`'s allocator of chunks of `chunk_bytes` (get_chunk_bytes).  On a GPU with virtual memory (vmm.hpp)
+/// the chunks are mapped back to back in one address range as large as the GPU's memory (ChunkMemory::contiguous), so
+/// that a pool's runs may cross them; else each is an allocation of its own.  Disable `zeroed` only when the adapter
+/// initializes every page before use.
+strata::core::ChunkMemory get_gpu_chunk_memory(int dev, uint64_t chunk_bytes, bool zeroed = true);
 /// Gets the bytes a pool on GPU `dev` takes: `gpu_mib` (--gpu-mib), but no more than `room`; -1: `room` but no more
 /// than `most`.  `room` gets what the pool could take: get_gpu_room(dev, keep, 0).
 uint64_t get_gpu_pool_bytes(int dev, uint64_t keep, int64_t gpu_mib, uint64_t most, uint64_t& room);
 /// Gets the most bytes one conversation of `tokens` tokens in `layout` takes in pages of `page_bytes`: its regions'
 /// bytes and each region's last block, which it may fill only in part.
 uint64_t get_conversation_bytes(const strata::core::StateLayout& layout, int64_t tokens, uint64_t page_bytes);
-/// Gets the chunks' size of a pool of `pool_bytes` in pages of `page_bytes`: kChunkBytes, or the pool when smaller,
-/// in whole pages.
+/// Gets the chunks' size of a pool of `pool_bytes` in pages of `page_bytes`: kChunkBytes, or the pool when smaller, in
+/// whole pages and, with virtual memory, whole units of its granularity.
 uint64_t get_chunk_bytes(uint64_t pool_bytes, uint64_t page_bytes);
-/// Says on stderr after `program` what `card`'s open pool took: of `room` it could take, its chunks of `chunk_bytes`,
-/// its pages and the conversation tokens kept for the conversations.
+/// Says on stderr after `program` what `card`'s open pool took: of `room` it could take, its chunks of `chunk_bytes`
+/// (in one virtual range or not), its pages and the conversation tokens kept for the conversations.
 void say_gpu_pool(const std::string& program, const PagedCard& card, uint64_t room, uint64_t chunk_bytes);
 /// Gets the bytes the RAM's pool and its staging ring take: --ram-mib (`s`), by default get_ram_room(`headroom`) but
 /// no more than `most`.
@@ -156,14 +162,15 @@ std::vector<strata::core::ExpertKey> get_ram_ranking(const std::vector<strata::c
 /// is copied back to it (`copy_back`: --copy-back; auto by the speeds of copying from `gpu_bytes`, the start of
 /// `card`'s pool's first chunk, and of reading the SSD, measured here).  The pool takes --ram-mib, by default
 /// get_ram_room(`headroom`) but no more than every expert and its staging ring of `ring` buffers take; its
-/// conversations are `layout`'s, its pages `card`'s (get_ram_pool_config).  It opens empty: the engine's start-up
-/// fill brings in the experts in get_ram_ranking's order as far as they fit.  Says on stderr after `program` what it
-/// took.
+/// conversations are `layout`'s, its pages `card`'s (get_ram_pool_config), its chunks at least the `prompt_bytes`
+/// the model's prompt paths borrow from it at most (PagedModel::get_prompt_buffers).  It opens
+/// empty: the engine's start-up fill brings in the experts in get_ram_ranking's order as far as they fit.  Says on
+/// stderr after `program` what it took.
 bool open_ram_pool(const std::string& program, const PagedSettings& s, strata::core::ExpertSource& files,
                    uint64_t headroom, int ring, const strata::core::StateLayout& layout, const PagedCard& card,
                    const std::vector<uint64_t>& blob_bytes, int64_t n_expert,
-                   const std::vector<strata::core::ExpertKey>& profile,
-                   const uint8_t* gpu_bytes, strata::core::RamExperts& ram, bool& copy_back, std::string& err);
+                   const std::vector<strata::core::ExpertKey>& profile, const uint8_t* gpu_bytes,
+                   uint64_t prompt_bytes, strata::core::RamExperts& ram, bool& copy_back, std::string& err);
 
 /// Gets why the engine cannot decode with `s` on a model whose steps run at most `max_rows` rows (empty: it can).
 std::string get_step_settings_problem(const strata::spec::StepSettings& s, int max_rows);

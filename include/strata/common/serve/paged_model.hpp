@@ -125,6 +125,12 @@ struct PagedModelFacts {
     double cpu_expert_ms = 0;
 };
 
+/// The memory a prompt path borrows from the pools while it reads a prompt (PagedModel::get_prompt_buffers).
+struct PromptBuffers {
+    uint64_t device = 0;   ///< bytes from the pool of the card it runs on
+    uint64_t host = 0;     ///< bytes from the RAM's pool
+};
+
 /// A request as its conversation's model sees it (PagedModel::start_request).
 struct RequestStart {
     Sampling sampling;
@@ -266,6 +272,21 @@ public:
 
     /// Gets the maximum tokens per prompt piece between inspection and concurrent decode opportunities.
     virtual int64_t get_prompt_chunk() const = 0;
+    /// Gets the largest chunk a prompt is read in (--prefill: a ceiling), or 0 when the prompt path keeps buffers of
+    /// its own.  The engine reads each prompt in the largest chunk up to it whose buffers its pools can lend then.
+    virtual int64_t get_prompt_ceiling() const { return 0; }
+    /// Gets what `card`'s prompt path borrows to read `tokens` tokens in chunks of `chunk`; nothing when such a read
+    /// needs no buffers (Qwen3.8 reads a short prompt through its verify windows).
+    virtual PromptBuffers get_prompt_buffers(const PagedCard&, int64_t /*chunk*/, int64_t /*tokens*/) const {
+        return {};
+    }
+    /// Lays `card`'s prompt path out for chunks of `chunk` tokens in the lent `device` and `host` memory
+    /// (get_prompt_buffers' bytes; null where none); with `chunk` 0, waits until the path no longer reads them, as
+    /// they go back.  False (and `err`) when it cannot.
+    virtual bool lay_out_prompt(const PagedCard&, int64_t /*chunk*/, uint8_t* /*device*/, uint8_t* /*host*/,
+                                std::string&) {
+        return true;
+    }
     /// Called after each chunk of a prompt read, `n` tokens from `pos0`; false (and `err`) stops the read.
     using ChunkDone = std::function<bool(int64_t pos0, int64_t n, std::string& err)>;
     /// Reads `ids[from, from + n)` into the conversation of `parts`, calling `on_chunk` after each chunk; the drafter

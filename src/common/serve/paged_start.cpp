@@ -3,9 +3,12 @@
 #include "strata/common/serve/paged_engine.hpp"
 
 #include "strata/base/gpu/links.hpp"
+#include "strata/base/gpu/memory_info.hpp"
 #include "strata/base/gpu/on_device.hpp"
 #include "strata/base/gpu/runtime.hpp"
+#include "strata/base/gpu/vmm.hpp"
 #include "strata/base/platform/env.hpp"
+#include "strata/base/platform/memory_manager.hpp"
 #include "strata/common/experts/card_rules.hpp"
 #include "strata/common/experts/split_rules.hpp"
 #include "strata/common/serve/request.hpp"
@@ -16,6 +19,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
+#include <memory>
+#include <numeric>
 
 namespace strata::serve {
 
@@ -137,8 +142,46 @@ void measure_card(PagedCard& card, const std::string& program, uint64_t expert_b
     card.layer_ms = strata::program::split_rules::get_layer_ms(strata::core::get_card_speed(card.dev));
 }
 
-strata::core::ChunkMemory get_gpu_chunk_memory(int dev, bool zeroed) {
+strata::core::ChunkMemory get_gpu_chunk_memory(int dev, uint64_t chunk_bytes, bool zeroed) {
     strata::core::ChunkMemory memory;
+    memory.copy = [dev](uint8_t* to, const uint8_t* from, uint64_t n) {
+        const strata::core::OnDevice on(dev);
+        return strata::core::gpu_copy(to, from, (size_t) n);
+    };
+    const strata::core::OnDevice on(dev);
+    std::string name;
+    uint64_t total = 0, free = 0;
+    bool unified = false;
+    strata::core::read_gpu_memory(dev, name, total, free, unified);
+    auto range = std::make_shared<strata::core::VmmRange>();
+    const uint64_t granularity = strata::core::vmm_min_granularity();
+    if (granularity > 0 && chunk_bytes % granularity == 0 && range->reserve(total, chunk_bytes)) {
+        memory.contiguous = true;
+        memory.alloc = [dev, zeroed, range](uint64_t n) -> uint8_t* {   // the lowest chunk of the range not mapped
+            const strata::core::OnDevice on(dev);
+            int64_t i = 0;
+            while (i < range->chunks() && range->mapped(i))
+                ++i;
+            if (n != range->chunk_bytes() || i == range->chunks() ||
+                !range->map_range(i, i + 1, [] { return (strata::core::VmmChunk) 0; }))
+                return nullptr;
+            uint8_t* p = range->base() + (uint64_t) i * n;
+            if (zeroed && !(strata::core::gpu_memset_async(p, 0, (size_t) n, nullptr) &&
+                            strata::core::gpu_stream_synchronize(nullptr))) {
+                strata::core::vmm_chunk_free(range->unmap(i));
+                return nullptr;
+            }
+            strata::core::get_memory_manager().add(p, n, "gpu" + std::to_string(dev), {});
+            return p;
+        };
+        memory.free = [dev, range](uint8_t* p) {
+            const strata::core::OnDevice on(dev);
+            strata::core::get_memory_manager().remove(p);
+            const auto i = (int64_t) ((uint64_t) (p - range->base()) / range->chunk_bytes());
+            strata::core::vmm_chunk_free(range->unmap(i));
+        };
+        return memory;
+    }
     memory.alloc = [dev, zeroed](uint64_t n) {
         const strata::core::OnDevice on(dev);
         // Adapters initialize pages on use; touching free runs can page active weights out under WDDM.
@@ -148,10 +191,6 @@ strata::core::ChunkMemory get_gpu_chunk_memory(int dev, bool zeroed) {
     memory.free = [dev](uint8_t* p) {
         const strata::core::OnDevice on(dev);
         strata::core::gpu_free(p);
-    };
-    memory.copy = [dev](uint8_t* to, const uint8_t* from, uint64_t n) {
-        const strata::core::OnDevice on(dev);
-        return strata::core::gpu_copy(to, from, (size_t) n);
     };
     return memory;
 }
@@ -169,17 +208,21 @@ uint64_t get_conversation_bytes(const strata::core::StateLayout& layout, int64_t
 }
 
 uint64_t get_chunk_bytes(uint64_t pool_bytes, uint64_t page_bytes) {
-    return std::max<uint64_t>(std::min(kChunkBytes, pool_bytes) / page_bytes, 1) * page_bytes;
+    const uint64_t granularity = strata::core::vmm_min_granularity();
+    const uint64_t unit = granularity > 0 ? std::lcm(page_bytes, granularity) : page_bytes;
+    return std::max<uint64_t>(std::min(kChunkBytes, pool_bytes) / unit, 1) * unit;
 }
 
 void say_gpu_pool(const std::string& program, const PagedCard& card, uint64_t room, uint64_t chunk_bytes) {
     const strata::core::PagePool& pool = card.experts.pool();
     std::fprintf(stderr, "%s: the page pool of %s (layers %lld-%lld): %.2f GiB (of %.2f GiB it could take) in chunks "
-                         "of %.0f MiB, pages of %llu bytes, for the experts and the conversations, %lld tokens of it "
+                         "of %.0f MiB%s, pages of %llu bytes, for the experts and the conversations, %lld tokens of it "
                          "kept for the conversations\n",
                  program.c_str(), card.id.c_str(), (long long) card.lb, (long long) card.le - 1,
                  (double) pool.report().total.bytes / 1073741824.0, (double) room / 1073741824.0,
-                 (double) chunk_bytes / 1048576.0, (unsigned long long) pool.page_bytes(),
+                 (double) chunk_bytes / 1048576.0,
+                 card.experts.is_contiguous() ? " mapped back to back in one virtual range" : "",
+                 (unsigned long long) pool.page_bytes(),
                  (long long) pool.tokens_min());
 }
 
@@ -212,14 +255,18 @@ bool open_ram_pool(const std::string& program, const PagedSettings& s, strata::c
                    uint64_t headroom, int ring, const strata::core::StateLayout& layout, const PagedCard& card,
                    const std::vector<uint64_t>& blob_bytes, int64_t n_expert,
                    const std::vector<strata::core::ExpertKey>& profile, const uint8_t* gpu_bytes,
-                   strata::core::RamExperts& ram, bool& copy_back, std::string& err) {
+                   uint64_t prompt_bytes, strata::core::RamExperts& ram, bool& copy_back, std::string& err) {
     uint64_t every = 0;
     for (const uint64_t b : blob_bytes)
         every += b * (uint64_t) n_expert;
     const uint64_t bytes = get_ram_pool_bytes(
         s, headroom, every + (uint64_t) ring * *std::max_element(blob_bytes.begin(), blob_bytes.end()));
     const auto open_t0 = std::chrono::steady_clock::now();
-    if (!ram.open(files, bytes, ring, layout, get_ram_pool_config(card), blob_bytes, n_expert,
+    strata::core::PagePoolConfig config = get_ram_pool_config(card);
+    // (a lent run stays inside one chunk: the RAM's chunks are separate allocations)
+    config.chunk_bytes = std::max(config.chunk_bytes, (prompt_bytes + config.page_bytes - 1) / config.page_bytes *
+                                                          config.page_bytes);
+    if (!ram.open(files, bytes, ring, layout, config, blob_bytes, n_expert,
                   get_ram_ranking(profile, blob_bytes, n_expert), err))
         return false;
     const double open_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - open_t0).count();

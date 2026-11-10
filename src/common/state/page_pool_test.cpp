@@ -3,10 +3,11 @@
 // point and evicting one of their size, an expert replaced in place, conversations filling the holes of experts they
 // evict and giving them back whole, the allocated and fragmented pages, the token limits and the experts' overflow
 // into the reserve, the hysteresis, growing and shrinking, the report, long random trading without fragmentation, a
-// new layout and expert ranking (a layer split's cut moved), and a pool of two million pages (Qwen3.8 IQ3_S's experts
-// in pages of 25,600 bytes).
+// new layout and expert ranking (a layer split's cut moved), joined chunks (one virtual range) and the run a prompt
+// borrows from the top (lend), and a pool of two million pages (Qwen3.8 IQ3_S's experts in pages of 25,600 bytes).
 #include "strata/common/state/page_pool.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -56,16 +57,29 @@ PagePoolConfig get_config(int64_t tokens_min = 0, int64_t tokens_max = INT64_MAX
     return config;
 }
 
+/// Gets get_config's settings for chunks that are one range (PagePoolConfig::join_chunks).
+PagePoolConfig get_joined_config() {
+    PagePoolConfig config = get_config();
+    config.join_chunks = true;
+    return config;
+}
+
 /// A pool of `chunks` chunks (12 pages by default) on host memory, and what it called.
 struct Fixture {
     uint64_t clock = 0;
     int chunks = 0, max_chunks = 100;
     std::vector<ExpertKey> evicted;
+    std::vector<std::pair<ExpertKey, PageId>> relocated;
+    /// With join_chunks, the chunks' buffer: they are back to back in it (one virtual range), else each is an
+    /// allocation of its own.  (Before `pool`, which gives its chunks back when it goes.)
+    std::vector<uint8_t> range;
     PagePool pool;
 
     explicit Fixture(PagePoolConfig config = get_config(), const StateLayout& layout = get_layout(), int n = 3)
-        : pool(layout, config, get_hooks()) {
-        check(pool.resize(n * config.chunk_bytes).refusal.empty() && chunks == n, "the pool takes its chunks");
+        : range(config.join_chunks ? 64 * config.chunk_bytes : 0), pool(layout, config, get_hooks()) {
+        check(pool.resize(n * config.chunk_bytes).refusal.empty() &&
+                  pool.report().total.bytes == n * config.chunk_bytes,
+              "the pool takes its chunks");
     }
     PagePoolHooks get_hooks() {
         PagePoolHooks hooks;
@@ -73,18 +87,20 @@ struct Fixture {
             if (chunks == max_chunks)
                 return nullptr;
             ++chunks;
-            return std::calloc(1, bytes);
+            return range.empty() ? std::calloc(1, bytes) : range.data() + (chunks - 1) * bytes;
         };
         hooks.free = [this](void* p) {
             --chunks;
-            std::free(p);
+            if (range.empty())
+                std::free(p);
         };
         hooks.now = [this] { return clock; };
         hooks.evicted = [this](ExpertKey key, PageId) { evicted.push_back(key); };
-        hooks.copy = [this](PageId to, PageId from) {
-            std::memcpy(pool.page_address(to), pool.page_address(from), page);
+        hooks.copy = [this](PageId to, PageId from, uint32_t pages) {
+            std::memmove(pool.page_address(to), pool.page_address(from), pages * page);
             return true;
         };
+        hooks.relocated = [this](ExpertKey key, PageId to) { relocated.emplace_back(key, to); };
         return hooks;
     }
     /// Adds experts 0 to `count` - 1 of layer 0, of one page each, expert n at clock time n.
@@ -453,6 +469,112 @@ void test_shrink_refusals() {
     check(f.pool.resize(2 * chunk).refusal.empty() && f.chunks == 2, "once removed the pool shrinks");
 }
 
+/// Tells whether a conversation's blocks of a region stay out of pages [from, end).
+bool is_outside(const Pages& blocks, PageId from, PageId end) {
+    return std::none_of(blocks.begin(), blocks.end(), [&](PageId b) { return b >= from && b < end; });
+}
+
+/// Joined chunks (one virtual range): runs cross their bounds, and a shrink cuts a run across the new end.
+void test_joined() {
+    Fixture f(get_joined_config(), get_layout(), 4);   // 16 pages in one range
+    check(f.pool.page_address(4) == f.pool.page_address(3) + page && f.pool.lend(10, 0).first == 6,
+          "joined chunks are one run: a run may cross their bounds");
+    f.pool.give_back();
+    check(f.pool.grow_conversation(1, 20).empty() && f.pool.grow_conversation(2, 1).empty() &&
+              f.pool.conversation_blocks(2, 0) == Pages{7},
+          "a fixed region across a chunk's bound");
+    f.pool.remove_conversation(1);
+    check(f.pool.resize(2 * chunk).refusal.empty() && f.chunks == 2 && f.pool.conversation_blocks(2, 0) == Pages{0} &&
+              f.pool.report().free.pages == 5,
+          "a shrink moves a block across the new end and cuts the free run across it");
+    check(f.pool.resize(4 * chunk).refusal.empty() && f.pool.report().free.pages == 13, "and grows again");
+}
+
+/// PagePool::lend: a free run at the top as it is, else experts moved (leaving the pages the prompt's K/V needs) or
+/// evicted, stray conversation blocks moved, never across chunks that are not joined, everything back after give_back.
+void test_lend() {
+    {   // a free run, which nothing else takes while it is lent
+        Fixture f(get_config(), get_layout(), 3);   // three chunks of 4 pages, not joined
+        const PoolLend l = f.pool.lend(3, 0);
+        check(l.first == 9 && l.refusal.empty() && l.experts_moved == 0 && f.pool.lent_pages() == 3 &&
+                  f.pool.report().lent.pages == 3 && f.pool.report().free.pages == 9,
+              "a free run at the pool's top is lent as it is");
+        check(f.pool.lend(1, 0).refusal == "a run is lent already" && !f.pool.can_lend(1) &&
+                  f.pool.resize(2 * chunk).refusal.find("lent") != std::string::npos,
+              "one run at a time, and no shrink while it is lent");
+        check(f.pool.grow_conversation(1, 28).empty() && is_outside(f.pool.conversation_blocks(1, 1), 9, 12) &&
+                  !f.pool.grow_conversation(1, 29).empty(),
+              "a growing conversation takes every page but the lent ones");
+        uint64_t prompt = 0;
+        for (const MemoryBlock& b : f.pool.get_memory_blocks())
+            prompt += b.name.category == "prompt_buffers" ? b.bytes : 0;
+        check(prompt == 3 * page, "the lent pages are their own use in the memory report");
+        f.pool.give_back();
+        check(f.pool.lent_pages() == 0 && f.pool.report().free.pages == 3 && f.pool.grow_conversation(1, 32).empty(),
+              "given back, the pages are free again");
+    }
+    for (const uint64_t keep : {0, 1}) {   // an expert there moves while the free pages left are enough
+        Fixture f(get_joined_config(), get_layout(), 2);   // 8 pages in one range
+        check(f.pool.add_expert({0, 0}, 2) == 4 && f.pool.add_expert({1, 0}, 2) == 2,
+              "experts outside the ranking sit round the middle: pages 2 to 5");
+        std::memset(f.pool.page_address(4), 0x5a, 2 * page);
+        const PoolLend l = f.pool.lend(4, keep);   // pages 4 to 7
+        check(l.first == 4 && f.pool.report().lent.pages == 4, "the run is the pool's top");
+        if (keep == 0)
+            check(l.experts_moved == 1 && f.pool.find_expert({0, 0}) == 0 && f.relocated.size() == 1 &&
+                      f.relocated[0].second == 0 && f.pool.page_address(1)[page - 1] == 0x5a && f.evicted.empty(),
+                  "an expert in the run is copied to free pages elsewhere, and its owner told");
+        else
+            check(l.experts_evicted == 1 && get_experts(f.evicted) == std::vector<int>{0} && f.relocated.empty() &&
+                      f.pool.report().free.pages == 2,
+                  "it is evicted when moving it would leave fewer free pages than the prompt's K/V needs");
+        f.pool.give_back();
+        check(f.pool.report().lent.pages == 0 && f.pool.report().free.pages == (keep == 0 ? 4u : 6u) &&
+                  (keep == 0 || f.pool.add_expert({0, 0}, 2) != no_page),
+              "given back, the pages are free again and an evicted expert comes back");
+    }
+    {   // a conversation's blocks there move out, keeping their contents
+        Fixture f(get_joined_config(), get_layout(), 3);   // 12 pages in one range
+        check(f.pool.grow_conversation(1, 24).empty() && f.pool.grow_conversation(2, 4).empty() &&
+                  f.pool.conversation_blocks(2, 0) == Pages{8} && f.pool.conversation_blocks(2, 1) == Pages{10},
+              "a conversation's pages at the pool's top");
+        f.pool.remove_conversation(1);
+        std::memset(f.pool.page_address(10), 0x33, page);
+        const PoolLend l = f.pool.lend(3, 0);
+        check(l.first == 9 && l.moved == std::vector<ConversationId>{2} &&
+                  f.pool.conversation_blocks(2, 0) == Pages{0} && f.pool.conversation_blocks(2, 1) == Pages{2} &&
+                  f.pool.page_address(2)[0] == 0x33,
+              "stray blocks (a fixed region reaching into the run too) are copied out of it");
+    }
+    {   // a block in a hole there moves out, and the hole goes
+        Fixture f(get_joined_config(), get_kv_layout(), 3);   // 12 pages in one range
+        for (int n = 0; n < 6; ++n)
+            f.pool.add_expert({0, n}, 2);
+        check(f.pool.find_expert({0, 5}) == 10 && f.pool.report().free.pages == 0, "six experts fill the pool");
+        f.clock = 10;
+        for (int n = 0; n < 5; ++n)
+            f.pool.use_expert({0, n});
+        check(f.pool.grow_conversation(1, 4).empty() && f.pool.conversation_blocks(1, 0) == Pages{10},
+              "a conversation's block in the least-used expert's hole, at the pool's top");
+        const PoolLend l = f.pool.lend(2, 0);
+        check(l.first == 10 && l.moved == std::vector<ConversationId>{1} &&
+                  f.pool.conversation_blocks(1, 0) == Pages{0} && get_experts(f.evicted) == std::vector<int>{5, 4},
+              "its block moves to the hole of another least-used expert, outside the run");
+    }
+    {   // refusals: a run across chunks that are not joined, and blocks with nowhere to go
+        Fixture f(get_config(), get_layout(), 3);
+        check(!f.pool.can_lend(5) && f.pool.lend(5, 0).refusal.find("in one piece") != std::string::npos &&
+                  f.pool.lend(4, 0).first == 8,
+              "a lent run stays inside the top chunk when the chunks are not joined");
+        f.pool.give_back();
+        Fixture g(get_joined_config(), get_layout(), 2);
+        check(g.pool.grow_conversation(1, 24).empty() && g.pool.report().free.pages == 0, "a conversation fills it");
+        check(!g.pool.can_lend(3) && !g.pool.lend(3, 0).refusal.empty() && g.pool.lent_pages() == 0 &&
+                  g.pool.report().free.pages == 0,
+              "a run whose blocks have nowhere to go is refused, changing nothing");
+    }
+}
+
 void test_report() {
     Fixture f;
     f.pool.grow_conversation(1, 5);
@@ -707,6 +829,8 @@ int main() {
     test_resize();
     test_shrink_refusals();
     test_report();
+    test_joined();
+    test_lend();
     test_block_runs();
     test_random_trading();
     test_many_pages();

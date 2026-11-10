@@ -10,10 +10,11 @@ namespace strata::core {
 
 bool vmm_available() { return false; }
 uint64_t vmm_granularity() { return 0; }
-VmmChunk vmm_chunk_new() { return 0; }
+uint64_t vmm_min_granularity() { return 0; }
+VmmChunk vmm_chunk_new(uint64_t) { return 0; }
 void vmm_chunk_free(VmmChunk) {}
 
-bool VmmRange::reserve(uint64_t) { return false; }
+bool VmmRange::reserve(uint64_t, uint64_t) { return false; }
 void VmmRange::release() {
     h_.clear();
     base_ = 0;

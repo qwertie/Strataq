@@ -63,6 +63,8 @@ const std::string kProgram = "strata-q38";
 constexpr double kCpuExpertMs = 0.035;
 /// With drafting, the verify windows' graphs kept for the most recent row layouts (the old engine's --batch-mtp).
 constexpr size_t kWindowGraphs = 64;
+/// The largest chunk a prompt is read in with `--prefill auto` or no --prefill: the old engine's auto ceiling.
+constexpr int64_t kPromptCeiling = 8192;
 
 /// Qwen3.8's side of one of the engine's cards (PagedCard of the same index): its prompt path and verify windows,
 /// which hand their rows to the next card's.  Card 0 runs on the Model's own cache and session and the Conversation's
@@ -216,6 +218,11 @@ public:
     }
     void forget_drafts(int session) override { drafter_->forget(session); }
     int64_t get_prompt_chunk() const override { return conv_.sp.chunk(); }
+    int64_t get_prompt_ceiling() const override { return m_.o.prefill_chunk; }
+    strata::serve::PromptBuffers get_prompt_buffers(const PagedCard& card, int64_t chunk,
+                                                    int64_t tokens) const override;
+    bool lay_out_prompt(const PagedCard& card, int64_t chunk, uint8_t* device, uint8_t* host,
+                        std::string& err) override;
     bool read_prompt(const PagedParts& parts, const std::vector<int64_t>& ids, int64_t from, int64_t n, bool drafting,
                      const ChunkDone& on_chunk, std::string& err) override;
     void set_step_histories(const std::vector<const std::vector<int32_t>*>& histories) override {
@@ -380,9 +387,13 @@ int run_paged_engine(int argc, char** argv) {
     o.kv_resident = 0;
     // strata-q38 does not pipeline verify windows across cards; 0 also keeps the drafter on the last card (mtp_first)
     o.pipeline_windows = 0;
-    // Paged caches cannot lend the contiguous expert arena that the prompt-buffer planner assumes.
+    // Paged caches cannot lend the contiguous expert arena that the prompt-buffer planner assumes; the engine lends
+    // the prompt paths their buffers from the page pools instead, for each prompt the largest chunk up to --prefill
+    // (a ceiling here) that they can lend then
     o.no_prefill_borrow = true;
-    if (o.prefill_chunk <= 0) o.prefill_chunk = 2048;   // open_pages leaves room for the prompt path's own buffers
+    if (o.prefill_auto || o.prefill_chunk <= 0)
+        o.prefill_chunk = kPromptCeiling;
+    o.prefill_auto = false;
     if (o.resident_budget > 0 && settings.ram_mib < 0)
         settings.ram_mib = (int64_t) (o.resident_budget >> 20);
     o.mmap_experts = true;
@@ -602,14 +613,19 @@ bool get_card_layout(const Model& m, const PagedCard& card, const ModelCard& mc,
 }
 
 /// Gets the GPU memory `card`'s pool leaves free besides what is allocated there: --vram-reserve-mib, and the drafter's
-/// head when the card runs it (has_drafter) and has not bound it.  Before the start allocates the card's prompt path
-/// (`started` false), also the prompt path's own buffers and the head, which the GPU's free memory still holds.
+/// head when the card runs it (has_drafter) and has not bound it.  Before the start binds the head (`started` false),
+/// also the head, which the GPU's free memory still holds.  (The prompt path's buffers are lent from the pool.)
 uint64_t get_gpu_keep(const Model& m, const ModelCard& card, bool started) {
     const uint64_t head = (card.stage != nullptr ? card.stage->head : m.native_head).row_bytes();
     return ((uint64_t) m.o.vram_reserve_mib << 20) +
-           (started ? 0 : strata::prefill::Prefill::bytes_needed_owned(m.g, *card.own, m.o.prefill_chunk,
-                                                                       m.srcp != nullptr)) +
            (has_drafter(m, card) && (!started || m.mtp.vram_bytes() == 0) ? m.mtp.bind_bytes(head, m.n_vocab) : 0);
+}
+
+/// Gets what card `mc`'s prompt path borrows to read in chunks of `chunk` tokens (Prefill::bytes_needed and
+/// host_bytes_needed); `hand_off`: the card hands its rows to a next one.
+strata::serve::PromptBuffers get_prompt_bytes(const Model& m, const ModelCard& mc, int64_t chunk, bool hand_off) {
+    return {strata::prefill::Prefill::bytes_needed(m.g, *mc.own, chunk, m.srcp != nullptr),
+            strata::prefill::Prefill::host_bytes_needed(chunk, hand_off)};
 }
 
 /// Gives card `k` its layers in its prompt path and verify windows (PagedCard::lb and le), as their stage of the layer
@@ -1384,12 +1400,29 @@ void PagedQwen::print_info(int slots, int spec) const {
                 slots > 0 ? (" batch_slots=" + std::to_string(slots) + " slot_cache=0").c_str() : "");
 }
 
+strata::serve::PromptBuffers PagedQwen::get_prompt_buffers(const PagedCard& card, int64_t chunk,
+                                                          int64_t tokens) const {
+    if (tokens <= m_.o.short_read && image_row_ptrs_.empty())   // (read through the verify windows)
+        return {};
+    return get_prompt_bytes(m_, cards_[card.index], chunk, card.index + 1 < cards_.size());
+}
+
+bool PagedQwen::lay_out_prompt(const PagedCard& card, int64_t chunk, uint8_t* device, uint8_t* host,
+                               std::string& err) {
+    strata::prefill::Prefill& sp = *cards_[card.index].sp;
+    if (chunk == 0)
+        return sp.idle(err);
+    const strata::serve::PromptBuffers b = get_prompt_bytes(m_, cards_[card.index], chunk,
+                                                             card.index + 1 < cards_.size());
+    return sp.relayout(chunk, device, b.device, err, host, b.host);
+}
+
 void PagedQwen::print_done(const strata::serve::RequestDone& d) const {
     // the fields of the old engine's DONE that this one has (no expert counts)
     print_response("DONE %lld %lld %.1f %.1f %s %lld %lld %lld 0 0 0 0 0.0 %lld 0 chunk=%lld experts_streamed=0\n",
                 (long long) d.produced, (long long) d.prompt, d.prompt_ms, d.decode_ms, d.finish,
                 (long long) d.guessed_right, (long long) d.guessed, (long long) d.resumed, (long long) d.read,
-                (long long) m_.o.prefill_chunk);
+                (long long) conv_.sp.chunk());
 }
 
 /// Gets why the cards of `o`'s layer split may not compute experts in hops, or an empty
@@ -1459,9 +1492,16 @@ bool open_pages(Model& m, PagedCard& card, ModelCard& mc, int64_t tokens_min, in
     mc.cache->set_expert_bytes((int64_t) strata::kernels::cpu::expert_layout().max_blob);
     strata::core::PagePoolConfig config;
     config.tokens_min = std::clamp<int64_t>(tokens_min, 0, m.o.max_context);
-    if (!mc.cache->open((int64_t) (chunk / page), m.g.n_layers, m.g.n_expert, (int64_t) page, err) ||
-        !card.experts.open(*mc.cache, strata::serve::get_gpu_chunk_memory(card.dev, false), pool_b, layout, config,
-                           blobs, m.g.n_expert, max_experts, ranking, err))
+    strata::core::ChunkMemory memory = strata::serve::get_gpu_chunk_memory(card.dev, chunk, false);
+    // with virtual memory the cache's arena is the range's first chunk, so that the pool's other chunks follow it
+    uint8_t* arena = memory.contiguous ? memory.alloc(chunk) : nullptr;
+    if (memory.contiguous && arena == nullptr) {
+        err = "no room for the page pool's first chunk";
+        return false;
+    }
+    if (!mc.cache->open((int64_t) (chunk / page), m.g.n_layers, m.g.n_expert, (int64_t) page, err, arena) ||
+        !card.experts.open(*mc.cache, std::move(memory), pool_b, layout, config, blobs, m.g.n_expert, max_experts,
+                           ranking, err))
         return false;
     strata::serve::say_gpu_pool(kProgram, card, room, chunk);
     return true;
@@ -1478,10 +1518,13 @@ bool open_ram(Model& m, const PagedCards& cards, const ModelCards& model_cards, 
         profile.push_back({l, e});
     strata::core::StateLayout layout;
     const int ring = strata::kernels::kVerifyMaxT * (int) m.K;   // the experts of one layer of a step
+    uint64_t prompt = 0;   // every card's prompt path's host buffers
+    for (size_t k = 0; k < model_cards.size(); ++k)
+        prompt += get_prompt_bytes(m, model_cards[k], m.o.prefill_chunk, k + 1 < model_cards.size()).host;
     return get_card_layout(m, cards.back(), model_cards.back(), 0, m.g.n_layers, layout, err) &&
            strata::serve::open_ram_pool(kProgram, s, m.src, m.o.resident_headroom, ring, layout, cards[0],
-                                        get_blob_bytes(m), m.g.n_expert, profile, m.xcache.device_slot(0), ram,
-                                        copy_back, err);
+                                        get_blob_bytes(m), m.g.n_expert, profile, m.xcache.device_slot(0), prompt,
+                                        ram, copy_back, err);
 }
 
 /// Gets why strata-q38 cannot run the loaded model `m` (empty: it can).
@@ -1511,20 +1554,31 @@ bool init_card_paths(Model& m, Conversation& conv, PagedCards& cards, ModelCards
         mc.hand_in = k == 0 ? nullptr : hand[k - 1];
         mc.hand_out = k + 1 == n ? nullptr : hand[k];
         set_stage(cards, model_cards, k);
+        // its buffers are lent for each prompt and laid out then (lay_out_prompt); `init` writes none of them, so
+        // the pool's first page stands in for them until the first prompt
+        mc.sp->set_host_borrowed(true);
+        const strata::core::OnDevice on(card.dev);
+        uint8_t* stand_in = card.experts.pool().page_address(0);
+        const uint64_t bytes = get_prompt_bytes(m, mc, o.prefill_chunk, k + 1 < n).device;
+        const bool ok = k == 0 ? conv.init_prompt(m, m.ss, stand_in, bytes, err)
+                               : mc.sp->init(mc.stage->wt, m.g, *mc.own, m.srcp, mc.cache, m.host_res.data(),
+                                             o.prefill_chunk, mc.cs, err, stand_in, bytes);
+        if (!ok) {
+            err = card.id + "'s prompt path: " + err;
+            return false;
+        }
         if (k == 0)
             break;
         const GpuStage& st = *mc.stage;
-        const strata::core::OnDevice on(card.dev);
-        if (!mc.sp->init(st.wt, m.g, *mc.own, m.srcp, mc.cache, m.host_res.data(), o.prefill_chunk, mc.cs, err) ||
-            !mc.ver->init(st.wt, m.g, *mc.own, m.get_verify_hits(st), st.head.loaded() ? &st.head : nullptr, o.spec,
+        if (!mc.ver->init(st.wt, m.g, *mc.own, m.get_verify_hits(st), st.head.loaded() ? &st.head : nullptr, o.spec,
                           err)) {
-            err = card.id + "'s prompt path or windows: " + err;
+            err = card.id + "'s windows: " + err;
             return false;
         }
         mc.ver->set_split(o.spec_split);
         mc.ver->set_pcie_mode(get_pcie_mode_code(o));
     }
-    if (!conv.init_prompt(m, m.ss, nullptr, 0, err) || !conv.init_decode(m, m.ss, o.spec, err))
+    if (!conv.init_decode(m, m.ss, o.spec, err))
         return false;
     if (n == 1)
         return true;

@@ -704,6 +704,37 @@ struct Alloc {
     }
 };
 
+/// Gets the stager's host copy threads (D-5): 32 for experts read from files (`files`: page faults on the SSD need
+/// many reads in flight), else 2 to 4 by the CPU's cores; STRATA_STAGER_THREADS wins.
+int get_stager_threads(bool files) {
+    const char* stv = std::getenv("STRATA_STAGER_THREADS");
+    const int hw = (int) std::thread::hardware_concurrency();
+    return stv ? std::clamp(std::atoi(stv), 1, 32) : files ? 32 : std::max(2, std::min(4, hw / 4));
+}
+
+/// Gets the stager ring's buffers (D-5): four a thread for experts read from files, else 16; STRATA_STAGER_RING wins.
+int get_stager_ring(bool files) {
+    if (const char* v = std::getenv("STRATA_STAGER_RING"))
+        return std::clamp(std::atoi(v), 2, 256);
+    return files ? 4 * get_stager_threads(true) : 16;
+}
+
+/// Takes from `o` (count_only: counts) the host buffers a borrowed layout has for chunks of `T` tokens
+/// (Prefill::set_host_borrowed): the PLE rows' two upload buffers (`ple`), a layer split's two hand-offs (`hand`,
+/// when `hand_off`) and the stager ring's `ring` blobs (`blobs`, when not null).
+bool take_host_buffers(Alloc& o, size_t T, bool hand_off, int ring, float** ple, float** hand,
+                       std::vector<uint8_t*>* blobs) {
+    bool ok = true;
+    for (int b = 0; b < 2; ++b)
+        ple[b] = o.take<float>(T * N, ok);
+    for (int b = 0; hand_off && b < 2; ++b)
+        hand[b] = o.take<float>(T * D, ok);
+    for (int i = 0; i < ring; ++i)
+        if (uint8_t* blob = o.take<uint8_t>((size_t) MAXBLOB(), ok); blobs != nullptr)
+            (*blobs)[(size_t) i] = blob;
+    return ok;
+}
+
 }  // namespace
 
 // Step 4 of the prompt-speed plan: the experts the arena could not pin (a third of the streamed ones on IQ3_S) are
@@ -740,23 +771,27 @@ struct Stager {
     std::condition_variable cv;
     std::vector<std::thread> threads;
     int device = 0;
+    /// The buffers are the caller's (Prefill::set_host_borrowed): Prefill::relayout places them in its host region,
+    /// and nothing here allocates or frees them
+    bool borrowed = false;
 
     bool init(size_t blob_bytes, int nthreads) {
-        if (const char* v = std::getenv("STRATA_STAGER_RING")) kRing = std::clamp(std::atoi(v), 2, 256);
         buf.assign((size_t) kRing, nullptr);
         pinned.assign((size_t) kRing, 0);
         dma_done.assign((size_t) kRing, nullptr);
         pageable.resize(kRing);
         for (int i = 0; i < kRing; ++i) {
-            pinned[i] = !force_pageable() && strata::core::allocate_host((void**) &buf[i], blob_bytes,
-                cudaHostAllocDefault,
-                {"other", "Device allocations", "Prompt processing"}) == cudaSuccess;
-            if (!pinned[i]) {
-                cudaGetLastError();
-                pageable[(size_t) i].resize(blob_bytes);
-                buf[i] = pageable[(size_t) i].data();
-                core::get_memory_manager().add(buf[i], blob_bytes, "ram",
-                    {"other", "Prompt processing", "Pageable expert staging"});
+            if (!borrowed) {
+                pinned[i] = !force_pageable() && strata::core::allocate_host((void**) &buf[i], blob_bytes,
+                    cudaHostAllocDefault,
+                    {"other", "Device allocations", "Prompt processing"}) == cudaSuccess;
+                if (!pinned[i]) {
+                    cudaGetLastError();
+                    pageable[(size_t) i].resize(blob_bytes);
+                    buf[i] = pageable[(size_t) i].data();
+                    core::get_memory_manager().add(buf[i], blob_bytes, "ram",
+                        {"other", "Prompt processing", "Pageable expert staging"});
+                }
             }
             if (cudaEventCreateWithFlags(&dma_done[i], stager_sleep() ? (cudaEventDisableTiming | cudaEventBlockingSync)
                                                                       : cudaEventDisableTiming) != cudaSuccess) return false;
@@ -781,12 +816,15 @@ struct Stager {
         for (auto& t : threads) t.join();
         for (int i = 0; i < kRing; ++i) {
             if (dma_done[i]) cudaEventDestroy(dma_done[i]);
+            if (borrowed)
+                continue;
             if (buf[i] && pinned[i])
                 strata::core::release_host(buf[i]);
             else
                 core::get_memory_manager().remove(buf[i]);
         }
     }
+
     void work() {
         cudaSetDevice(device);
         uint32_t seen = 0;
@@ -1430,16 +1468,18 @@ void Prefill::release() {
         if (impl_->used[i]) cudaEventDestroy(impl_->used[i]);
     }
     for (int b = 0; b < 2; ++b) {
-        if (impl_->hand[b])
+        if (impl_->hand[b] && !host_borrowed_)
             strata::core::release_host(impl_->hand[b]);
         if (impl_->hand_done[b]) cudaEventDestroy(impl_->hand_done[b]);
         for (cudaEvent_t& e : impl_->hand_ev[b])
             if (e) cudaEventDestroy(e);
         if (impl_->ple_copied[b]) cudaEventDestroy(impl_->ple_copied[b]);
-        if (impl_->ple_emb_host[b] && impl_->ple_pageable[b].empty())
-            strata::core::release_host(impl_->ple_emb_host[b]);
-        else
-            core::get_memory_manager().remove(impl_->ple_emb_host[b]);
+        if (!host_borrowed_) {   // (a borrowed buffer is in relayout's host region, the caller's)
+            if (impl_->ple_emb_host[b] && impl_->ple_pageable[b].empty())
+                strata::core::release_host(impl_->ple_emb_host[b]);
+            else
+                core::get_memory_manager().remove(impl_->ple_emb_host[b]);
+        }
         if (b == 0 && impl_->ple_raw_dev) {
             (void) strata::core::release_device(impl_->ple_raw_dev);
             impl_->ple_raw_dev = nullptr;
@@ -1890,7 +1930,7 @@ bool Prefill::init(const core::WeightTable& wt, const core::ModelGeometry& g, co
     }
     // the CPU share's staged-chunk limit, before the ring is sized below (a caller that sizes loans first armed it)
     arm_cpu_share(cpu_pool_ != nullptr);
-    for (int b = 0; next_ != nullptr && b < 2; ++b)
+    for (int b = 0; next_ != nullptr && !host_borrowed_ && b < 2; ++b)
         if (!m.hand[b] && strata::core::allocate_host((void**) &m.hand[b], (size_t) chunk * D * 4,
             cudaHostAllocPortable,
             {"other", "Device allocations", "Prompt processing"}) != cudaSuccess) {
@@ -1930,7 +1970,6 @@ bool Prefill::init(const core::WeightTable& wt, const core::ModelGeometry& g, co
     }
     if (!m.stager) {
         m.stager = std::make_unique<Stager>();
-        const int hw = (int) std::thread::hardware_concurrency();
         const char* stv = std::getenv("STRATA_STAGER_THREADS");   // D-5: the host copy threads of unpinned blobs
         // A GGUF read in place (UD-Q4_K_XL beyond its RAM budget): most of a chunk's blobs are page faults on the
         // SSD, so the copies need many reads in flight - 32 threads and a 128-deep ring read a 4K chunk in 29 s
@@ -1950,8 +1989,9 @@ bool Prefill::init(const core::WeightTable& wt, const core::ModelGeometry& g, co
                 std::fprintf(stderr, "prefill: the GGUF experts are %.0f%% in the page cache; the stager takes the RAM profile\n", warm * 100.0);
             }
         }
-        const int threads = stv ? std::clamp(std::atoi(stv), 1, 32) : files ? 32 : std::max(2, std::min(4, hw / 4));
-        if (files && std::getenv("STRATA_STAGER_RING") == nullptr) m.stager->kRing = 4 * threads;
+        const int threads = get_stager_threads(files);
+        m.stager->kRing = get_stager_ring(files);
+        m.stager->borrowed = host_borrowed_;
         // pp-opt: with files, each thread claims runs of neighbouring blobs and reads them as one request (copy_blobs);
         // STRATA_STAGER_BATCH=1 is the A/B arm (one blob per request, as before)
         {
@@ -2006,7 +2046,7 @@ bool Prefill::init(const core::WeightTable& wt, const core::ModelGeometry& g, co
     }
     pf_mark("init: routing tables (pinned, mapped)", tr_last);
     for (int b = 0; b < 2; ++b) {
-        if (!m.ple_emb_host[b] &&
+        if (!host_borrowed_ && !m.ple_emb_host[b] &&
             (force_pageable() || strata::core::allocate_host((void**) &m.ple_emb_host[b], (size_t) T * N * 4,
                 cudaHostAllocDefault,
                 {"other", "Device allocations", "Prompt processing"}) != cudaSuccess)) {
@@ -2256,7 +2296,8 @@ bool Prefill::carve(size_t T, void* alloc) {
     return ok;
 }
 
-bool Prefill::relayout(int64_t chunk, void* borrow, uint64_t borrow_bytes, std::string& err) {
+bool Prefill::relayout(int64_t chunk, void* borrow, uint64_t borrow_bytes, std::string& err, void* host,
+                       uint64_t host_bytes) {
     Impl& m = *impl_;
     if (m.borrow_spill) {
         err = "prefill: a hybrid borrowed/owned layout cannot be changed between requests";
@@ -2291,7 +2332,26 @@ bool Prefill::relayout(int64_t chunk, void* borrow, uint64_t borrow_bytes, std::
               std::to_string(o.failed_bytes >> 20) + " MiB)";
         return false;
     }
+    if (host_borrowed_) {
+        Alloc h;
+        h.base = (uint8_t*) host;
+        h.cap = host == nullptr ? 0 : host_bytes;
+        if (!take_host_buffers(h, (size_t) chunk, next_ != nullptr, m.stager->kRing, m.ple_emb_host, m.hand,
+                               &m.stager->buf)) {
+            err = "prefill: the host buffers for a chunk of " + std::to_string(chunk) + " tokens do not fit";
+            return false;
+        }
+    }
     return true;
+}
+
+uint64_t Prefill::host_bytes_needed(int64_t chunk, bool hand_off) {
+    Alloc o;
+    o.count_only = true;
+    float* unused[2] = {};
+    (void) take_host_buffers(o, (size_t) chunk, hand_off, std::max(get_stager_ring(true), get_stager_ring(false)),
+                             unused, unused, nullptr);
+    return o.used;
 }
 
 int64_t Prefill::chunk() const { return impl_->T; }
