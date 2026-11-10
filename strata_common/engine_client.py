@@ -1562,8 +1562,15 @@ class StrataEngine:
             return ""
         return f" pen_from={orig_len - 1}"
 
+    def gen_keys(self, sampling: dict | None) -> str:
+        """Gets the request's key=value options for this engine's GEN / BGEN / RUN line."""
+        return self.sampling_keys(sampling or {}, self.split_engine)
+
     @staticmethod
-    def sampling_keys(sampling: dict) -> str:
+    def sampling_keys(sampling: dict, split_engine: bool = False) -> str:
+        """Gets a request's key=value options for an engine's request line; `split_engine`: for the all-cards split
+        engine, which refuses keys it does not know, so a request's priority (which only orders the server's queue
+        there) is left out."""
         keys = ""
         t = sampling.get("temperature")
         if isinstance(t, (int, float)) and float(t) > 0.0:
@@ -1601,7 +1608,7 @@ class StrataEngine:
         if isinstance(seed, int) and seed > 0:
             keys += f" seed={seed}"
         priority = get_request_priority(sampling)
-        if priority != 0:
+        if priority != 0 and not split_engine:
             keys += f" priority={priority}"
         # setup's calibration (tools/calibrate.py): engine settings for this request only, measured without a restart
         tune = sampling.get("strata_tune")
@@ -2282,7 +2289,7 @@ class StrataEngine:
                 raise QueueWaitExpired("the inference queue wait deadline expired; retry later")
             head = "RUNI" if embeddings else "RUN"
             pictures = f" {embeddings}" if embeddings else ""
-            self._send(f"{head} {identity} {int(max_new)}{self.sampling_keys(sampling or {})}"
+            self._send(f"{head} {identity} {int(max_new)}{self.gen_keys(sampling)}"
                        f"{pictures} {','.join(str(int(t)) for t in ids)}", process=process)
             sent = True
             while True:
@@ -2356,7 +2363,7 @@ class StrataEngine:
                         prompt = [*ids, *output]
                         live["state"] = "queued"
                         self._send(f"{head} {identity} {int(max_new) - len(output)}"
-                                   f"{self.sampling_keys(sampling or {})}{pictures} " +
+                                   f"{self.gen_keys(sampling)}{pictures} " +
                                    ",".join(str(int(token)) for token in prompt), process=process)
                         continue
                     complete = True
@@ -2397,7 +2404,7 @@ class StrataEngine:
             raise EngineDied("the engine is unavailable; this request was not sent")
         self.progress, self.progress_ms, self.reused = None, 0, 0
         born = self.gen                                 # the engine process this request is sent to
-        keys = self.sampling_keys(sampling or {})
+        keys = self.gen_keys(sampling)
         priority = get_request_priority(sampling or {})
         # logprobs: only an admission's token can have an LP line here (the slot's "BT" lines carry none), so the
         # server refuses these requests unless max_tokens is 1.  The lines go to the request itself, through its
@@ -3042,8 +3049,8 @@ class StrataEngine:
         carry = NO_LINE                  # a line read for a token's LP line, held until it is used
         # an image request takes the same sampling keys as text (#75: it used to decode greedily whatever was asked)
         rid_key = f" rid={rid}" if rid is not None else ""
-        head = f"GENI {int(max_new)}{self.sampling_keys(sampling or {})}{rid_key} {embeddings}" if embeddings else \
-            f"GEN {int(max_new)}{self.sampling_keys(sampling or {})}{rid_key}"
+        head = f"GENI {int(max_new)}{self.gen_keys(sampling)}{rid_key} {embeddings}" if embeddings else \
+            f"GEN {int(max_new)}{self.gen_keys(sampling)}{rid_key}"
         if prefill_only:                                 # split serving (strata_server/split.py): read the prompt, make no token
             if embeddings or int(max_new) != 0:
                 raise ValueError("prefill_only is a text prompt and max_new 0")

@@ -14,9 +14,9 @@ ROOT = Path(__file__).resolve().parents[2]
 # keys the split engine's parse_gen accepts (some only note that they change nothing: pin, pcie_frac, spec_min_p, pipe, aux_cpus, cvec)
 ACCEPTED = {"temperature", "top_p", "top_k", "min_p", "penalty_repeat", "penalty_freq", "penalty_present", "penalty_last_n", "seed", "keep", "ckpt", "pin",
             "pcie_frac", "spec_min_p", "pipe", "aux_cpus", "cvec", "img_keys"}
-# keys the server does not send to a split engine: pen_from is dropped (StrataEngine.pen_from_key), logprobs / allowed / logit_bias are refused with a 400 first
-# (refuse_for_split, logit_bias.validate_request)
-DROPPED = {"pen_from"}
+# keys the server does not send to a split engine: pen_from and priority are dropped (StrataEngine.pen_from_key, sampling_keys),
+# logprobs / allowed / logit_bias are refused with a 400 first (refuse_for_split, logit_bias.validate_request)
+DROPPED = {"pen_from", "priority"}
 REFUSED = {"logprobs", "allowed", "logit_bias"}
 # keys only other engines are sent: the DeepSeek engine's restore points (STRATA_DS4_RESTORE_POINTS), the prefill-only request of strata_server/split.py, rid for several writers
 OTHER_ENGINES = {"marks", "tail", "shared", "prefill", "rid"}
@@ -68,6 +68,16 @@ class SplitGenKeys(unittest.TestCase):
         self.assertEqual(split.pen_from_key(100, 130), "")
         self.assertEqual(other.pen_from_key(100, 130), " pen_from=99")
         self.assertEqual(other.pen_from_key(100, 100), "")
+
+    def test_priority_is_not_sent_to_a_split_engine_and_is_to_the_others(self):
+        from strata_common import engine_client
+
+        split = object.__new__(engine_client.StrataEngine)
+        split.split_engine = True
+        other = object.__new__(engine_client.StrataEngine)
+        other.split_engine = False
+        self.assertNotIn("priority=", split.gen_keys({"priority": 2}))
+        self.assertIn(" priority=2", other.gen_keys({"priority": 2}))
 
     def test_a_split_engine_name_is_found_by_its_executable(self):
         from strata_common import engine_client
