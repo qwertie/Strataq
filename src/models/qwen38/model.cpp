@@ -1878,8 +1878,9 @@ int Model::load() {
     // the entire difference between CUDA0's cache and CUDA1's: 814 slots against 188, 2026-09-30.  Both of
     // those allocations are already made before a stage's cache is sized, so what has to be held back here is
     // the windows and - only on the stage that carries them - the drafter and the head.
-    // (the arithmetic is program/stage_reserve.hpp's: 96 MiB for the verify windows - 75 MiB measured, rounded up -
-    // and 1000 MiB for the MTP drafter and the head on the last stage only; pinned by tests/program/stage_reserve_test.cpp)
+    // (the arithmetic is models/qwen38/stage_reserve.hpp's: 96 MiB for the verify windows - 75 MiB measured, rounded
+    // up - and 1000 MiB for the MTP drafter and the head on the last stage only; pinned by
+    // tests/program/stage_reserve_test.cpp)
     // --pipeline-windows: a second verifier on every stage (its arena alone is 70-75 MiB and its graphs come on top:
     // 64 MiB left two RTX 5070 Ti under Linux short of it) and, with the decode pipelined, two copies of the first
     // stage's GDN state (sized from its session where the first card's cache is sized; this is the split search's
@@ -5136,7 +5137,6 @@ std::string nibble_refusal(const Options& o) {
     return {};
 #endif
 }
-
 
 /// Prints the cards' free and total memory and the largest other programs that hold some, as a warning added to the
 /// message that says the engine cannot start for lack of GPU memory (#3797, base/gpu/gpu_report.hpp). Best effort: a

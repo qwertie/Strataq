@@ -140,9 +140,9 @@ class SetupAndApp(unittest.TestCase):
         self.assertIn("dsv41_context.problem(int(context))", source)
 
     def test_the_engine_does_not_clamp_max_context(self):
-        main = (ROOT / "src" / "models" / "deepseekv41" / "ds4_main.cpp").read_text(encoding="utf-8", errors="replace")
-        self.assertIn('o.max_context = std::atoll(val("--max-context").c_str());', main)
-        self.assertNotRegex(main, r"max_context\s*=\s*std::(min|clamp)")
+        options = (ROOT / "src" / "models" / "deepseekv41" / "ds4_options.cpp").read_text(encoding="utf-8", errors="replace")
+        self.assertIn('o.max_context = std::atoll(val("--max-context").c_str());', options)
+        self.assertNotRegex(options, r"max_context\s*=\s*std::(min|clamp)")
         model = (ROOT / "src" / "models" / "deepseekv41" / "ds4_model.cu").read_text(encoding="utf-8", errors="replace")
         self.assertNotRegex(model, r"max_context\s*=\s*std::(min|clamp)")
 

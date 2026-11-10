@@ -38,7 +38,8 @@ class Config(unittest.TestCase):
         spec = split_spec({"split_serve": {"prefill_gpu": 0, "decode_gpu": 1}})
         check_cfg({"args": ["--serve", "--prompt-cache", "3"]}, spec)
         for cfg in ({"args": ["--layer-split", "24"]}, {"args": ["--batch", "2"]}, {"args": ["--prompt-cache", "0"]},
-                    {"args": [], "replicas": 2}, {"args": [], "parallel": 2}, {"args": ["--peer-device", "1"]}):
+                    {"args": [], "replicas": 2}, {"args": [], "parallel": 2}, {"args": ["--peer-device", "1"]},
+                    {"args": [], "exe": "bin/strata-q38.exe"}):
             with self.assertRaises(SplitConfigError, msg=cfg):
                 check_cfg(cfg, spec)
         spec2 = split_spec({"split_serve": {"prefill_gpu": 0, "decode_gpu": 1, "decode_args": ["--batch", "2"]}})

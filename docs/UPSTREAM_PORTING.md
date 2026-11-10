@@ -192,5 +192,5 @@ strata-q38 until they are measured there; the new K/V readers take `units` (the 
 `qsa_pattn_batch` and the new SYCL entry points refuse it and fall back); strata-q38's rows follow `kVerifyMaxT`
 (16 on HIP), `runconfig._LIVE_RANGE` allows 1-16; `child_env` gives paged engines none of the parallel-stack or GDN
 env defaults; `split.py` refuses split serving with a paged engine. Still open: `LP` logprob lines over the
-request-ID protocol (`generate_request` and `paged_engine.cpp`), and the Metal DeepSeek build's `FinishIn` layout
-against memory-manager's `KvRows`.
+request-ID protocol (`generate_request` and `paged_engine.cpp`; until then the server refuses logprobs with a paged
+engine), and the Metal DeepSeek build's `FinishIn` layout against memory-manager's `KvRows`.

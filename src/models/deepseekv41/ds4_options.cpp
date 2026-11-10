@@ -1,7 +1,6 @@
 // src/models/deepseekv41/ds4_options.cpp - the model's own command-line options (ds4_model.hpp: read_option), which
 // strata-dsv41 and strata-ds41 both read, and the drafts' confidence cut both make.
 #include "ds4_model.hpp"
-#include "ds4_experts_rule.hpp"
 #include "strata/common/spec/confidence.hpp"
 
 #include <algorithm>

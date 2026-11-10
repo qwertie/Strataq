@@ -350,6 +350,14 @@ class Api(unittest.TestCase):
         self.engine.batch = 0
         self.assertIn("logprobs", self.post({"logprobs": True})["choices"][0])
 
+    def test_logprobs_are_refused_by_a_page_pool_engine(self):
+        # strata-q38 / strata-ds41 answer RUN lines without LP lines: even max_tokens 1 would get an empty list
+        self.engine.request_protocol = True
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self.post({"logprobs": True, "max_tokens": 1})
+        self.assertEqual(cm.exception.code, 400)
+        self.assertIn("strata-q38", cm.exception.read().decode())
+
     def test_allowed_token_ids_outside_the_vocabulary_is_a_400(self):
         # emit_lp_line indexes its logits row with each named id, so an id past the vocabulary would read out of
         # bounds; the request is refused before anything is generated

@@ -44,7 +44,8 @@ struct NibbleCache {
     unsigned long long* d_ptrs = nullptr;                ///< the same on the device (the transcoder's and hash's input)
     unsigned long long* d_ref = nullptr;                 ///< each slot's hash as loaded
     unsigned long long* d_now = nullptr;                 ///< RECHECK's
-    unsigned long long* d_bad = nullptr;                 ///< per layer: items that did not round-trip, words that differ
+    /// per layer: items that did not round-trip, words that differ
+    unsigned long long* d_bad = nullptr;
     uint8_t* staging = nullptr;
     uint64_t raw_max = 0;
     cudaStream_t stream = nullptr;
@@ -53,7 +54,9 @@ struct NibbleCache {
 
     bool active() const { return cache != nullptr; }
 
-    static std::string cuda_fail(const char* what, cudaError_t e) { return std::string(what) + ": " + cudaGetErrorString(e); }
+    static std::string cuda_fail(const char* what, cudaError_t e) {
+        return std::string(what) + ": " + cudaGetErrorString(e);
+    }
 
     /// For `c` on the current device, `want` converted pairs at most.
     bool begin(strata::core::ExpertCache& c, int64_t want, std::string& err) {
@@ -78,7 +81,8 @@ struct NibbleCache {
         }
         if (const int rc = nibble::prepare((void*) stream); rc != 0) {
             err = std::string("the 4-bit fill's GGUF codebooks: ") +
-                  (rc == (int) cudaErrorInvalidValue ? "a grid entry is not unique" : cudaGetErrorString((cudaError_t) rc));
+                  (rc == (int) cudaErrorInvalidValue ? "a grid entry is not unique"
+                                                     : cudaGetErrorString((cudaError_t) rc));
             return false;
         }
         return true;
@@ -112,7 +116,8 @@ struct NibbleCache {
             e = cudaMemcpyAsync(staging + (uint64_t) i * L.raw_bytes, q[(size_t) i].blob, (size_t) L.raw_bytes,
                                 cudaMemcpyHostToDevice, stream);
         }
-        if (e == cudaSuccess) e = cudaMemcpyAsync(d_ptrs + n, h_ptrs + n, (size_t) k * 8, cudaMemcpyHostToDevice, stream);
+        if (e == cudaSuccess)
+            e = cudaMemcpyAsync(d_ptrs + n, h_ptrs + n, (size_t) k * 8, cudaMemcpyHostToDevice, stream);
         if (e != cudaSuccess) {
             err = cuda_fail("the 4-bit fill's copies in", e);
             return false;
@@ -122,7 +127,8 @@ struct NibbleCache {
             err = std::string("the 4-bit ") + what + ": " + cudaGetErrorString((cudaError_t) rc);
             return false;
         };
-        if (!m2("transcoder", nibble::transcode(L, staging, k, d_ptrs + n, d_bad + layer, (void*) stream))) return false;
+        if (!m2("transcoder", nibble::transcode(L, staging, k, d_ptrs + n, d_bad + layer, (void*) stream)))
+            return false;
         for (int64_t i = 0; i < k && e == cudaSuccess; ++i)
             e = cudaMemcpyAsync((uint8_t*) (uintptr_t) h_ptrs[n + i] + nibble::kDownOff,
                                 staging + (uint64_t) i * L.raw_bytes + L.raw_down_off, (size_t) L.down_bytes,
@@ -131,7 +137,8 @@ struct NibbleCache {
             err = cuda_fail("the 4-bit fill's down rows", e);
             return false;
         }
-        if (!m2("GGUF check", nibble::check_gguf(L, staging, k, d_ptrs + n, d_bad + layer, (void*) stream))) return false;
+        if (!m2("GGUF check", nibble::check_gguf(L, staging, k, d_ptrs + n, d_bad + layer, (void*) stream)))
+            return false;
         if (!m2("slot hash", nibble::hash_slots(L, d_ptrs + n, k, d_ref + n, (void*) stream))) return false;
         // the next batch's copies in land in the same staging bytes: they wait for this batch's kernels (one stream)
         for (const Pending& p : q) {
@@ -164,8 +171,8 @@ struct NibbleCache {
         for (size_t l = 0; l < bad.size(); ++l)
             if (bad[l] != 0) {
                 char b[192];
-                std::snprintf(b, sizeof b, "%slayer %zu (%s): %llu items or words do not round-trip", err.empty() ? "" : "; ",
-                              l, nibble::fmt_name(nibble::layer((int64_t) l).gu_type), bad[l]);
+                std::snprintf(b, sizeof b, "%slayer %zu (%s): %llu items or words do not round-trip",
+                              err.empty() ? "" : "; ", l, nibble::fmt_name(nibble::layer((int64_t) l).gu_type), bad[l]);
                 err += b;
             }
         if (!err.empty()) {
@@ -191,26 +198,28 @@ struct NibbleCache {
         const nibble::LayerVram& L = nibble::layer(layer);
         std::vector<uint8_t> got((size_t) L.hashed);
         unsigned long long h = 0;
-        cudaError_t e = cudaMemcpy(got.data(), cache->device_slot(slots[(size_t) at]), got.size(), cudaMemcpyDeviceToHost);
+        cudaError_t e = cudaMemcpy(got.data(), cache->device_slot(slots[(size_t) at]), got.size(),
+                                   cudaMemcpyDeviceToHost);
         if (e == cudaSuccess) e = cudaMemcpy(&h, d_ref + at, 8, cudaMemcpyDeviceToHost);
         if (e != cudaSuccess) {
             err = cuda_fail("the 4-bit check's read back", e);
             return false;
         }
-        const char* why = nibble::hash_host(got.data(), L.hashed) != h ? "the device slot hash differs from the host reference"
+        const char* why = nibble::hash_host(got.data(), L.hashed) != h
+                            ? "the device slot hash differs from the host reference"
                         : std::memcmp(got.data() + nibble::kDownOff, raw + L.raw_down_off, (size_t) L.down_bytes) != 0
                             ? "the down rows differ from the GGUF blob's"
                             : nullptr;
         if (why != nullptr) {
-            err = "layer " + std::to_string(layer) + " expert " + std::to_string(expert) + " (" + nibble::fmt_name(L.gu_type) +
-                  "): " + why;
+            err = "layer " + std::to_string(layer) + " expert " + std::to_string(expert) + " (" +
+                  nibble::fmt_name(L.gu_type) + "): " + why;
             return false;
         }
         return true;
     }
 
-    /// STRATA_EXPERT_NIBBLE_RECHECK: every converted slot's hash again, on the device, against the one recorded at load.
-    /// False with the first slot that differs (or a CUDA error) in `err`; `bad_layer` its layer (-1: an error).
+    /// STRATA_EXPERT_NIBBLE_RECHECK: every converted slot's hash again, on the device, against the one recorded at
+    /// load.  False with the first slot that differs (or a CUDA error) in `err`; `bad_layer` its layer (-1: an error).
     bool recheck(std::string& err, int64_t& bad_layer) {
         bad_layer = -1;
         if (n == 0) return true;
@@ -245,17 +254,25 @@ struct NibbleCache {
 };
 #else
 // A build without the 4-bit kernels (STRATA_EXPERT_NIBBLE_BUILT 0: HIP, Metal, a CUDA build without
-// STRATA_EXPERIMENTAL_SM60): nibble_refusal refuses the switch, so no cache is ever converted and none of this is entered.
+// STRATA_EXPERIMENTAL_SM60): nibble_refusal refuses the switch, so no cache is ever converted and none of this is
+// entered.
 struct NibbleCache {
     int64_t n = 0;
     double seconds = 0;
     std::vector<std::pair<int32_t, int32_t>> pairs;
     bool active() const { return false; }
-    bool begin(strata::core::ExpertCache&, int64_t, std::string& err) { err = "the 4-bit slots are not in this build"; return false; }
-    bool add(int32_t, int32_t, int32_t, const uint8_t*, std::string& err) { err = "the 4-bit slots are not in this build"; return false; }
+    bool begin(strata::core::ExpertCache&, int64_t, std::string& err) { return refuse(err); }
+    bool add(int32_t, int32_t, int32_t, const uint8_t*, std::string& err) { return refuse(err); }
     bool finish(std::string&) { return true; }
-    bool check(int32_t, int32_t, const uint8_t*, std::string& err) const { err = "the 4-bit slots are not in this build"; return false; }
+    bool check(int32_t, int32_t, const uint8_t*, std::string& err) const { return refuse(err); }
     bool recheck(std::string&, int64_t& bad_layer) { bad_layer = -1; return true; }
+
+private:
+    /// Fails a call that needs the 4-bit kernels, saying in `err` that this build lacks them.
+    static bool refuse(std::string& err) {
+        err = "the 4-bit slots are not in this build";
+        return false;
+    }
 };
 #endif
 

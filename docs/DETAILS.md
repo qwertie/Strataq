@@ -1047,10 +1047,10 @@ What each engine says:
 
 ### Rows per step, lookahead and conversations at once (strata-q38)
 
-strata-q38 decodes each step as one pass of up to 8 rows ("rows per step"). Each conversation that decodes gets a row
-for its next token; the rows left over go to the drafter's guesses, shared evenly, at most "lookahead" per
-conversation ([MEMORY_MANAGER_PLAN.md](MEMORY_MANAGER_PLAN.md#how-rows-are-shared-the-owners-rule)). Both, and the
-conversations at once, change while the engine runs (the Memory panel, `CHANGE_SETTINGS`).
+strata-q38 decodes each step as one pass of up to 8 rows, 16 in a HIP build ("rows per step"). Each conversation
+that decodes gets a row for its next token; the rows left over go to the drafter's guesses, shared evenly, at most
+"lookahead" per conversation ([MEMORY_MANAGER_PLAN.md](MEMORY_MANAGER_PLAN.md#how-rows-are-shared-the-owners-rule)).
+Both, and the conversations at once, change while the engine runs (the Memory panel, `CHANGE_SETTINGS`).
 
 Measured on the Strix Halo (Radeon 8060S) on Windows 11, Qwen3.8 IQ3_S, 204,800 context, int8 K/V, the MTP drafter
 (`--spec-min-p 0.5`), temperature 0, 160 tokens per conversation, 2026-11-01. Three prompts: a story, a Python module

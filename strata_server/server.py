@@ -5204,6 +5204,10 @@ def make_handler(svc: Service):
             # max_tokens (by the rest of the context when it is not sent), which is the only bound OpenAI and vLLM
             # put on it either.  A reply that is not streamed does hold every entry (its token, bytes and up to 20
             # alternatives) until it ends, so a long one holds a lot: streaming hands each entry out with its chunk.
+            if engine_client.top_logprobs(req) is not None and getattr(svc.engine, "request_protocol", False):
+                # The page-pool engines' RUN lines have no LP lines yet (docs/UPSTREAM_PORTING.md), so the reply
+                # would carry an empty list, even for max_tokens 1.
+                raise ValueError("logprobs is not available with strata-q38 or strata-ds41 yet")
             if engine_client.top_logprobs(req) is not None and batch_slots_on(svc.engine) and max_req != 1:
                 # --parallel/--batch: a slot's "BT <slot> <id>" lines carry no LP line, and the batched loop never
                 # calls emit_lp_line (src/program/generate.cpp); an admission -- a max_tokens 1 request -- is read

@@ -1115,8 +1115,11 @@ bool PagedEngine::serve_request(const std::string& line, bool admit) {
         if (h.dec.draft_enabled && (facts_.has_drafter ||
             (lookup && (settings_.suffix_draft > 0 || settings_.lookup_chain > 0))) &&
             settings_.step.lookahead > 0) {
+            // One conversation's window stays within DraftPolicy::kMaxT rows, what the draft policy, the step's draft
+            // probabilities and the MTP drafter hold; only a step of several conversations uses the rest of max_rows.
+            const int window_rows = std::min(facts_.max_rows, strata::spec::DraftPolicy::kMaxT);
             h.dec.planner = std::make_unique<strata::spec::WindowPlanner>(
-                facts_.max_rows, settings_.step.model_lookahead < 0 ? facts_.max_rows :
+                window_rows, settings_.step.model_lookahead < 0 ? window_rows :
                     settings_.step.model_lookahead + 1, lookup ? (int) settings_.suffix_draft : 0,
                 lookup ? (int) settings_.lookup_chain : 0, (int) settings_.lookup_chain_min, facts_.context);
             if (h.policy)
