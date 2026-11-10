@@ -267,7 +267,7 @@ namespace strata::kernels { bool native_norm_rope_usable(int p0, int p1) { strat
 namespace strata::kernels { void native_ple_postops_batch(float * p0, float * p1, const float * p2, float * p3, const PleWeights & p4, float * p5, float * p6, float * p7, int p8, void * p9) { strata::metal_engine::missing("strata::kernels::native_ple_postops_batch"); } }
 namespace strata::kernels { void native_ple_postops_batch_snap(float * p0, float * p1, const float * p2, float * p3, const PleWeights & p4, float * p5, float * p6, float * p7, int p8, float * p9, void * p10) { strata::metal_engine::missing("strata::kernels::native_ple_postops_batch_snap"); } }
 namespace strata::kernels { void native_q5_k_f32(const void * p0, const float * p1, void * p2, float * p3, int p4, int p5, int p6, void * p7) { strata::metal_engine::missing("strata::kernels::native_q5_k_f32"); } }
-namespace strata::kernels { bool native_q6_k_pack(const void * p0, int p1, int p2, const char * p3) { strata::metal_engine::missing("strata::kernels::native_q6_k_pack"); return {}; } }
+namespace strata::kernels { bool native_q6_k_pack(void * p0, int p1, int p2, const char * p3) { strata::metal_engine::missing("strata::kernels::native_q6_k_pack"); return {}; } }
 namespace strata::kernels { void native_q8_0_pack_host(const void * p0, void * p1, int p2, int p3) { strata::metal_engine::missing("strata::kernels::native_q8_0_pack_host"); } }
 namespace strata::kernels { void native_q8_0_packed_register(const void * p0, const void * p1, int p2, int p3) { strata::metal_engine::missing("strata::kernels::native_q8_0_packed_register"); } }
 namespace strata::kernels { void native_q8_0_packed_unregister(const void * p0) { strata::metal_engine::missing("strata::kernels::native_q8_0_packed_unregister"); } }

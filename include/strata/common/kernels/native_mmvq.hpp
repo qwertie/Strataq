@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 namespace strata::kernels {
 
@@ -121,13 +122,18 @@ bool native_q8_0_sm60_pack_quiet(const void* weights, int n_in, int n_out, const
 bool native_q8_0_sm60_pack_in_place(void* weights, int n_in, int n_out, const char* what);
 void native_q8_0_sm60_release(const void* weights);
 
-/// STRATA_Q6_PACKED=1 (opt-in): a packed copy of a Q6_K matrix (the output heads) - the same bytes as ql / qh /
-/// scales / d planes - that native_q6_k_mmvq calls on `weights` read instead (bitwise equal outputs). The copy is
-/// owned here: native_q6_k_pack builds it from the device matrix (false: not eligible or failed; nothing changes),
-/// native_q6_k_unpack frees it. STRATA_Q6P_SELFTEST=1 checks it bitwise and times it at load.
+/// STRATA_Q6_PACKED=1: a Q6_K matrix (the output heads) rewritten in its own allocation as ql / qh / scales / d
+/// planes - the same bytes - that native_q6_k_mmvq and native_mmvq_il read (bitwise equal outputs).
+/// native_q6_k_pack rewrites the device matrix (false: not eligible or failed; it keeps the GGUF layout);
+/// native_q6_k_unpack forgets it before the caller frees the matrix. Afterwards nothing may read `weights` as GGUF
+/// blocks: native_q6_k_packed_gather copies rows out as GGUF blocks instead. STRATA_Q6P_SELFTEST=1 checks a packed
+/// copy bitwise and times it at load, before the rewrite.
 bool native_q6_k_packed_enabled();
-bool native_q6_k_pack(const void* weights, int n_in, int n_out, const char* what);
+bool native_q6_k_pack(void* weights, int n_in, int n_out, const char* what);
 void native_q6_k_unpack(const void* weights);
+/// Copies rows ids[0, n) of a matrix native_q6_k_pack rewrote to dst as GGUF Q6_K rows; false (nothing launched) when
+/// `weights` is not one.
+bool native_q6_k_packed_gather(const void* weights, const int32_t* ids, int64_t n, void* dst, void* stream);
 
 void native_q8_0_f32(const void* weights, const float* x, void* scratch_q8_1,
                       float* y, int n_in, int n_out, int ncols, void* stream);

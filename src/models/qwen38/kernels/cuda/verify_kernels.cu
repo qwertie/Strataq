@@ -3,6 +3,7 @@
 // The per-token arithmetic of every kernel here is transcribed from its single-token original (fused_gdn.cu,
 // elementwise.cu) with the same operation order, so a verify window reproduces plain decode bit for bit.
 #include "strata/models/qwen38/kernels/verify_kernels.hpp"
+#include "strata/common/kernels/native_mmvq.hpp"
 #include "strata/core/bw_dense_defaults.hpp"
 #include "strata/core/geometry.hpp"
 #include "strata/base/gpu/emulate.hpp"
@@ -824,6 +825,7 @@ void force_token(int32_t* tok, const int32_t* force, int j, void* stream) {
 }
 
 void gather_rows(const uint8_t* src, int64_t row_bytes, const int32_t* ids, int64_t n, uint8_t* dst, void* stream) {
+    if (native_q6_k_packed_gather(src, ids, n, dst, stream)) return;
     cudaStream_t s = (cudaStream_t) stream;
     if (row_bytes % 16 == 0)
         gather_rows_kernel<<<48 * 8, 256, 0, s>>>((const uint4*) src, row_bytes / 16, ids, n, (uint4*) dst);

@@ -2673,7 +2673,7 @@ bool q8_packed_mmvq(const void* weights, const void* x_q8_1, float* y, int n_in,
 // ============================ STRATA_Q6_PACKED=1: the packed Q6_K head layout (opt-in) ============================
 //
 // The output heads (the main head, 248320 rows, and the MTP draft head's row subset) are Q6_K matrices of 2560-wide
-// rows: 10 blocks of 210 bytes each, so every int load is 2-byte aligned and a row is 2100 bytes. The packed copy
+// rows: 10 blocks of 210 bytes each, so every int load is 2-byte aligned and a row is 2100 bytes. The packed layout
 // holds the SAME bytes as four planes - ql (128 B per block), qh (64 B), scales (16 B), d (2 B) - so a thread's
 // two words are aligned dword loads (non-temporal). Thread ownership (block tid / 32 + 4 i, word tid % 32), the
 // q6_q8_dot_impl expression, the per-thread order and the reduction are those of native_q6_k_mmvq_kernel<false> /
@@ -2760,11 +2760,21 @@ __global__ void native_q6_k_packed_kernel(const int* __restrict__ ql, const int*
 
 bool g_q6_bypass = false;   // the load-time self-test times the GGUF-layout kernels with the copy registered
 
-// the packed planes of one Q6_K matrix (owned: allocated by native_q6_k_pack, freed by native_q6_k_unpack)
+// the packed planes of one Q6_K matrix; `base` is the allocation native_q6_k_unpack frees (the self-test's copy), null
+// when the planes overwrote the matrix's own GGUF blocks
 struct Q6Packed { void* base; const int* ql; const int* qh; const int8_t* sc; const half* d; int n_in, n_out; };
 std::unordered_map<const void*, Q6Packed>& q6_packed_registry() {
     static std::unordered_map<const void*, Q6Packed> registry;
     return registry;
+}
+
+// Describes the planes of nb blocks at `at`, laid out back to back with no padding: ql | qh | scales | d. Together they
+// are exactly the GGUF blocks' bytes, so they fit in the matrix's own allocation.
+Q6Packed q6_planes(const void* at, bool owned, std::size_t nb, int n_in, int n_out) {
+    const auto* base = static_cast<const uint8_t*>(at);
+    return Q6Packed{owned ? const_cast<void*>(at) : nullptr, reinterpret_cast<const int*>(base),
+                    reinterpret_cast<const int*>(base + nb * 128), reinterpret_cast<const int8_t*>(base + nb * 192),
+                    reinterpret_cast<const half*>(base + nb * 208), n_in, n_out};
 }
 
 template<int NCOLS>
@@ -2780,7 +2790,7 @@ void q6_packed_launch(const Q6Packed& w, const Q81Block* x, float* y, cudaStream
 
 bool q6_packed_mmvq(const void* weights, const void* x_q8_1, float* y, int n_in, int n_out, int ncols, void* stream) {
     auto& registry = q6_packed_registry();
-    if (registry.empty() || g_q6_bypass || (ncols > 1 && !g_multi_exact)) return false;
+    if (registry.empty() || g_q6_bypass) return false;
     const auto found = registry.find(weights);
     if (found == registry.end() || found->second.n_in != n_in || found->second.n_out != n_out) return false;
     validate_shape(n_in, ncols, 256);
@@ -2814,6 +2824,19 @@ bool q6_packed_mmvq(const void* weights, const void* x_q8_1, float* y, int n_in,
     }
     launch_check();
     return true;
+}
+
+// Rebuilds GGUF Q6_K blocks from the planes (q6_planes) of nb blocks: output block b is block b % nbr of row
+// ids[b / nbr]. One byte a thread: it runs once, when a drafter gathers its rows of the head.
+__global__ void native_q6_k_packed_gather_kernel(const uint8_t* __restrict__ planes, long long nb, int nbr,
+                                                 const int32_t* __restrict__ ids, long long n, uint8_t* __restrict__ dst) {
+    constexpr long long B = sizeof(Q6KBlock);
+    for (long long i = (long long) blockIdx.x * blockDim.x + threadIdx.x; i < n * nbr * B; i += (long long) gridDim.x * blockDim.x) {
+        const long long b = i / B, src = (long long) ids[b / nbr] * nbr + b % nbr;
+        const int o = int(i - b * B);
+        dst[i] = o < 128 ? planes[src * 128 + o] : o < 192 ? planes[nb * 128 + src * 64 + (o - 128)]
+               : o < 208 ? planes[nb * 192 + src * 16 + (o - 192)] : planes[nb * 208 + src * 2 + (o - 208)];
+    }
 }
 } // namespace
 
@@ -2955,40 +2978,32 @@ bool native_q6_k_packed_enabled() {
     return enabled;
 }
 
-bool native_q6_k_pack(const void* weights, int n_in, int n_out, const char* what) {
+bool native_q6_k_pack(void* weights, int n_in, int n_out, const char* what) {
     if (!weights || n_in <= 0 || n_in % 256 || n_in / 256 < WARPS * WARP / 32 || n_out < 2048) return false;
     if (q6_packed_registry().count(weights)) return true;
     const std::size_t nb = std::size_t(n_in / 256) * std::size_t(n_out);
     const std::size_t bytes = nb * sizeof(Q6KBlock);
     std::vector<Q6KBlock> host(nb);
     if (cudaMemcpy(host.data(), weights, bytes, cudaMemcpyDeviceToHost) != cudaSuccess) { cudaGetLastError(); return false; }
-    // planes: ql | qh | scales | d, each 256-byte aligned
-    const std::size_t o_qh = (nb * 128 + 255) & ~std::size_t(255);
-    const std::size_t o_sc = (o_qh + nb * 64 + 255) & ~std::size_t(255);
-    const std::size_t o_d = (o_sc + nb * 16 + 255) & ~std::size_t(255);
-    const std::size_t total = o_d + nb * 2;
-    std::vector<uint8_t> packed(total, 0);
+    std::vector<uint8_t> packed(bytes);
     for (std::size_t b = 0; b < nb; ++b) {
         std::memcpy(packed.data() + b * 128, host[b].ql, 128);
-        std::memcpy(packed.data() + o_qh + b * 64, host[b].qh, 64);
-        std::memcpy(packed.data() + o_sc + b * 16, host[b].scales, 16);
-        std::memcpy(packed.data() + o_d + b * 2, &host[b].d, 2);
+        std::memcpy(packed.data() + nb * 128 + b * 64, host[b].qh, 64);
+        std::memcpy(packed.data() + nb * 192 + b * 16, host[b].scales, 16);
+        std::memcpy(packed.data() + nb * 208 + b * 2, &host[b].d, 2);
     }
-    void* dev = nullptr;
-    if (strata::core::allocate_device(&dev, total,
-        {"other", "Packed output heads", what}) != cudaSuccess) { cudaGetLastError(); return false; }
-    if (cudaMemcpy(dev, packed.data(), total, cudaMemcpyHostToDevice) != cudaSuccess) {
-        strata::core::release_device(dev); cudaGetLastError(); return false;
-    }
-    auto* base = static_cast<uint8_t*>(dev);
-    q6_packed_registry()[weights] = Q6Packed{dev, reinterpret_cast<const int*>(base),
-                                             reinterpret_cast<const int*>(base + o_qh),
-                                             reinterpret_cast<const int8_t*>(base + o_sc),
-                                             reinterpret_cast<const half*>(base + o_d), n_in, n_out};
-    std::fprintf(stderr, "strata: STRATA_Q6_PACKED=1 packed the %s (%d x %d, +%.1f MiB)\n", what, n_out, n_in,
-                 total / 1048576.0);
-    // STRATA_Q6P_SELFTEST=1: bitwise check against the GGUF-layout kernels (1..4 columns) and paired timings
+    // STRATA_Q6P_SELFTEST=1: a packed copy beside the GGUF blocks, checked bitwise against the GGUF-layout kernels
+    // (1..4 columns) and timed in pairs with them; it is freed again before the planes replace the blocks
     if (const char* v = std::getenv("STRATA_Q6P_SELFTEST"); v && (v[0] == '1' || v[0] == '2')) {
+        void* dev = nullptr;
+        if (strata::core::allocate_device(&dev, bytes, {"other", "Packed output heads", what}) != cudaSuccess) {
+            cudaGetLastError();
+            return false;
+        }
+        if (cudaMemcpy(dev, packed.data(), bytes, cudaMemcpyHostToDevice) != cudaSuccess) {
+            strata::core::release_device(dev); cudaGetLastError(); return false;
+        }
+        q6_packed_registry()[weights] = q6_planes(dev, true, nb, n_in, n_out);
         cudaStream_t s = nullptr;
         cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking);
         const int nq = n_in / Q8K;
@@ -3065,8 +3080,22 @@ bool native_q6_k_pack(const void* weights, int n_in, int n_out, const char* what
         cudaEventDestroy(e0); cudaEventDestroy(e1);
         strata::core::release_device(dx); strata::core::release_device(ya); strata::core::release_device(yb);
         cudaStreamDestroy(s);
-        if (!same) { native_q6_k_unpack(weights); return false; }
+        native_q6_k_unpack(weights);
+        if (!same) return false;
     }
+    if (cudaMemcpy(weights, packed.data(), bytes, cudaMemcpyHostToDevice) != cudaSuccess) {
+        cudaGetLastError();
+        // a partial write leaves neither layout: put the blocks back
+        const bool restored = cudaMemcpy(weights, host.data(), bytes, cudaMemcpyHostToDevice) == cudaSuccess;
+        cudaGetLastError();
+        std::fprintf(stderr, "strata: writing the packed %s failed; %s\n", what,
+                     restored ? "it keeps the GGUF layout" : "its GGUF blocks could not be restored either");
+        return false;
+    }
+    q6_packed_registry()[weights] = q6_planes(weights, false, nb, n_in, n_out);
+    strata::core::get_memory_manager().set_label(weights, {"other", "Packed output heads", what});
+    std::fprintf(stderr, "strata: STRATA_Q6_PACKED=1 packed the %s in place (%d x %d, %.1f MiB)\n", what, n_out, n_in,
+                 bytes / 1048576.0);
     return true;
 }
 
@@ -3074,8 +3103,19 @@ void native_q6_k_unpack(const void* weights) {
     auto& registry = q6_packed_registry();
     const auto found = registry.find(weights);
     if (found == registry.end()) return;
-    strata::core::release_device(found->second.base);
+    if (found->second.base) strata::core::release_device(found->second.base);
     registry.erase(found);
+}
+
+bool native_q6_k_packed_gather(const void* weights, const int32_t* ids, int64_t n, void* dst, void* stream) {
+    const auto found = q6_packed_registry().find(weights);
+    if (found == q6_packed_registry().end()) return false;
+    const int nbr = found->second.n_in / 256;
+    native_q6_k_packed_gather_kernel<<<48 * 8, 256, 0, static_cast<cudaStream_t>(stream)>>>(
+        reinterpret_cast<const uint8_t*>(found->second.ql), (long long) nbr * found->second.n_out, nbr, ids,
+        (long long) n, static_cast<uint8_t*>(dst));
+    launch_check();
+    return true;
 }
 
 void native_mmvq_set_multi_exact(bool exact) { g_multi_exact = exact; }
@@ -3966,7 +4006,8 @@ bool native_mmvq_il_supported(int ggml_type, int ncols, int n_out) {
 
 void native_mmvq_il(int ggml_type, const void* weights, const void* x_q8_1, const void* x_il, float* y, int n_in,
                     int n_out, int ncols, void* stream) {
-    if (!native_mmvq_il_supported(ggml_type, ncols, n_out)) {
+    // a packed Q6_K head (native_q6_k_pack) has no GGUF blocks left for the interleaved kernels
+    if (!native_mmvq_il_supported(ggml_type, ncols, n_out) || (ggml_type == 14 && q6_packed_registry().count(weights))) {
         native_mmvq(ggml_type, weights, x_q8_1, y, n_in, n_out, ncols, stream);
         return;
     }
