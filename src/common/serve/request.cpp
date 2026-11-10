@@ -1,9 +1,13 @@
 // strata/common/serve/request.cpp - see request.hpp.
 #include "strata/common/serve/request.hpp"
 
+#include <algorithm>
 #include <charconv>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <numeric>
 #include <sstream>
 
 namespace strata::serve {
@@ -79,6 +83,75 @@ bool read_sampling_key(const std::string& key, const std::string& value, Samplin
     else if (key == "seed") s.seed = std::strtoull(v, nullptr, 10);
     else return false;
     return true;
+}
+
+bool read_logprob_key(const std::string& key, const std::string& value, LogprobRequest& r) {
+    if (key == "logprobs") {
+        r.top = std::atoi(value.c_str());
+        return true;
+    }
+    if (key != "allowed")
+        return false;
+    std::istringstream list(value);
+    for (std::string one; std::getline(list, one, ',');)
+        if (!one.empty())
+            r.allowed.push_back((int32_t) std::atoi(one.c_str()));
+    return true;
+}
+
+std::string format_logprob_line(const float* logits, int64_t vocab, int32_t token, const LogprobRequest& r) {
+    if (logits == nullptr || token < 0 || token >= vocab)
+        return "LP nan\n";
+    const float most = *std::max_element(logits, logits + vocab);
+    double sum = 0.0;
+    for (int64_t v = 0; v < vocab; ++v)
+        sum += std::exp((double) logits[v] - (double) most);
+    const double lse = (double) most + std::log(sum);
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "LP %.6f", (double) logits[token] - lse);
+    std::string line = buf;
+    const auto add = [&](int32_t id) {
+        std::snprintf(buf, sizeof buf, " %d:%.6f", (int) id, (double) logits[id] - lse);
+        line += buf;
+    };
+    if (!r.allowed.empty()) {
+        for (const int32_t id : r.allowed)
+            if (id != token && id >= 0 && id < vocab)
+                add(id);
+    } else if (r.top > 0) {
+        std::vector<int32_t> order((size_t) vocab);
+        std::iota(order.begin(), order.end(), 0);
+        const int64_t k = std::min<int64_t>(r.top, vocab);
+        std::partial_sort(order.begin(), order.begin() + k, order.end(),
+                          [&](int32_t a, int32_t b) { return logits[a] > logits[b]; });
+        for (int64_t j = 0; j < k; ++j)
+            add(order[(size_t) j]);
+    }
+    return line + "\n";
+}
+
+void RowLogprobs::start(LogprobRequest r, int64_t first) {
+    request_ = std::move(r);
+    first_ = first;
+    lines_.clear();
+}
+
+void RowLogprobs::note(int64_t pos, int32_t token, int64_t vocab, const std::function<bool(float*)>& copy) {
+    if (request_.top < 0 || pos < first_ || token < 0)
+        return;
+    logits_.resize((size_t) vocab);
+    lines_[pos] = format_logprob_line(copy(logits_.data()) ? logits_.data() : nullptr, vocab, token, request_);
+}
+
+std::string RowLogprobs::take(int64_t pos) {
+    if (request_.top < 0)
+        return "";
+    const auto found = lines_.find(pos);
+    if (found == lines_.end())
+        return "LP nan\n";
+    std::string line = std::move(found->second);
+    lines_.erase(found);
+    return line;
 }
 
 std::vector<uint64_t> parse_hex_list(const std::string& text) {

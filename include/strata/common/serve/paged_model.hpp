@@ -153,6 +153,17 @@ public:
 
     /// What the engine reads of the model; the model fills it before serve_paged_model.
     PagedModelFacts facts;
+    /// Per session: the LP lines its request asked for, which the engine starts with each request and prints with
+    /// the tokens a step keeps; the model notes them as it picks tokens (note_logprobs).
+    std::vector<RowLogprobs> logprobs;
+
+    /// Notes the LP line of `token`, picked after `session`'s row at `pos`, when its request asked for one; `copy`
+    /// then writes that row's head logits (`vocab` floats) on the host.
+    void note_logprobs(int session, int64_t pos, int32_t token, int64_t vocab,
+                       const std::function<bool(float*)>& copy) {
+        if ((size_t) session < logprobs.size())
+            logprobs[(size_t) session].note(pos, token, vocab, copy);
+    }
 
     /// Validates a request's pictures before taking a conversation, and fills the empty `images` with where each
     /// picture starts and a hash of its content, in prompt order.

@@ -425,6 +425,12 @@ private:
     bool go_to(int64_t pos, std::string& err);
     void end_prompt(Part& p);
     int32_t sample(const Part& p);
+    /// Notes the LP line of `pick`, the token after `row`, from the head's logit row `logit_row`
+    /// (Model::copy_logits_row; note_logprobs).
+    void note_row_logprobs(const strata::spec::StepRow& row, int32_t pick, int logit_row) {
+        note_logprobs(row.session, row.pos, pick, m_.vocab(),
+                      [&](float* out) { return m_.copy_logits_row(logit_row, out); });
+    }
     bool copy_expert(const PagedCard& card, strata::core::ExpertKey key, int32_t first, bool from_ram,
                      std::string& err);
 
@@ -926,6 +932,7 @@ bool PagedDeepSeek::read_prompt(const PagedParts& parts, const std::vector<int64
         p.primed_pos = end;
         p.primed_token = tokens.back();
         p.primed_pick = sample(p);
+        note_row_logprobs({(int) p.id() - 1, p.primed_token, end}, p.primed_pick, -1);
     }
     return on_chunk(from, n, err);
 }
@@ -1010,6 +1017,8 @@ bool PagedDeepSeek::run_rows(const std::vector<strata::spec::StepRow>& rows, std
             for (size_t i = 0; i < got.size(); ++i)
                 picks[pending[(size_t) window.first + i]] = got[i];
         }
+        for (size_t r = 0; r < pending.size(); ++r)
+            note_row_logprobs(rows[pending[r]], picks[pending[r]], (int) r);
         return true;
     }
     const strata::spec::StepRow& row = rows[0];
@@ -1026,6 +1035,8 @@ bool PagedDeepSeek::run_rows(const std::vector<strata::spec::StepRow>& rows, std
             return false;
         std::copy(got.begin(), got.end(), picks.begin());
         verified_ = (int) got.size();
+        for (size_t r = 0; r < got.size(); ++r)
+            note_row_logprobs(rows[r], got[r], (int) r);
         return true;
     }
 
@@ -1047,6 +1058,7 @@ bool PagedDeepSeek::run_rows(const std::vector<strata::spec::StepRow>& rows, std
     if (closes)
         end_prompt(p);
     picks[0] = sample(p);
+    note_row_logprobs(row, picks[0], -1);
     return true;
 }
 
@@ -1091,6 +1103,7 @@ void PagedDeepSeek::sample_pending_rows(GroupRows& g) {
             end_prompt(p);
         const auto& s = p.smp;
         g.picks[g.pending[r]] = m_.sample_row((int) r, s.temperature, s.top_p, s.top_k, s.min_p, s.seed, counter_++);
+        note_row_logprobs(g.rows[g.pending[r]], g.picks[g.pending[r]], (int) r);
     }
 }
 

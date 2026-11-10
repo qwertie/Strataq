@@ -233,6 +233,51 @@ class Generate(unittest.TestCase):
         self.assertEqual(e.last["finish"], "length")
 
 
+class GenerateRequest(unittest.TestCase):
+    """strata-q38 and strata-ds41 (generate_request): the token's LP line is read next to it, on the request's own
+    Event, and only when it was asked for."""
+
+    def engine(self, *lines):
+        """Gets an engine of the request-ID protocol that answers its RUN line with `lines`, all at once."""
+        e = StrataEngine.__new__(StrataEngine)
+        e.proc, e.gen, e.info, e.silence_s = SimpleNamespace(poll=lambda: None), 1, {"request_queue": 1}, 0
+        e.request_protocol, e.request_queues, e.request_lock = True, {}, threading.Lock()
+        e.slot_live, e.request_sequence, e.sent = [], 0, []
+
+        def send(text, process=None):
+            e.sent.append(text)
+            for line in lines:
+                e.request_queues[text.split()[1]].put(line)
+        e._send = send
+        return e
+
+    def test_a_token_is_yielded_with_its_lp_line_read(self):
+        e = self.engine("STARTED", "T 72", "LP -0.100000 72:-0.1 65:-2.5", "T 105", "LP -0.200000 105:-0.2 65:-3",
+                        "DONE 2 3 0 2 stop 0 0 0")
+        cancel, seen = threading.Event(), []
+        for t in e.generate([1, 2, 3], 8, {"logprobs": True, "top_logprobs": 2}, cancel):
+            if t is not None:
+                seen.append((t, [x[0] for x in cancel._strata_lp_lines]))
+        self.assertEqual(seen, [(72, [72]), (105, [72, 105])])
+        self.assertIn(" logprobs=2 ", e.sent[0])
+        self.assertEqual(cancel._strata_lp_lines[1][1], "LP -0.200000 105:-0.2 65:-3")
+        self.assertEqual(e.last["finish"], "stop")
+
+    def test_a_line_read_after_a_token_without_its_lp_line_is_not_lost(self):
+        e = self.engine("T 72", "DONE 1 3 0 1 length 0 0 0")
+        cancel = threading.Event()
+        self.assertEqual([t for t in e.generate([1], 1, {"logprobs": True}, cancel) if t is not None], [72])
+        self.assertEqual(list(cancel._strata_lp_lines), [])
+        self.assertEqual(e.last["finish"], "length")
+
+    def test_not_asked_reads_as_before(self):
+        e = self.engine("T 72", "T 105", "DONE 2 3 0 2 stop 0 0 0")
+        cancel = threading.Event()
+        self.assertEqual([t for t in e.generate([1], 8, {}, cancel) if t is not None], [72, 105])
+        self.assertFalse(hasattr(cancel, "_strata_lp_lines"))
+        self.assertNotIn("logprobs=", e.sent[0])
+
+
 class Api(unittest.TestCase):
     def setUp(self):
         self.tok = Tokenizer()
@@ -350,13 +395,15 @@ class Api(unittest.TestCase):
         self.engine.batch = 0
         self.assertIn("logprobs", self.post({"logprobs": True})["choices"][0])
 
-    def test_logprobs_are_refused_by_a_page_pool_engine(self):
-        # strata-q38 / strata-ds41 answer RUN lines without LP lines: even max_tokens 1 would get an empty list
-        self.engine.request_protocol = True
-        with self.assertRaises(urllib.error.HTTPError) as cm:
-            self.post({"logprobs": True, "max_tokens": 1})
-        self.assertEqual(cm.exception.code, 400)
-        self.assertIn("strata-q38", cm.exception.read().decode())
+    def test_a_page_pool_engine_answers_logprobs_beside_other_requests(self):
+        # strata-q38 / strata-ds41 run several requests at once (their `batch` is the request capacity) and print an
+        # LP line after every token of each, so a reply of any length gets its entries
+        self.engine.request_protocol, self.engine.batch, self.engine.info = True, 2, {"request_queue": 1}
+        try:
+            choice = self.post({"logprobs": True, "max_tokens": 50})["choices"][0]
+        finally:
+            self.engine.request_protocol, self.engine.batch, self.engine.info = False, 0, {}
+        self.assertEqual("".join(e["token"] for e in choice["logprobs"]["content"]), choice["message"]["content"])
 
     def test_allowed_token_ids_outside_the_vocabulary_is_a_400(self):
         # emit_lp_line indexes its logits row with each named id, so an id past the vocabulary would read out of

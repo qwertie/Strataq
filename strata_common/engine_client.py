@@ -776,6 +776,22 @@ class LPLines(collections.deque):
         self.owner = owner
 
 
+def take_lp_line(lines_q, token: int, own) -> object:
+    """Reads the line that follows token `token`'s T line.  The engine writes a token and its LP line in one flush,
+    so that line is the LP line when the request asked for logprobs: it goes on `own` (an LPLines; None drops it)
+    and NO_LINE is returned.  Any other line is returned for the caller to handle next; NO_LINE also when none came
+    within half a second."""
+    try:
+        line = lines_q.get(timeout=0.5)
+    except queue.Empty:
+        return NO_LINE
+    if not (isinstance(line, str) and line.startswith("LP ")):
+        return line
+    if own is not None:
+        own.append((token, line))
+    return NO_LINE
+
+
 class _RequestOwned:
     """#4451: a per-request control field of a --batch engine.  With batch slots several requests run on their own
     threads, and the control lines serve one at a time; a field every request writes (`_ctl_mode`, `_ctl_result`,
@@ -1564,7 +1580,7 @@ class StrataEngine:
 
     def gen_keys(self, sampling: dict | None) -> str:
         """Gets the request's key=value options for this engine's GEN / BGEN / RUN line."""
-        return self.sampling_keys(sampling or {}, self.split_engine)
+        return self.sampling_keys(sampling or {}, getattr(self, "split_engine", False))
 
     @staticmethod
     def sampling_keys(sampling: dict, split_engine: bool = False) -> str:
@@ -1776,17 +1792,7 @@ class StrataEngine:
             if line.startswith("T "):
                 t = int(line[2:])
                 if want_lp:
-                    # the engine writes the token and its LP line in one flush: the next line is that one, or a
-                    # line this reader must still see (held for the next turn, as generate() does)
-                    try:
-                        held = lines_q.get(timeout=0.5)
-                    except queue.Empty:
-                        held = NO_LINE
-                    if isinstance(held, str) and held.startswith("LP "):
-                        own = getattr(cancel, "_strata_lp_lines", None)
-                        if own is not None:
-                            own.append((t, held))
-                        held = NO_LINE
+                    held = take_lp_line(lines_q, t, getattr(cancel, "_strata_lp_lines", None))
                 on_token(t)
                 if not stopped and (cancel.is_set() or (stop_when is not None and stop_when())):
                     send_stop()
@@ -2274,6 +2280,12 @@ class StrataEngine:
 
         complete, sent, stopped, admitted = False, False, False, False
         output, carry = [], {}
+        # logprobs: the engine prints a token's LP line right after its T line; it goes on the request's own Event
+        # (several requests run at once) before the token is yielded, so whoever takes the token finds its line
+        want_lp = top_logprobs(sampling or {}) is not None
+        if want_lp:
+            cancel._strata_lp_lines = LPLines(cancel)
+        held = NO_LINE                                   # a line read while looking for a token's LP line
         prompt_ms, prompt_read = 0.0, None
         initial_reused = None
         self.last = {}
@@ -2300,7 +2312,10 @@ class StrataEngine:
                     self._send(f"CANCEL {identity}", process=process)
                     stopped = True
                 try:
-                    line = channel.get(timeout=0.1)
+                    if held is NO_LINE:
+                        line = channel.get(timeout=0.1)
+                    else:
+                        line, held = held, NO_LINE
                 except queue.Empty:
                     if self.proc is not process or self.gen != born or not self.alive():
                         raise EngineDied("the engine ended during this request")
@@ -2336,6 +2351,8 @@ class StrataEngine:
                     live["generated"] += 1
                     live["first_token"] = live["first_token"] or time.time()
                     output.append(int(fields[1]))
+                    if want_lp:
+                        held = take_lp_line(channel, output[-1], cancel._strata_lp_lines)
                     yield output[-1]
                 elif fields[0] == "RESUME":
                     live["reused"] = int(fields[1])
@@ -3116,15 +3133,7 @@ class StrataEngine:
                         return
                     t = int(line[2:])
                     if want_lp:
-                        # the engine writes the token and its `LP` line in one flush, so the line is
-                        # here now; an engine without logprobs leaves the next line a normal one
-                        try:
-                            carry = lines_q.get(timeout=0.5)
-                        except queue.Empty:
-                            carry = NO_LINE
-                        if isinstance(carry, str) and carry.startswith("LP "):
-                            self.lp_lines.append((t, carry))
-                            carry = NO_LINE
+                        carry = take_lp_line(lines_q, t, self.lp_lines)
                     yield t
                 elif line.startswith("PP "):
                     f = line.split()

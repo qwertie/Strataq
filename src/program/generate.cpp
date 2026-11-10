@@ -202,46 +202,16 @@ static void df2_tap_dump(const float* dev, int64_t rows, int64_t pos0, int64_t f
 // logprobs=K / allowed=...: one `LP` line for the token just emitted, from `ver`'s head
 // logits for the window row it came from (before sampling, penalties and temperature).
 // Format matches the SYCL port's LP line so one server-side reader serves both.
-// Called only when the request asked (`req_logprobs >= 0`): a request without logprobs never reaches it, so the
+// Called only when the request asked (`lp.top >= 0`): a request without logprobs never reaches it, so the
 // default path does no work for this and prints exactly what it printed before.
-static void emit_lp_line(const strata::core::Verifier& ver, int t, int32_t token, int k,
-                         const std::vector<int32_t>& allowed) {
-    if (k < 0) return;
+static void emit_lp_line(const strata::core::Verifier& ver, int t, int32_t token,
+                         const strata::serve::LogprobRequest& lp) {
+    if (lp.top < 0) return;
     static std::vector<float> row;
     row.resize((size_t) ver.vocab());
-    if (!ver.copy_logits(t, row.data()) || token < 0 || (size_t) token >= row.size()) {
-        strata::serve::print_response("LP nan\n");
-        return;
-    }
-    float mx = -INFINITY;
-    for (const float v : row) mx = std::max(mx, v);
-    double se = 0.0;
-    for (const float v : row) se += std::exp((double) v - (double) mx);
-    const double lse = (double) mx + std::log(se);
-    strata::serve::print_response("LP %.6f", (double) row[(size_t) token] - lse);
-    if (!allowed.empty()) {
-        // Only the ids the caller named; the server renormalises over them, which is what allowed_token_ids means.
-        // The server refuses an id past the vocabulary with a 400 only when it can read the vocabulary size from the
-        // tokenizer.  The engine's own vocab() is the authority: an id past it is left off the line, so the logits
-        // are never read out of bounds.
-        for (const int32_t id : allowed) {
-            if (id == token || id < 0 || (int64_t) id >= ver.vocab()) continue;
-            strata::serve::print_response(" %d:%.6f", (int) id, (double) row[(size_t) id] - lse);
-        }
-        strata::serve::print_response("\n");
-        return;
-    }
-    if (k > 0) {
-        static std::vector<int32_t> ord;
-        ord.resize(row.size());
-        for (size_t v = 0; v < row.size(); ++v) ord[v] = (int32_t) v;
-        const int kk = std::min<int>(k, (int) row.size());
-        std::partial_sort(ord.begin(), ord.begin() + kk, ord.end(),
-                          [&](int32_t a, int32_t b) { return row[(size_t) a] > row[(size_t) b]; });
-        for (int j = 0; j < kk; ++j)
-            strata::serve::print_response(" %d:%.6f", ord[(size_t) j], (double) row[(size_t) ord[(size_t) j]] - lse);
-    }
-    strata::serve::print_response("\n");
+    const bool copied = ver.copy_logits(t, row.data());
+    strata::serve::print_response("%s", strata::serve::format_logprob_line(copied ? row.data() : nullptr,
+                                                                            ver.vocab(), token, lp).c_str());
 }
 
 namespace {
@@ -7629,11 +7599,8 @@ int main(int argc, char** argv) {
             std::string req_bias_text;
             bool req_bias_present = false;
             int req_cvec = 1;   // cvec=0|1: a loaded control vector for this request (on when absent)
-            // logprobs=K (0..20): after each "T id" an "LP logprob id:logprob ..." line.
-            // -1 (absent) = no LP lines, so a server that never asks sees today's output.
-            int req_logprobs = -1;
-            // allowed=a,b,c: with logprobs, print only these token ids (renormalized server-side).
-            std::vector<int32_t> req_allowed;
+            // logprobs=K and allowed=a,b,c: an LP line after each "T id"; absent = none
+            strata::serve::LogprobRequest req_logprobs;
             // ckpt=0: a one-shot call whose turn no later request extends.  No checkpoint at its last turn boundary
             // (so no split there) nor every --prompt-cache-every tokens, and its session is neither continued nor
             // parked after it.  It still resumes from a checkpoint it matches, and still saves the system-prompt root
@@ -7661,7 +7628,8 @@ int main(int argc, char** argv) {
             std::vector<uint64_t> req_img_keys;
             bool req_pcie_set = false;   // the request names its own share (the measured one holds meanwhile)
             for (const auto& [key, val] : req.keys) {   // (#75: GENI takes the same keys; image requests were greedy)
-                if (strata::serve::read_sampling_key(key, val, smp)) continue;
+                if (strata::serve::read_sampling_key(key, val, smp) ||
+                    strata::serve::read_logprob_key(key, val, req_logprobs)) continue;
                 const float fv = std::strtof(val.c_str(), nullptr);
                 if (key == "logit_bias") { req_bias_text = val; req_bias_present = true; }
                 else if (key == "pen_from") req_pen_from = std::atoll(val.c_str());
@@ -7669,17 +7637,6 @@ int main(int argc, char** argv) {
                 else if (key == "ckpt") req_ckpt = std::atoi(val.c_str()) != 0;
                 else if (key == "prefill") req_prefill_only = std::atoi(val.c_str()) != 0;
                 else if (key == "pin") req_pin = std::max<long long>(0, std::atoll(val.c_str()));
-                else if (key == "logprobs") req_logprobs = std::atoi(val.c_str());
-                else if (key == "allowed") {
-                    size_t p = 0;
-                    while (p < val.size()) {
-                        const size_t c = val.find(",", p);
-                        const std::string one = val.substr(p, c == std::string::npos ? std::string::npos : c - p);
-                        if (!one.empty()) req_allowed.push_back((int32_t) std::atoi(one.c_str()));
-                        if (c == std::string::npos) break;
-                        p = c + 1;
-                    }
-                }
                 else if (key == "pcie_frac") { req_pcie_frac = std::clamp((double) fv, 0.0, 1.0); req_pcie_set = true; }
                 else if (key == "spec_min_p") { req_spec_min_p = std::clamp((double) fv, 0.0, 1.0); req_min_p_set = true; }
                 else if (key == "draft") req_draft = val;
@@ -10376,7 +10333,7 @@ int main(int argc, char** argv) {
                     bool eos = false;
                     for (int i = 0; !nf && i <= a && produced_n < max_new && !eos; ++i) {
                         print_response("T %d\n", (int) outp[(size_t) i]);
-                        if (req_logprobs >= 0) emit_lp_line(V1(A), i, outp[(size_t) i], req_logprobs, req_allowed);
+                        if (req_logprobs.top >= 0) emit_lp_line(V1(A), i, outp[(size_t) i], req_logprobs);
                         strata::core::progress_beat();
                         ++produced_n;
                         if (o.suffix_draft > 0) wplan.sfx.append(outp[(size_t) i]);
@@ -10925,7 +10882,7 @@ int main(int argc, char** argv) {
                 bool eos = false;
                 for (int i = merged ? a : 0; i <= a && produced_n < max_new && !eos; ++i) {   // (merged: row T-1 only)
                     print_response("T %d\n", (int) outv[(size_t) i]);
-                    if (req_logprobs >= 0) emit_lp_line(ver, i, outv[(size_t) i], req_logprobs, req_allowed);
+                    if (req_logprobs.top >= 0) emit_lp_line(ver, i, outv[(size_t) i], req_logprobs);
                     strata::core::progress_beat();
                     ++produced_n;
                     wplan.append(outv[(size_t) i]);

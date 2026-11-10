@@ -2137,6 +2137,11 @@ class Service:
                   if isinstance(req.get("response_format"), dict) else None,
                   "input": raw[:262144], "input_truncated": len(raw) > 262144,
                   "output": "", "reasoning": "", "output_truncated": False, "reasoning_truncated": False,
+                  # None where no logprobs can come: only a chat completion that asks has them
+                  "logprobs": MonitorLogprobs(len(getattr(self.tok, "tokens", ())) or None)
+                  if path == "/v1/chat/completions"
+                  and engine_client.top_logprobs(req) is not None else None, "logprobs_truncated": False,
+                  "logprobs_dropped": False,               # (made room for newer ones: MONITOR_LOGPROBS_BYTES)
                   "queue_s": 0.0, "load_s": 0.0, "first_token_s": None,
                   "_clock": time.perf_counter()}
         with self.status_lock:
@@ -2147,6 +2152,10 @@ class Service:
     CONTEXT_WAIT_S = 2.0      # how long GET /api/context waits for the engine's turn before it answers with what it has
     SETTINGS_WAIT_S = 30.0    # how long POST /v1/memory waits for the engine's turn before it answers 503
     PREVIEW_TOKENS = 24       # the start of each conversation's first user message in the list
+    # The most tokens of a reply whose logprobs a monitor record keeps (MonitorLogprobs): 3.7 MB at 20 alternatives,
+    # 112 bytes a token (sys.getsizeof of a 4400-token record's buffers, 3-byte ids)
+    MONITOR_LOGPROBS_TOKENS = 32768
+    MONITOR_LOGPROBS_BYTES = 32 << 20     # the most all records' MonitorLogprobs take together
 
     @contextlib.contextmanager
     def _engine_turn(self, wait: float | None = None):
@@ -2386,18 +2395,43 @@ class Service:
         return 200, {"id": cid, "busy": not turn, "at": shown["at"], "tokens": shown["tokens"].tolist(),
                      "pieces": token_pieces(self.tok, shown["tokens"])}
 
-    def request_records(self, request_id=None):
+    def request_records(self, request_id=None, logprobs=False):
+        if request_id:
+            return self._request_record(request_id, logprobs)
         with self.status_lock:
             records = list(self.api_requests)
-            if request_id:
-                record = next((r for r in records if r["id"] == request_id), None)
-                if record is None:
-                    return None
-                return {k: v for k, v in record.items() if not k.startswith("_")}
             return [{k: v for k, v in r.items()
-                     if k not in ("input", "output", "reasoning", "response") and not k.startswith("_")}
+                     if k not in ("input", "output", "reasoning", "response", "logprobs") and not k.startswith("_")}
                     | {"wallclock_s": r.get("wallclock_s", round(time.perf_counter() - r["_clock"], 3))}
                     for r in reversed(records)]
+
+    def drop_old_logprobs(self, current):
+        """Empties the monitor's oldest MonitorLogprobs, never `current` record's, while they all take more than
+        MONITOR_LOGPROBS_BYTES.  The caller holds status_lock."""
+        held = [r for r in self.api_requests if r["logprobs"]]
+        total = sum(r["logprobs"].nbytes for r in held)
+        for r in held:
+            if total <= self.MONITOR_LOGPROBS_BYTES:
+                return
+            if r is not current:
+                total -= r["logprobs"].nbytes
+                r.update(logprobs=MonitorLogprobs(None), logprobs_dropped=True)
+
+    def _request_record(self, request_id, logprobs):
+        """Gets GET /api/requests?id='s answer: the monitor record, None when it is no longer kept.  Its logprobs are
+        "logprobs_tokens", the number of tokens kept (None when none can come), and only when `logprobs` (&logprobs=1)
+        also the entries: decoding them takes long, and they can be tens of MB of JSON."""
+        with self.status_lock:
+            record = next((r for r in self.api_requests if r["id"] == request_id), None)
+            if record is None:
+                return None
+            out = {k: v for k, v in record.items() if not k.startswith("_") and k != "logprobs"}
+            kept = record["logprobs"]
+            out["logprobs_tokens"] = len(kept) if kept is not None else None
+            kept = kept.copy() if kept is not None and logprobs else None   # a running reply adds more meanwhile
+        if kept is not None:                           # decoded outside the lock
+            out["logprobs"] = kept.entries(self)
+        return out
 
     def metrics(self, all_requests=False) -> dict:
         """GET /metrics: what the Monitor tab shows - the engine's facts, what it is doing, the last requests, and
@@ -3785,6 +3819,7 @@ class LogprobEntries:
 
     def __init__(self, svc, allowed=(), owner=None):
         self.tok, self.stop_ids = svc.tok, svc.stop_ids
+        self.pieces = token_piece_table(svc)
         self.allowed = [i for i in allowed]
         self.inc = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self.pending = []                          # entries read but not yet given to a piece of text
@@ -3841,19 +3876,30 @@ class LogprobEntries:
                     continue
                 if not math.isfinite(lp) or not all(math.isfinite(v) for _, v in alts):
                     continue
-                b = self.raw(t)
-                e = {"token": self.inc.decode(b), "logprob": lp, "bytes": list(b),
-                     "top_logprobs": []}
                 if self.allowed:
                     alts = [(i, v) for i, v in alts if i in self.allowed]
-                for i, v in alts:
-                    alt = self.raw(i)
-                    e["top_logprobs"].append({"token": alt.decode("utf-8", "replace"),
-                                              "logprob": v, "bytes": list(alt)})
+                e = self.entry(t, lp, alts)
                 if self.allowed:
                     e = self._renormalise(e, t, lp)
                 out.append(e)
         return out
+
+    def entry(self, t, lp, alts) -> "LogprobToken":
+        """Builds the entry of chosen token `t` with logprob `lp` and alternatives `alts` ((id, logprob) pairs).  Its
+        text comes from the incremental decoder, so the entries of one reply must be built in the reply's order."""
+        b, _, listed = self.piece(t)
+        top = [LogprobToken(i, {"token": p[1], "logprob": v, "bytes": p[2]})
+               for i, v in alts for p in [self.piece(i)]]
+        return LogprobToken(t, {"token": self.inc.decode(b), "logprob": lp, "bytes": listed, "top_logprobs": top})
+
+    def piece(self, t) -> tuple:
+        """Gets token `t`'s bytes, its text on its own (a part of a UTF-8 character as U+FFFD) and its bytes as a
+        list (the API's "bytes", shared by every entry of that token), from token_piece_table's table."""
+        p = self.pieces.get(t)
+        if p is None:
+            b = self.raw(t)
+            p = self.pieces[t] = (b, b.decode("utf-8", "replace"), list(b))
+        return p
 
     def _renormalise(self, e, t, lp):
         """Keep only the named ids and normalise over them, so they sum to 1.
@@ -3870,8 +3916,8 @@ class LogprobEntries:
         cand = e["top_logprobs"]
         own = None
         if t in self.allowed:                      # named, and not repeated on the line: it is a candidate
-            b = self.raw(t)
-            own = {"token": b.decode("utf-8", "replace"), "logprob": lp, "bytes": list(b)}
+            _, text, listed = self.piece(t)
+            own = LogprobToken(t, {"token": text, "logprob": lp, "bytes": listed})
             cand = [own] + cand
         if not cand:
             return e                               # no named id observed for this token: its own logprob, no top
@@ -3885,6 +3931,102 @@ class LogprobEntries:
         if own is not None:                        # the chosen token is in the distribution: report its own value
             e["logprob"] = own["logprob"]           # (it used to copy the first alternative's, another token's)
         return e
+
+
+def token_piece_table(svc) -> dict:
+    """Gets the table of token id -> LogprobEntries.piece, kept on `svc` for its tokenizer and filled as ids are first
+    asked for, so that a token's text is looked up once instead of decoded for every entry."""
+    pieces = getattr(svc, "_token_pieces", None)
+    if pieces is None or pieces[0] is not svc.tok:
+        pieces = svc._token_pieces = (svc.tok, {})
+    return pieces[1]
+
+
+class LogprobToken(dict):
+    """A logprobs entry or alternative, the dict the API sends, that also remembers its token's id in `tid`, so that
+    the API monitor can keep a reply's numbers without its text (MonitorLogprobs)."""
+
+    __slots__ = ("tid",)
+
+    def __init__(self, tid: int, fields: dict):
+        dict.__init__(self, fields)                # (positional and no kwargs: tens of thousands are made at once)
+        self.tid = tid
+
+
+class MonitorLogprobs:
+    """The logprobs entries a reply carried, as the API monitor keeps them: numbers, without text.  Each part of the
+    reply ("reasoning_content", "content") is two packed runs of rows: one row a token (its id, logprob and number of
+    alternatives), and one row an alternative (its id and logprob), the tokens' alternatives one after another.  An id
+    takes 3 bytes when the vocabulary fits in them (4 otherwise), a logprob 2 (fixed point: -logprob in steps of
+    1/SCALE, -32 and below kept as -32), the count 2.  entries() turns them back into the API's entries for
+    GET /api/requests?id=."""
+    PARTS = ("reasoning_content", "content")     # the order the reply writes them in, which entries() decodes in
+    SCALE = 2048
+
+    def __init__(self, n_vocab):
+        self.width = 3 if n_vocab and n_vocab <= 1 << 24 else 4
+        self.parts, self.tokens = {}, 0          # part -> (token rows, alternative rows)
+
+    def __len__(self):
+        return self.tokens
+
+    @property
+    def nbytes(self) -> int:
+        """Gets the bytes the packed rows take."""
+        return sum(len(heads) + len(alts) for heads, alts in self.parts.values())
+
+    def add(self, part: str, e: LogprobToken):
+        """Appends entry `e` of reply part `part`."""
+        alts = e["top_logprobs"][:0xFFFF]          # (a count of 2 bytes: allowed_token_ids can name more)
+        heads, rows = self.parts.setdefault(part, (bytearray(), bytearray()))
+        heads += self._pack(e.tid, e["logprob"]) + len(alts).to_bytes(2, "little")
+        for a in alts:
+            rows += self._pack(a.tid, a["logprob"])
+        self.tokens += 1
+
+    def copy(self) -> "MonitorLogprobs":
+        """Gets a copy that a running reply's capture does not change, to decode without the monitor's lock."""
+        out = MonitorLogprobs(None)
+        out.width, out.tokens = self.width, self.tokens
+        out.parts = {k: (bytes(heads), bytes(alts)) for k, (heads, alts) in self.parts.items()}
+        return out
+
+    def entries(self, svc) -> dict:
+        """Gets the entries by part, their text decoded as the reply's was (LogprobEntries)."""
+        build, out = LogprobEntries(svc), {}
+        for part in self.PARTS:
+            if part not in self.parts:
+                continue
+            heads, alts = self.parts[part]
+            (ids, lps, counts), (alt_ids, alt_lps, _) = self._columns(heads, True), self._columns(alts, False)
+            at, entries = 0, []
+            for t, lp, n in zip(ids, lps, counts):
+                entries.append(build.entry(t, lp, zip(alt_ids[at:at + n], alt_lps[at:at + n])))
+                at += n
+            out[part] = entries
+        return out
+
+    @classmethod
+    def rounded(cls, logprob: float) -> float:
+        """Gets `logprob` as entries() gives it back (the tests compare with it)."""
+        return -cls._steps(logprob) / cls.SCALE
+
+    @classmethod
+    def _steps(cls, logprob: float) -> int:
+        return min(0xFFFF, max(0, round(-logprob * cls.SCALE)))
+
+    def _pack(self, tid, logprob) -> bytes:
+        return tid.to_bytes(self.width, "little") + self._steps(logprob).to_bytes(2, "little")
+
+    def _columns(self, buf, counted: bool) -> tuple:
+        """Gets the ids, logprobs and (`counted`: token rows) counts of the rows in `buf`, as lists."""
+        import numpy as np                       # (only here: the monitor's detail is its only user)
+        w = self.width
+        rows = np.frombuffer(buf, np.uint8).reshape(-1, w + 2 + 2 * counted).astype(np.int64)
+        number = lambda first, size: sum(rows[:, first + k] << 8 * k for k in range(size))   # little-endian
+        return (number(0, w).tolist(), (-number(w, 2) / self.SCALE).tolist(),
+                number(w + 2, 2).tolist() if counted else None)
+
 
 def prompt_progress(svc: Service):
     """The last PP line as llama.cpp's `prompt_progress`, so a client written for llama.cpp reads both servers: the
@@ -4842,8 +4984,9 @@ def make_handler(svc: Service):
                 return
             if path == "/api/requests" and svc.api_monitor:
                 if self._authorized():
-                    request_id = parse_qs(urlsplit(self.path).query).get("id", [None])[0]
-                    records = svc.request_records(request_id)
+                    query = parse_qs(urlsplit(self.path).query)
+                    request_id = query.get("id", [None])[0]
+                    records = svc.request_records(request_id, query.get("logprobs") == ["1"])
                     self._json(404 if records is None else 200,
                                {"error": {"message": "request no longer retained"}} if records is None else
                                records if request_id else {"requests": records, "retention": 100, "persistent": False,
@@ -5355,10 +5498,12 @@ def make_handler(svc: Service):
             try:
                 for item in items:
                     if item is not None:
+                        logprobs = None                    # only a chat completion's chunks carry them
                         if api == "openai":
                             delta = item["choices"][0]["delta"]
                             content, reasoning = delta.get("content", ""), delta.get("reasoning_content", "")
                             usage, timings = item.get("usage"), item.get("timings")
+                            logprobs = item["choices"][0].get("logprobs")
                         elif api == "responses":
                             kind = item["type"]
                             content = item["delta"] if kind == "response.output_text.delta" else ""
@@ -5379,9 +5524,25 @@ def make_handler(svc: Service):
                                 self.record["usage"] = usage
                             if timings:
                                 self.record["timings"] = timings
+                            # (a record whose entries were dropped keeps none: they would start mid-answer)
+                            if logprobs and self.record["logprobs"] is not None and not self.record["logprobs_dropped"]:
+                                self._keep_logprobs(logprobs)
+                                svc.drop_old_logprobs(self.record)
                     yield item
             finally:
                 items.close()
+
+        def _keep_logprobs(self, logprobs):
+            """Adds a chunk's logprobs (OpenAI's shape: "content" / "reasoning_content" -> entries) to the monitor
+            record's, up to Service.MONITOR_LOGPROBS_TOKENS tokens; past that, only "logprobs_truncated" is set, so
+            the record keeps the start of the answer.  The caller holds svc.status_lock."""
+            kept = self.record["logprobs"]
+            for part, entries in logprobs.items():
+                for e in entries or ():
+                    if len(kept) >= svc.MONITOR_LOGPROBS_TOKENS:
+                        self.record["logprobs_truncated"] = True
+                        return
+                    kept.add(part, e)
 
         def _openai(self, req):
             req = svc.with_shared(req, "openai")
@@ -5402,15 +5563,13 @@ def make_handler(svc: Service):
             # put on it either.  A reply that is not streamed does hold every entry (its token, bytes and up to 20
             # alternatives) until it ends, so a long one holds a lot: streaming hands each entry out with its chunk.
             engine_client.refuse_for_split(svc.engine, req)   # (before the batch-slot rule below: its message would say to run without --parallel)
-            if engine_client.top_logprobs(req) is not None and getattr(svc.engine, "request_protocol", False):
-                # The page-pool engines' RUN lines have no LP lines yet (docs/UPSTREAM_PORTING.md), so the reply
-                # would carry an empty list, even for max_tokens 1.
-                raise ValueError("logprobs is not available with strata-q38 or strata-ds41 yet")
-            if engine_client.top_logprobs(req) is not None and batch_slots_on(svc.engine) and max_req != 1:
+            if engine_client.top_logprobs(req) is not None and batch_slots_on(svc.engine) and max_req != 1 \
+                    and not (getattr(svc.engine, "info", None) or {}).get("request_queue"):
                 # --parallel/--batch: a slot's "BT <slot> <id>" lines carry no LP line, and the batched loop never
                 # calls emit_lp_line (src/program/generate.cpp); an admission -- a max_tokens 1 request -- is read
                 # as GEN 1, which does write them.  Past that one token a reply would hold entries for a prefix
-                # only, which a client cannot tell from the model's own answer, so the longer one is refused.
+                # only, which a client cannot tell from the model's own answer, so the longer one is refused.  The
+                # paged engines (strata-q38, strata-ds41: INFO request_queue=1) print an LP line after every token.
                 raise ValueError('logprobs is available with "parallel" (batch slots) only for max_tokens 1; '
                                  'run the server without "--parallel" for longer replies')
             n_vocab = len(getattr(svc.tok, "tokens", ())) or None

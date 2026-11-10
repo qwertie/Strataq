@@ -995,10 +995,11 @@ bool PagedEngine::serve_request(const std::string& line, bool admit) {
         return true;
     }
     int64_t priority = 0;
+    strata::serve::LogprobRequest logprobs;
     for (const auto& [key, value] : req.keys)
         if (key == "priority")
             priority = std::atoll(value.c_str());
-        else
+        else if (!strata::serve::read_logprob_key(key, value, logprobs))
             (void) strata::serve::read_sampling_key(key, value, smp);   // the other engines' keys are not this one's
     const int64_t n = (int64_t) ids.size();
     if (input_.is_cancel_requested(req.request_id)) {
@@ -1079,6 +1080,7 @@ bool PagedEngine::serve_request(const std::string& line, bool admit) {
     h.images = std::move(images);
     model_.attach_images(h.parts);
     model_.start_request(session, {smp, req.keys});
+    model_.logprobs[(size_t) session].start(std::move(logprobs), n - 1);
     const char* finish = "length";
     int64_t read_to = resume;   // the prompt tokens the session holds
     if (!make_room(h, n - 1, err, priority)) {   // refused: the engine stays up
@@ -1175,6 +1177,7 @@ bool PagedEngine::create_conversation(std::string& err) {
     }
     at_.push_back(held_.size());
     held_.push_back(std::move(h));
+    model_.logprobs.resize(held_.size());
     return true;
 }
 
@@ -1278,8 +1281,10 @@ bool PagedEngine::decode_step() {
         h->gpu_tokens.shrink_to(h->live.size());
         if (!d.fed.empty() || !d.emitted.empty())
             h->last_tokens_at = (uint64_t) std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        for (const int32_t t : d.emitted)
-            print_response("T %d\n", (int) t);
+        // the i-th token emitted follows the row at d.pos - emitted + i
+        for (size_t i = 0; i < d.emitted.size(); ++i)
+            print_response("T %d\n%s", (int) d.emitted[i], model_.logprobs[(size_t) h->session].take(
+                d.pos - (int64_t) d.emitted.size() + (int64_t) i).c_str());
         if (d.finish == nullptr)
             continue;
         if (!wait_model_state())

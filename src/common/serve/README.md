@@ -13,7 +13,8 @@ engine).
   `GET /v1/memory`): each engine fills a `MemoryReport` (`EngineHooks::describe_memory`), and the loop adds the parked
   conversations and writes the lines.
 - `request.hpp`: a request line (`RUN`, `RUNI`, plus legacy handler forms) split into its parts, its token ids, and the
-  sampling keys every engine reads.
+  sampling keys every engine reads; the logprobs keys and their `LP` lines (`format_logprob_line`, and `RowLogprobs`,
+  which the paged engine's models fill as they pick tokens).
 - `paged_engine.hpp`: the paged engine (docs/MEMORY_MANAGER_PLAN.md, "One shared paged engine"): conversations in
   page pools, several decoding at once, pausing to RAM and the SSD, priorities, `CHANGE_SETTINGS`, the pools' resizes
   and start-up fill, the adaptive tier, the layer cut's planning and moves. It runs a model through `paged_model.hpp`

@@ -14,6 +14,8 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -52,6 +54,42 @@ struct Sampling {
 
 /// Stores `value` in `s` if `key` names a sampling option; false for any other key.
 bool read_sampling_key(const std::string& key, const std::string& value, Sampling& s);
+
+/// The log probabilities a request asks for, which the engine prints as an LP line after each token's T line:
+/// logprobs=K and allowed=a,b,c.
+struct LogprobRequest {
+    int top = -1;                    ///< K (0..20): how many of the most likely tokens to list; -1: no LP lines
+    std::vector<int32_t> allowed;    ///< token ids listed instead of the K most likely (the server renormalises them)
+};
+
+/// Stores `value` in `r` if `key` is logprobs or allowed; false for any other key.
+bool read_logprob_key(const std::string& key, const std::string& value, LogprobRequest& r);
+
+/// Formats the LP line of `token` from the `vocab` logits of the row it was picked after (before penalties and
+/// temperature): "LP <logprob> [id:logprob ...]\n", listing r.allowed (but `token` and ids past the vocabulary) or
+/// else the r.top most likely tokens; "LP nan\n" when `logits` is null or `token` lies outside the vocabulary.
+std::string format_logprob_line(const float* logits, int64_t vocab, int32_t token, const LogprobRequest& r);
+
+/// One conversation's LP lines in the paged engine: the model formats one for each token it picks (note), the engine
+/// prints those of the tokens a step kept (take).  A step's rejected guesses leave lines that a later row at the same
+/// position replaces.
+class RowLogprobs {
+public:
+    /// Starts a request that asked for `r` and whose first answer token follows the row at `first`.
+    void start(LogprobRequest r, int64_t first);
+    /// Formats the LP line of `token`, picked after the row at `pos`, when the request asked for LP lines and the row
+    /// is past its prompt; `copy` then writes that row's `vocab` head logits on the host (false: they are lost).
+    void note(int64_t pos, int32_t token, int64_t vocab, const std::function<bool(float*)>& copy);
+    /// Gets and forgets the LP line of the token picked after the row at `pos`: "" when the request asked for none,
+    /// "LP nan\n" when no line was noted.
+    std::string take(int64_t pos);
+
+private:
+    LogprobRequest request_;
+    int64_t first_ = 0;
+    std::map<int64_t, std::string> lines_;   ///< by the row's position
+    std::vector<float> logits_;              ///< note's host copy of one row
+};
 
 /// Reads comma-separated hexadecimal numbers (the img_keys option: one key per picture); empty if any is malformed.
 std::vector<uint64_t> parse_hex_list(const std::string& text);

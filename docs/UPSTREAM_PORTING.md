@@ -192,9 +192,9 @@ code updates its rows here. Rows are grouped by step; `{a,b}` lists several file
 - Old engine only, keep off in strata-q38: split serving (ccf18ea1), coalesced prompt reads (1fb3e9a3), replicas with
   a shared expert arena (16e08b50), `STRATA_EXPERT_NIBBLE` (slot sizes against the pool's page size), the old
   conversation cache's park and checkpoint opt-ins, `STRATA_RAM_ADAPT`, `STRATA_VRAM_FREE=device`.
-- Worth adding to strata-q38 later: `wait_for_ram` before sizing its RAM pool (b82d1d45), `LP` logprob lines in
-  `paged_engine.cpp`, and a measurement under the server's Linux CUDA parallel-stack env defaults (dd471d31, 2a9ccfe3,
-  b60fbb54), or leaving its engine out of them.
+- Worth adding to strata-q38 later: `wait_for_ram` before sizing its RAM pool (b82d1d45), and a measurement under
+  the server's Linux CUDA parallel-stack env defaults (dd471d31, 2a9ccfe3, b60fbb54), or leaving its engine out of
+  them.
 
 **`memory-manager` merged `local` (debc4619) on 2026-11-09.** The hand ports above are done: the loader hunks are in
 `Model::load()` and `options.cpp`; the 4-bit slot code is shared in `include/strata/common/experts/nibble_cache.hpp`;
@@ -202,9 +202,9 @@ code updates its rows here. Rows are grouped by step; `{a,b}` lists several file
 strata-q38 until they are measured there; the new K/V readers take `units` (the sm_6x fast `qsa_block_scores_long`,
 `qsa_pattn_batch` and the new SYCL entry points refuse it and fall back); strata-q38's rows follow `kVerifyMaxT`
 (16 on HIP), `runconfig._LIVE_RANGE` allows 1-16; `child_env` gives paged engines none of the parallel-stack or GDN
-env defaults; `split.py` refuses split serving with a paged engine. Still open: `LP` logprob lines over the
-request-ID protocol (`generate_request` and `paged_engine.cpp`; until then the server refuses logprobs with a paged
-engine), and the Metal DeepSeek build's `FinishIn` layout against memory-manager's `KvRows`.
+env defaults; `split.py` refuses split serving with a paged engine. The paged engines print `LP` logprob lines
+(`RowLogprobs` in `request.hpp`). Still open: the Metal DeepSeek build's `FinishIn` layout against memory-manager's
+`KvRows`.
 
 **0.2.9 to 0.2.13.1, merged 2026-11-09:**
 

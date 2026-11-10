@@ -938,6 +938,16 @@ first-token and decode timings. `GET /api/requests` returns summaries and `GET /
 monitor keeps the newest 100 requests in memory until restart, 262,144 characters per field, with visible truncation flags.
 Headers are not recorded. Treat the history as sensitive when Strata is reachable from a network, and set an API key.
 
+A `/v1/chat/completions` request whose client asks for `logprobs` also keeps the numbers of the entries its answer
+carried, for up to 32,768 tokens, then sets `logprobs_truncated`. It keeps ids, and logprobs rounded to steps of
+1/2048 (about 4 decimals; -32 and below are kept as -32): 112 bytes a token at 20 alternatives. All requests together
+keep at most 32 MiB of them; past that the oldest requests' are dropped first, and their tab says so.
+`GET /api/requests?id=<id>` says how many tokens it kept (`logprobs_tokens`); `&logprobs=1` adds them as the API's
+entries (`logprobs`: `content` and `reasoning_content`). The request's **Probabilities** tab shows the answer with each
+token tinted by the probability the model gave it; hover a token, or focus it and move with the arrow keys, to see
+that probability and the likeliest tokens at its place. Other requests have no probabilities: the server does no
+extra work for them.
+
 Its **Context in VRAM** panel shows the conversations the engine holds, as the engine lists them when **Refresh** is
 pressed. The list next to the views names each one and says where it is (VRAM, or RAM or disk for a parked one), its
 size and how its first user message begins. A session's size is the tokens it holds of the most it can hold

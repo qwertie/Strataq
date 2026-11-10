@@ -275,6 +275,9 @@ private:
     std::vector<std::unique_ptr<Group>> groups_;
     /// Converts the shared step's chains to the verifier's row arguments.
     static bool get_row_inputs(const std::vector<strata::spec::StepRow>& rows, RowInputs& inputs, std::string& err);
+    /// Notes the LP lines of `picks`, the tokens after `rows`, from `ver`'s head logits (note_logprobs).
+    void note_row_logprobs(const strata::core::Verifier& ver, const RowInputs& rows,
+                           const std::vector<int32_t>& picks);
     /// Gets this window's rotary coordinates after ensuring its conversations' indexer tables are current.
     bool get_row_coordinates(const std::vector<strata::spec::StepRow>& rows, int32_t* out, std::string& err);
     /// Uploads changed indexer coordinates and, when shared, activates the prompt/drafter table.
@@ -1171,6 +1174,7 @@ bool PagedQwen::run_rows(const std::vector<strata::spec::StepRow>& rows, std::ve
         if (conv_.ver.nonfinite_in(r))
             picks[(size_t) r] = -1;
     picks_ = picks;
+    note_row_logprobs(conv_.ver, inputs, picks);
     return true;
 }
 
@@ -1242,6 +1246,7 @@ bool PagedQwen::finish_group(int group, std::vector<int32_t>& picks, std::string
     if (!verifier.finish_slot_rows(group * strata::kernels::kVerifyMaxT, picks, err))
         return false;
     g.picks = picks;
+    note_row_logprobs(verifier, g, picks);
     return true;
 }
 
@@ -1321,6 +1326,13 @@ bool PagedQwen::get_row_inputs(const std::vector<strata::spec::StepRow>& rows, R
         inputs.positions[r] = row.pos;
     }
     return true;
+}
+
+void PagedQwen::note_row_logprobs(const strata::core::Verifier& ver, const RowInputs& rows,
+                                  const std::vector<int32_t>& picks) {
+    for (int r = 0; r < rows.count; ++r)
+        note_logprobs(rows.sessions[(size_t) r], rows.positions[(size_t) r], picks[(size_t) r], ver.vocab(),
+                      [&](float* out) { return ver.copy_logits(r, out); });
 }
 
 bool PagedQwen::get_row_coordinates(const std::vector<strata::spec::StepRow>& rows, int32_t* out, std::string& err) {

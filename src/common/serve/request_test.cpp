@@ -1,6 +1,7 @@
 // The request lines of --serve (request.hpp), split as strata_common/engine_client.py writes them.
 #include "strata/common/serve/request.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 
@@ -48,6 +49,31 @@ int main() {
     Sampling s;
     check(read_sampling_key("top_k", "40", s) && s.top_k == 40, "a sampling key");
     check(!read_sampling_key("pin", "4", s), "another key");
+
+    LogprobRequest lp;
+    check(read_logprob_key("logprobs", "2", lp) && lp.top == 2 && !read_logprob_key("top_k", "4", lp), "logprobs");
+    const float logits[4] = {0.0f, 2.0f, 1.0f, 0.0f};   // log-softmax: -2.4938 -0.4938 -1.4938 -2.4938
+    check(format_logprob_line(logits, 4, 2, lp) == "LP -1.493812 1:-0.493812 2:-1.493812\n", "the top two");
+    check(format_logprob_line(nullptr, 4, 2, lp) == "LP nan\n" && format_logprob_line(logits, 4, 4, lp) == "LP nan\n",
+          "lost logits and a token past the vocabulary");
+    check(read_logprob_key("allowed", "3,9,,2", lp) && lp.allowed == std::vector<int32_t>{3, 9, 2}, "allowed");
+    check(format_logprob_line(logits, 4, 2, lp) == "LP -1.493812 3:-2.493812\n",
+          "allowed: the picked token and an id past the vocabulary are left out");
+
+    RowLogprobs rows;
+    rows.start({}, 5);
+    rows.note(5, 1, 4, [&](float*) -> bool { return check(false, "not asked: no copy"), false; });
+    check(rows.take(5).empty(), "not asked: no line");
+    rows.start({1, {}}, 5);
+    const auto copy = [&](float* out) { return std::copy(logits, logits + 4, out), true; };
+    rows.note(4, 1, 4, copy);   // a prompt row
+    rows.note(6, 2, 4, copy);   // a rejected guess, then the row that replaced it
+    rows.note(6, 1, 4, copy);
+    rows.note(5, 1, 4, [](float*) { return false; });
+    check(rows.take(4) == "LP nan\n", "a prompt row gets no line");
+    check(rows.take(5) == "LP nan\n", "lost logits");
+    check(rows.take(6) == "LP -0.493812 1:-0.493812\n" && rows.take(6) == "LP nan\n",
+          "the last pick at a position wins, and is taken once");
     std::printf("request_test: %d checks passed\n", checks);
     return 0;
 }

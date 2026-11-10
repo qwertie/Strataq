@@ -16304,6 +16304,17 @@ void Model::set_penalties(int last_n, float repeat, float freq, float present) {
     p_->pen_present = present;
 }
 bool Model::logits(std::vector<float>& out) { return p_->logits(out); }
+bool Model::copy_logits_row(int row, float* out) {
+    Impl& p = *p_;
+    Dev& d = p.devs[(size_t) p.head_dev];
+    cudaSetDevice(d.id);
+#if defined(STRATA_METAL)
+    ds4_metal_flush();   // (a host read of a device result: commit the batched dispatches first)
+#endif
+    const size_t at = (size_t) (row < 0 ? std::max(0, p.n_logits - 1) : row) * (size_t) p.g.vocab;
+    return cudaMemcpyAsync(out, d.logits + at, (size_t) p.g.vocab * 4, cudaMemcpyDeviceToHost, d.st) == cudaSuccess &&
+           cudaStreamSynchronize(d.st) == cudaSuccess;
+}
 int Model::image_token() const { return p_->img_tok; }
 int Model::dim() const { return p_->g.dim; }
 bool Model::encode_image(const uint8_t* rgb, int width, int height, std::vector<uint16_t>& span, std::string& err) {

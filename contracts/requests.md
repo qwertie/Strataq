@@ -22,9 +22,14 @@ Generation events are complete lines prefixed with `R <request-id>`:
 R r1 STARTED
 R r1 PP <read> <total> <milliseconds> <tokens-per-second>
 R r1 T <token-id>
+R r1 LP <logprob> [<token-id>:<logprob> ...]
 R r1 DONE <produced> <prompt-tokens> <prompt-ms> <decode-ms> <finish> [statistics ...]
 R r1 ERR <reason>
 ```
+
+A request with `logprobs=K` (and optionally `allowed=<id,id,...>`) gets an `LP` line right after each `T` line:
+the token's log probability, then the K most likely tokens' (or the allowed ids'), from the logits before
+penalties and temperature.
 
 `STARTED` means the engine has admitted the request. Queue deadlines remain
 active until then. `DONE` supplies the engine's existing statistics, including

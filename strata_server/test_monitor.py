@@ -1,5 +1,8 @@
 """Request inspection through HTTP; no native model or GPU is required."""
+import itertools
 import json
+import math
+import shutil
 from array import array
 import threading
 import time
@@ -11,9 +14,10 @@ from pathlib import Path
 from unittest import mock
 
 from strata_server.frontend import ChatTemplate
-from strata_server.server import ByteTokenizer, Service, serve
+from strata_server.server import ByteTokenizer, LogprobToken, MonitorLogprobs, Service, serve
 from strata_server.test_server import start_http
 from strata_common.engine_client import EngineDied, MockEngine
+from strata_server.test_logprobs import LpEngine, ThinkTokenizer
 
 
 class ReloadableEngine(MockEngine):
@@ -491,7 +495,7 @@ class Monitor(unittest.TestCase):
         for el in ("ctx-view", "ctx-refresh", "ctx-save", "ctx-binary", "ctx-slot", "ctx-sum", "ctx-note", "ctx-pager",
                    "ctx-prev", "ctx-next", "ctx-range"):
             self.assertIn(f'id="{el}"', html)
-            self.assertIn(f'"{el}"', script)
+            self.assertIn(f'"{el}"' if el != "ctx-range" else "`${prefix}-range`", script)   # (drawTokenPage's)
 
     def test_the_main_page_links_to_the_monitor(self):
         web = Path(__file__).parent / "web"
@@ -501,6 +505,159 @@ class Monitor(unittest.TestCase):
             self.assertIn(f'"{el}"', js)
         self.assertIn('href="api-monitor"', html)
         self.assertEqual(self.request("/web/../server.py")[0], 404)
+
+
+class Probabilities(unittest.TestCase):
+    """The logprobs entries of a request whose client asked for them, kept in its record for the page's Probabilities
+    tab (strata_server/web/monitor.js)."""
+
+    def setUp(self):
+        self.tok = ThinkTokenizer()
+        self.engine = LpEngine(self.tok, "Two times three.</think>\n\nSix.")
+        self.svc = Service(self.engine, self.tok, ChatTemplate(Path(__file__).parent / "chat_template.jinja"))
+        self.svc.api_monitor = True
+        self.httpd, self.base = start_http(self, self.svc)
+
+    request = Monitor.request
+
+    def latest(self):
+        """Gets the newest record with its logprobs entries, which the record leaves out unless asked."""
+        summary = self.request("/api/requests")[1]["requests"][0]
+        return self.request("/api/requests?id=" + summary["id"] + "&logprobs=1")[1]
+
+    def chat(self, stream, **kwargs):
+        return self.request("/v1/chat/completions", {"messages": [{"role": "user", "content": "hi"}],
+                                                     "max_tokens": 200, "stream": stream,
+                                                     "chat_template_kwargs": {"enable_thinking": True}, **kwargs})
+
+    def test_streamed_and_not_the_record_keeps_the_entries_the_reply_carries(self):
+        # allowed_token_ids: the record keeps the renormalised numbers the reply carried, not the engine's
+        for stream, asked in itertools.product((False, True), ({"top_logprobs": 2}, {"allowed_token_ids": [65, 72]})):
+            with self.subTest(stream=stream, asked=asked):
+                code, reply = self.chat(stream, logprobs=True, **asked)
+                self.assertEqual(code, 200)
+                if stream:
+                    sent = {}
+                    for line in reply.splitlines():
+                        if line.startswith("data: {"):
+                            for part, entries in (json.loads(line[6:])["choices"][0].get("logprobs") or {}).items():
+                                sent.setdefault(part, []).extend(entries)
+                else:
+                    sent = {k: v for k, v in reply["choices"][0]["logprobs"].items() if v is not None}
+                record = self.latest()
+                self.assertEqual(record["logprobs"], as_kept(sent))
+                self.assertFalse(record["logprobs_truncated"])
+                self.assertEqual("".join(e["token"] for e in record["logprobs"]["content"]), record["output"])
+                self.assertEqual("".join(e["token"] for e in record["logprobs"]["reasoning_content"]),
+                                 record["reasoning"])
+                summary = self.request("/api/requests")[1]["requests"][0]
+                self.assertNotIn("logprobs", summary)           # the list stays light, and so does a plain detail:
+                plain = self.request("/api/requests?id=" + summary["id"])[1]
+                self.assertNotIn("logprobs", plain)
+                self.assertEqual(plain["logprobs_tokens"], sum(map(len, sent.values())))
+
+    def test_none_when_the_client_did_not_ask_or_cannot(self):
+        self.chat(False)
+        self.assertEqual((self.latest()["logprobs_tokens"], self.latest().get("logprobs")), (None, None))
+        self.request("/v1/messages", {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 50,
+                                      "logprobs": True})    # no logprobs in Anthropic's API
+        self.assertEqual((self.latest()["logprobs_tokens"], self.latest().get("logprobs")), (None, None))
+        self.engine.with_lines = False                          # asked, but the engine wrote no LP lines
+        self.assertEqual(self.chat(False, logprobs=True)[0], 200)
+        self.assertEqual((self.latest()["logprobs_tokens"], self.latest()["logprobs"]), (0, {}))
+
+    def test_the_capture_is_bounded_and_the_reply_is_not(self):
+        self.svc.MONITOR_LOGPROBS_TOKENS = 5
+        reply = self.chat(False, logprobs=True, top_logprobs=2)[1]
+        record = self.latest()
+        self.assertTrue(record["logprobs_truncated"])
+        self.assertEqual(record["logprobs"], as_kept(
+            {"reasoning_content": reply["choices"][0]["logprobs"]["reasoning_content"][:5]}))
+        self.assertEqual("".join(e["token"] for e in reply["choices"][0]["logprobs"]["content"]),
+                         reply["choices"][0]["message"]["content"])
+
+    def test_the_record_keeps_numbers_only(self):
+        for n_vocab, width in ((248320, 3), (None, 4), (1 << 25, 4)):    # 4 bytes an id when 3 may not hold it
+            kept = MonitorLogprobs(n_vocab)
+            alts = [LogprobToken(i, {"logprob": -1.0}) for i in range(20)]
+            for i in range(1000):
+                kept.add("content", LogprobToken(i, {"token": "x", "logprob": -0.5, "bytes": [120],
+                                                     "top_logprobs": alts}))
+            self.assertEqual(kept.nbytes / 1000, width + 2 + 2 + 20 * (width + 2), n_vocab)
+
+    def test_a_character_split_across_tokens_reads_as_the_api_wrote_it(self):
+        self.svc.engine = self.engine = LpEngine(self.tok, "Ok.</think>\n\nCafé costs €5.")   # é, €: 2, 3 tokens
+        reply = self.chat(False, logprobs=True, top_logprobs=2)[1]["choices"][0]["logprobs"]["content"]
+        self.assertIn("", [e["token"] for e in reply])         # the API gives a part of a character no text
+        self.assertEqual(self.latest()["logprobs"]["content"], as_kept({"content": reply})["content"])
+
+    def test_the_oldest_records_make_room_and_the_current_one_never_does(self):
+        self.chat(False, logprobs=True)
+        tokens = self.latest()["logprobs_tokens"]
+        one = self.svc.api_requests[-1]["logprobs"].nbytes
+        self.svc.MONITOR_LOGPROBS_BYTES = 2 * one
+        for _ in range(3):
+            self.chat(False, logprobs=True)
+        dropped = [r["logprobs_dropped"] for r in self.svc.api_requests]
+        self.assertEqual(dropped, [True, True, False, False])
+        self.assertEqual(self.latest()["logprobs_tokens"], tokens)
+        first = self.request("/api/requests")[1]["requests"][-1]["id"]
+        self.assertEqual(self.request(f"/api/requests?id={first}&logprobs=1")[1]["logprobs"], {})
+        self.svc.MONITOR_LOGPROBS_BYTES = 1                    # not even room for the current one: it stays
+        self.chat(False, logprobs=True)
+        self.assertEqual(self.latest()["logprobs_tokens"], tokens)
+
+    def test_logprobs_are_kept_to_a_two_thousandth_down_to_minus_32(self):
+        for lp, kept in ((0.0, 0.0), (1e-9, 0.0), (-0.01, -20 / 2048), (-31.9, -65331 / 2048), (-100.0, -65535 / 2048)):
+            self.assertEqual(MonitorLogprobs.rounded(lp), kept, lp)
+
+
+def as_kept(parts: dict) -> dict:
+    """Gets logprobs entries by part with each logprob rounded as the monitor keeps it."""
+    def entry(e):
+        return {**e, "logprob": MonitorLogprobs.rounded(e["logprob"]), **(
+            {"top_logprobs": [entry(a) for a in e["top_logprobs"]]} if "top_logprobs" in e else {})}
+    return {part: [entry(e) for e in entries] for part, entries in parts.items()}
+
+
+@unittest.skipUnless(shutil.which("node"), "node is needed to run the page's own code")
+class ProbabilitiesPage(unittest.TestCase):
+    """The pure parts of the Probabilities tab's code (strata_server/web/monitor.js), run in node."""
+
+    def run_page(self, expression):
+        from strata_server.test_speed_average import function_source, run_node
+        js = (Path(__file__).parent / "web" / "monitor.js").read_text(encoding="utf-8")
+        steps = next(line for line in js.splitlines() if line.startswith("const LP_STEPS"))
+        names = ("probabilityStep", "probabilityRange", "percent", "noProbabilities", "entriesInOrder")
+        return run_node("\n".join([steps, *(function_source(js, n) for n in names),
+                                   f"console.log(JSON.stringify({expression}));"]))
+
+    def test_tints_legend_and_percentages(self):
+        steps = [math.log(p) for p in (1, 0.9, 0.89, 0.5, 0.2, 0.05, 0.049)]
+        self.assertEqual(self.run_page(f"{steps}.map(probabilityStep)"), [0, 0, 1, 1, 2, 3, 4])
+        self.assertEqual(self.run_page("[0, 1, 2, 3, 4].map(probabilityRange)"),
+                         ["90% or more", "50–90%", "20–50%", "5–20%", "under 5%"])
+        self.assertEqual(self.run_page(f"{[0, math.log(0.87345), math.log(0.0123), -20]}.map(percent)"),
+                         ["100.0%", "87.3%", "1.23%", "under 0.01%"])
+
+    def test_the_reason_when_there_is_nothing_to_show(self):
+        records = [{"logprobs_tokens": None}, {}, {"logprobs_tokens": 0}, {"logprobs_tokens": 1}]
+        why = self.run_page(f"{json.dumps(records)}.map(noProbabilities)")
+        self.assertIn("asks for logprobs", why[0])
+        self.assertEqual(why[1], why[0])
+        self.assertIn("came with none", why[2])
+        self.assertEqual(why[3], "")
+        both = {"logprobs": {"content": [{"token": "b"}], "reasoning_content": [{"token": "a"}]}}
+        self.assertEqual(self.run_page(f"entriesInOrder({json.dumps(both)}).map(e => e.token)"), ["a", "b"])
+
+    def test_the_page_has_the_tab_and_its_parts(self):
+        web = Path(__file__).parent / "web"
+        html, js = (web / "monitor.html").read_text(encoding="utf-8"), (web / "monitor.js").read_text(encoding="utf-8")
+        self.assertIn('data-pane="probabilities"', html)
+        for el in ("lp-bar", "lp-legend", "lp-pager", "lp-prev", "lp-next", "lp-range", "lp-tip"):
+            self.assertIn(f'id="{el}"', html)
+        self.assertIn('drawTokenPage(lpView, "lp"', js)       # paged like the context viewer
+        self.assertNotIn("innerHTML", js[js.index("function showTip"):])   # a token's text is never markup
 
 
 class EngineConversations(unittest.TestCase):

@@ -300,6 +300,9 @@ public:
     void set_penalties(int last_n, float repeat, float freq, float present);
     /// The last feed's logit rows on the host (rows x vocab floats).
     bool logits(std::vector<float>& out);
+    /// Copies row `row` of the head's logits (the one sample_row reads; -1: the one sample() reads) to `out`, vocab
+    /// floats on the host, for strata-ds41's LP lines.
+    bool copy_logits_row(int row, float* out);
 
     /// The DSpark drafter (speculative decoding): its block size (0: not loaded), drafts for the positions after `y`
     /// (y: the token at pos(), not fed yet) with their confidences, and the verification of [y, drafts]: how many of the

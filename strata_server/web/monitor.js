@@ -55,13 +55,20 @@ function list() {
     const meta = document.createElement("div"); meta.className = "small";
     meta.textContent = `${r.id} · ${seconds(r.wallclock_s)} · ${r.stream ? "stream" : "JSON response"}${r.http_status ? ` · HTTP ${r.http_status}` : ""}`;
     button.append(row, endpoint, meta);
-    button.onclick = async () => { selected = r.id; detail = null; list(); await showDetail(); };
+    button.onclick = async () => { selected = r.id; detail = null; lpPage = 0; list(); await showDetail(); };
     $("requests").append(button);
     if (focusId === r.id) button.focus({preventScroll:true});
   }
 }
 function content() {
   if (!detail) return;
+  const why = noProbabilities(detail), tab = document.querySelector('[data-pane="probabilities"]');
+  tab.setAttribute("aria-disabled", String(Boolean(why))); tab.title = why;
+  $("lp-bar").hidden = pane !== "probabilities" || Boolean(why);
+  if (pane === "probabilities") { showProbabilities(why); return; }
+  lpStamp = ""; hideTip();
+  // the Probabilities spans go first: text() keeps them when their text is the same
+  if ($("content").childElementCount) $("content").replaceChildren();
   let value = detail[pane] || (pane === "response" && detail.stream ? "Streaming response: see Output and the request error, if any." : "No content.");
   if (pane === "output") { try { value = JSON.stringify(JSON.parse(value), null, 2); } catch (_) {} }
   text("content", value);
@@ -202,20 +209,32 @@ function showContext() {
     (ctxView === "colored" ? "Each token's colour comes from its id, so the same token always has the same colour. Hover a token for its position and id. " : "") + NOTES[e.kind]);
   if (got.error) { text("ctx-note", got.error); return; }
   if (ctxView === "plain") { view.textContent = got.pieces.join(""); return; }
-  const m = got.tokens.length, pages = Math.max(1, Math.ceil(m / PAGE));
-  ctxPage = Math.min(Math.max(ctxPage < 0 ? pages - 1 : ctxPage, 0), pages - 1);
-  const start = ctxPage * PAGE, end = Math.min(m, start + PAGE);
-  $("ctx-pager").hidden = pages < 2; $("ctx-prev").disabled = ctxPage === 0; $("ctx-next").disabled = ctxPage === pages - 1;
-  text("ctx-range", `Tokens ${start.toLocaleString()}–${Math.max(start, end - 1).toLocaleString()} (page ${ctxPage + 1} of ${pages})`);
   palettes ??= {light: makePalette(THEMES.light), dark: makePalette(THEMES.dark)};
-  const frag = document.createDocumentFragment();     // one append: one layout
-  for (let i = start; i < end; i++) {
-    const id = got.tokens[i], k = tokenColour(id), span = document.createElement("span"); span.className = "tok";
+  ctxPage = drawTokenPage(view, "ctx", got.tokens.length, ctxPage, (span, i) => {
+    const id = got.tokens[i], k = tokenColour(id);
     span.style.setProperty("--bl", palettes.light[k]); span.style.setProperty("--bd", palettes.dark[k]);   // both themes
     span.textContent = got.pieces[i]; span.title = `token #${i} · id ${id}`;
+  });
+}
+// Appends one page of `count` tokens to `view` as `.tok` spans, each filled in by `paint(span, index)`, and sets up
+// the pager whose element ids start with `prefix` ("ctx": Context in VRAM, "lp": Probabilities). `page` -1 is the
+// last page. Returns the page drawn.
+function drawTokenPage(view, prefix, count, page, paint) {
+  const pages = Math.max(1, Math.ceil(count / PAGE));
+  page = Math.min(Math.max(page < 0 ? pages - 1 : page, 0), pages - 1);
+  const start = page * PAGE, end = Math.min(count, start + PAGE);
+  $(`${prefix}-pager`).hidden = pages < 2;
+  $(`${prefix}-prev`).disabled = page === 0; $(`${prefix}-next`).disabled = page === pages - 1;
+  text(`${prefix}-range`,
+    `Tokens ${start.toLocaleString()}–${Math.max(start, end - 1).toLocaleString()} (page ${page + 1} of ${pages})`);
+  const frag = document.createDocumentFragment();     // one append: one layout
+  for (let i = start; i < end; i++) {
+    const span = document.createElement("span"); span.className = "tok";
+    paint(span, i);
     frag.append(span);
   }
   view.append(frag);
+  return page;
 }
 // the tokens of the conversation picked, read from the engine now (they may have grown since the list)
 async function loadEntry() {
@@ -280,3 +299,124 @@ $("ctx-prev").onclick = () => { ctxPage--; showContext(); }; $("ctx-next").oncli
 document.querySelectorAll("[data-view]").forEach(button => { button.onclick = () => { ctxView = button.dataset.view; document.querySelectorAll("[data-view]").forEach(b => b.setAttribute("aria-selected", String(b === button))); showContext(); }; });
 
 loadContext();
+// Probabilities: the selected request's answer as tokens tinted by the probability the model gave each one, from the
+// logprobs entries the server kept for it (OpenAI's: token, logprob, top_logprobs), which only a client that asked has
+const LP_STEPS = [0.9, 0.5, 0.2, 0.05, 0];            // the lowest probability of each tint, class lp0 (sure) to lp4
+const LP_FLOOR = -65535 / 2048;                      // the lowest logprob the server keeps (MonitorLogprobs)
+let lpPage = 0, lpStamp = "", lpShown = [];           // lpShown: the entries drawn, by span index (data-i)
+let lpData = null, lpLoading = null;                  // the last entries read (loadProbabilities), the read under way
+$("lp-legend").replaceChildren(...LP_STEPS.map((_, i) => {
+  const swatch = document.createElement("span");
+  swatch.className = `tok lp lp${i}`; swatch.textContent = probabilityRange(i);
+  return swatch;
+}));
+const lpView = $("content");
+for (const kind of ["mouseover", "focusin"])
+  lpView.addEventListener(kind, event => showTip(event.target));
+for (const kind of ["mouseout", "focusout", "scroll"])
+  lpView.addEventListener(kind, hideTip);
+lpView.addEventListener("keydown", moveTokenFocus);
+$("lp-prev").onclick = () => { lpPage--; content(); }; $("lp-next").onclick = () => { lpPage++; content(); };
+// Gets why request record `d` has no token probabilities to show, or "" when it has some.
+function noProbabilities(d) {
+  if (d.logprobs_tokens == null) {
+    return "No token probabilities: only a /v1/chat/completions request that asks for logprobs has them.";
+  }
+  if (d.logprobs_dropped)
+    return "The monitor dropped this request's token probabilities to make room for newer requests' (32 MiB in all).";
+  return d.logprobs_tokens ? "" : "The client asked for token probabilities, but the answer came with none.";
+}
+// Gets the entries of record `d` read with its logprobs, in the order the model wrote them: the reasoning's, then
+// the answer's.
+function entriesInOrder(d) { return [...(d.logprobs?.reasoning_content || []), ...(d.logprobs?.content || [])]; }
+// Draws the selected request's entries as tinted token spans, a page at a time, or only says `why` there are none
+// (noProbabilities's reason). The entries are read apart from the record, and again only when more were kept.
+function showProbabilities(why) {
+  const got = !why && lpData?.id === detail.id ? lpData : null, thought = got?.thought || 0;
+  text("content-note", why || "Each token is tinted by the probability the model gave it. Hover a token, or " +
+    "focus one and move with the arrow keys, to see its probability and the likeliest tokens at that place." +
+    (thought ? " The reasoning comes first, in italics, then the answer." : "") +
+    " The monitor keeps logprobs rounded to about 4 decimals." +
+    (detail.logprobs_truncated ?
+      " Monitor capture stopped at 32,768 tokens; the API response was not shortened." : "") +
+    (got ? "" : " Reading…"));
+  if (!why && got?.tokens !== detail.logprobs_tokens)
+    loadProbabilities(detail.id, detail.logprobs_tokens);
+  const stamp = `${detail.id} ${got?.tokens} ${lpPage} ${why}`;   // redrawn on a change only: a hover outlives polls
+  if (stamp === lpStamp)
+    return;
+  lpStamp = stamp; hideTip(); lpView.replaceChildren(); lpShown = got?.entries || [];
+  if (!got)
+    return;
+  lpPage = drawTokenPage(lpView, "lp", lpShown.length, lpPage, (span, i) => {
+    const e = lpShown[i];
+    const part = i < thought ? " lp-thought" : thought && i === thought ? " lp-answer" : "";
+    span.className += ` lp lp${probabilityStep(e.logprob)}${part}`;
+    span.textContent = e.token; span.dataset.i = i; span.tabIndex = -1;
+  });
+  if (lpView.firstElementChild)
+    lpView.firstElementChild.tabIndex = 0;            // one tab stop: the arrow keys move within the page
+}
+// Reads the entries of request `id`, of which `tokens` were kept when asked, into lpData, then shows them.
+async function loadProbabilities(id, tokens) {
+  const key = `${id} ${tokens}`;
+  if (lpLoading === key)
+    return;
+  lpLoading = key;
+  try {
+    const value = await api(`/api/requests?id=${encodeURIComponent(id)}&logprobs=1`);
+    lpData = {id, tokens, entries: entriesInOrder(value), thought: value.logprobs?.reasoning_content?.length || 0};
+  } catch (error) { notice(error.message); return; }   // (the next poll tries again)
+  finally { lpLoading = null; }
+  if (pane === "probabilities" && detail?.id === id)
+    content();
+}
+// Gets the index in LP_STEPS of the tint for a token of log-probability `logprob`.
+function probabilityStep(logprob) { return LP_STEPS.findIndex(min => Math.exp(logprob) >= min); }
+// Gets the legend's words for tint `i` of LP_STEPS, such as "50–90%".
+function probabilityRange(i) {
+  const [low, high] = [LP_STEPS[i], LP_STEPS[i - 1]].map(p => Math.round(p * 100));
+  return i === 0 ? `${low}% or more` : low ? `${low}–${high}%` : `under ${high}%`;
+}
+// Gets a probability, given as its natural log, as a percentage for people.
+function percent(logprob) {
+  const p = 100 * Math.exp(logprob);
+  return p < 0.01 ? "under 0.01%" : `${p.toFixed(p < 10 ? 2 : 1)}%`;
+}
+// Shows, beside token span `span` of the Probabilities view, its probability and the likeliest tokens at its place.
+function showTip(span) {
+  const e = pane === "probabilities" ? lpShown[span.dataset?.i] : undefined;
+  if (!e)
+    return;
+  const tip = $("lp-tip");
+  const line = (token, logprob) =>
+    `${JSON.stringify(token)}  ${percent(logprob)} · logprob ${logprob <= LP_FLOOR ? "< -32" : logprob.toFixed(4)}`;
+  const head = document.createElement("b"); head.textContent = line(e.token, e.logprob);
+  const note = document.createElement("div"); note.className = "small";
+  const alternatives = document.createElement("ol");
+  for (const a of e.top_logprobs || []) {
+    const item = document.createElement("li");
+    item.textContent = line(a.token, a.logprob) + (a.token === e.token ? "  (chosen)" : "");
+    alternatives.append(item);
+  }
+  note.textContent = alternatives.childElementCount ? "Likeliest tokens at this place:" :
+    "No alternatives: the client asked for none (top_logprobs 0).";
+  tip.replaceChildren(head, note, alternatives); tip.hidden = false;
+  span.setAttribute("aria-describedby", "lp-tip");
+  const r = span.getBoundingClientRect();
+  tip.style.left = `${Math.max(8, Math.min(r.left, innerWidth - tip.offsetWidth - 8))}px`;
+  tip.style.top = `${r.bottom + 6 + tip.offsetHeight > innerHeight ? r.top - tip.offsetHeight - 6 : r.bottom + 6}px`;
+}
+function hideTip() { $("lp-tip").hidden = true; }
+// Moves the focus between the Probabilities view's tokens: left and right arrows, Home and End; Escape hides the tip.
+function moveTokenFocus(event) {
+  const span = event.target;
+  if (span.dataset?.i === undefined)
+    return;
+  if (event.key === "Escape") { hideTip(); return; }
+  const to = {ArrowRight: span.nextElementSibling, ArrowLeft: span.previousElementSibling,
+    Home: lpView.firstElementChild, End: lpView.lastElementChild}[event.key];
+  if (!to)
+    return;
+  event.preventDefault(); span.tabIndex = -1; to.tabIndex = 0; to.focus();
+}
