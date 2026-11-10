@@ -473,7 +473,8 @@ function getControlHelp(key, settings, details = {}) {
   if (key === "decode_share_percent")
     return "While a prompt is read, the conversations that are answering take turns with it: after each turn of " +
       "reading they generate for this percentage of the time the turn took. 0 makes them wait for the whole prompt; " +
-      "more lets them answer faster and the prompt read slower.";
+      "more lets them answer faster and the prompt read slower. On a graphics card of 12 GB or less, try 0: there " +
+      "the prompt and the answers each need most experts read in again, so taking turns slows both.";
   if (key === "prompt_turn_ms")
     return "The least time a prompt is read before the answering conversations get their turn. 0 means one chunk " +
       "of the prompt. Longer turns switch less often between reading and answering.";
