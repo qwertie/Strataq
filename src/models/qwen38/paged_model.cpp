@@ -222,7 +222,9 @@ public:
         histories_ = histories;
     }
     bool run_rows(const std::vector<strata::spec::StepRow>& rows, std::vector<int32_t>& picks,
-                  std::string& err) override;
+                  std::string& err) override {
+        return run_rows(rows, histories_, picks, err);
+    }
     int get_pipeline_stages() const override { return (int) cards_.size(); }
     bool prepare_group(int group, const std::vector<strata::spec::StepRow>& rows, std::string& err) override;
     bool launch_group(int stage, int group, std::string& err) override;
@@ -275,6 +277,10 @@ private:
     std::vector<std::unique_ptr<Group>> groups_;
     /// Converts the shared step's chains to the verifier's row arguments.
     static bool get_row_inputs(const std::vector<strata::spec::StepRow>& rows, RowInputs& inputs, std::string& err);
+    /// Verifies `rows` in one window. `tails[r]` holds the tokens row r's conversation had read before the row's
+    /// window, from which the penalties' recent tokens are taken (get_penalty_histories).
+    bool run_rows(const std::vector<strata::spec::StepRow>& rows, const std::vector<const std::vector<int32_t>*>& tails,
+                  std::vector<int32_t>& picks, std::string& err);
     /// Notes the LP lines of `picks`, the tokens after `rows`, from `ver`'s head logits (note_logprobs).
     void note_row_logprobs(const strata::core::Verifier& ver, const RowInputs& rows,
                            const std::vector<int32_t>& picks);
@@ -1121,7 +1127,10 @@ bool PagedQwen::read_prompt_segment(const PagedParts& parts, const std::vector<i
             next.assign(ids.begin() + pos + 1, ids.begin() + pos + count + 1);
             for (int t = 0; t < count; ++t)
                 rows.push_back({session, (int32_t) ids[(size_t) (pos + t)], pos + t, t - 1});
-            if (!run_rows(rows, picks, err) || !keep_rows(rows, {count}, false, err))
+            const int64_t recent = history_lengths_[(size_t) session];
+            const std::vector<int32_t> tail(ids.begin() + std::max<int64_t>(pos - recent, 0), ids.begin() + pos);
+            if (!run_rows(rows, std::vector<const std::vector<int32_t>*>(rows.size(), &tail), picks, err) ||
+                !keep_rows(rows, {count}, false, err))
                 return false;
             Part& part = get_part(*parts.back());
             if (drafting && !drafter_->read_prompt(nullptr, part.pages, part.ss, cards_.back().ver->final_R_all(),
@@ -1148,7 +1157,8 @@ bool PagedQwen::read_prompt_segment(const PagedParts& parts, const std::vector<i
     return ok;
 }
 
-bool PagedQwen::run_rows(const std::vector<strata::spec::StepRow>& rows, std::vector<int32_t>& picks,
+bool PagedQwen::run_rows(const std::vector<strata::spec::StepRow>& rows,
+                         const std::vector<const std::vector<int32_t>*>& tails, std::vector<int32_t>& picks,
                          std::string& err) {
     RowInputs inputs;
     if (!get_row_inputs(rows, inputs, err))
@@ -1167,7 +1177,7 @@ bool PagedQwen::run_rows(const std::vector<strata::spec::StepRow>& rows, std::ve
             }
         }
     }
-    conv_.ver.set_batch_histories(strata::serve::get_penalty_histories(rows, histories_, history_lengths_));
+    conv_.ver.set_batch_histories(strata::serve::get_penalty_histories(rows, tails, history_lengths_));
     if (!conv_.run_rows(inputs.sessions.data(), S, inputs.tokens.data(), inputs.positions.data(), picks.data(), err))
         return false;
     for (int r = 0; r < S; ++r)

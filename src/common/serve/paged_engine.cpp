@@ -645,6 +645,8 @@ int PagedEngine::serve() {
         for (const PagedCard& card : cards_) {
             const std::vector<strata::core::ExpertKey>& ranking = card.experts.get_ranking();
             for (size_t i = 0; i < ranking.size(); ++i) {
+                if (ranking[i].layer >= facts_.n_layers)   // a drafter's expert (DeepSeek's DSpark blocks)
+                    continue;
                 float& u = usage[(size_t) (ranking[i].layer * facts_.n_expert + ranking[i].expert)];
                 u = std::max(u, 1.0f - (float) i / (float) ranking.size());
             }

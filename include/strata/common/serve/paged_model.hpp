@@ -201,8 +201,9 @@ public:
     /// the card's device (its kernels take an expert at its pool's arena plus its slot); DeepSeek's kernels take a
     /// table of addresses per layer (PagePool::page_address of each first page).
     virtual bool publish_residency(const PagedCard& card, std::string& err) = 0;
-    /// Gets the routings each expert (layer * n_expert + expert) had in the decode steps, which the adaptive tier
-    /// counts and decays; empty when the tier is off.
+    /// Gets the routings each expert (layer * n_expert + expert) of the trunk's PagedModelFacts::n_layers layers had
+    /// in the decode steps, which the adaptive tier counts and decays; empty when the tier is off.  A card's ranking
+    /// may hold experts past them (a drafter's), which have no count.
     virtual std::vector<float>& get_usage() = 0;
     /// Makes the model run layers [card.lb, card.le) on `card` (the layer cut moved); false (and `err`) when its
     /// dense tensors could not reload or its windows could not discard the old layers. The engine calls it
