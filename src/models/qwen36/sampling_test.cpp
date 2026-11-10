@@ -121,7 +121,7 @@ int main() {
         check(penalty_history_start({}, false).empty(), "empty prompt");
         // a penalty on the first pick: the task's token 12 is untouched by default, penalised with the old window
         Sampling t;
-        t.present = 1.5f; t.last_n = 64;
+        t.penalty_present = 1.5f; t.penalty_last_n = 64;
         std::vector<float> a(8000, 0.f), b(8000, 0.f);
         apply_penalties(a, t, h);
         apply_penalties(b, t, penalty_history_start(prompt, true));
@@ -131,7 +131,7 @@ int main() {
         std::vector<int32_t> hr = h;
         hr.push_back(900); hr.push_back(900);
         std::vector<float> c(8000, 0.f);
-        t.freq = 0.5f;
+        t.penalty_freq = 0.5f;
         apply_penalties(c, t, hr);
         check(c[900] == -(1.5f + 2 * 0.5f) && c[12] == 0.f, "default: the reply's own repeats are still penalised");
     }
