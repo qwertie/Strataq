@@ -131,7 +131,7 @@ class Rule(unittest.TestCase):
                 self.tensors = [T("blk.0.ffn_down_exps.weight", "Q2_0", (640, 2560, 512), 1000), T("blk.1.ffn_gate_exps.weight", "IQ3_S", (2560, 640, 512), 5000),
                                 T("token_embd.weight", "IQ4_XS", (2560, 248320), 10), T("per_layer_token_embd.weight", "IQ4_NL", (1, 2), 20),
                                 T("output.weight", "Q6_K", (2560, 248320), 30)]
-        with mock.patch("tools.gguf_reader.GGUFFile", F):
+        with mock.patch("strata_common.gguf_reader.GGUFFile", F):
             m = S.scan_model("/x/model-00001-of-00001.gguf")
         self.assertEqual(m.routed_bytes, 2 * 1000 + 5000)
         self.assertEqual((m.embd_type, m.ple_type, m.output_type), ("IQ4_XS", "IQ4_NL", "Q6_K"))
