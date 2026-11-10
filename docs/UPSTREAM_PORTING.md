@@ -200,5 +200,9 @@ code updates its rows here. Rows are grouped by step; `{a,b}` lists several file
 **What `memory-manager` must port by hand** when it merges this: upstream's new Qwen3.8 loader code in `generate.cpp`
 (memory rules: `--ram-keep-gib`, `g_lend_keep`, spill gate 2e7db84b, small-card `pf_fused_override` fd59c9c3) goes to
 `Model::load()` / `options.cpp`; the `units` argument for new K/V readers (two-pass QSA, layer-split DFlash2 taps);
-`paged_engine.cpp` and strata-q38 lack `pen_from`, the stop bound, `--lookup-max-t`, DFlash2 and the fatal-GPU `ERR`
-line with exit code 3; strata-ds41 lacks the `--parallel` protocol, restore points and the penalized verify.
+`paged_engine.cpp` and strata-q38 lack `pen_from`, the stop bound, `--lookup-max-t` and DFlash2. The new engines end
+on a failed step with a plain `ERR` line, not upstream's `ERR fatal GPU error: ...` and exit code 3, by which the server
+counts restarts (at most 3 in 10 minutes); whether a lost GPU context fails their step is not tested. strata-ds41
+needs no `--parallel` protocol (it runs several conversations a step over the request protocol, and the shared
+`paged_engine.cpp` already reads prompts in turns between other conversations' steps); it lacks restore points and
+the penalized verify.
