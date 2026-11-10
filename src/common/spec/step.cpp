@@ -211,7 +211,7 @@ void Step::prepare(const std::vector<Decoding*>& active, Work& work, int group, 
                         break;
             window = planner.begin(d.pos, n + 1, n > 0, probs.data(), 0.0, d.produced == 0 || want == 0);
             window.T = std::min(window.T, n + 1);
-            planner.pick_lookup(window, guesses.data(), want + 1);
+            planner.pick_lookup(window, guesses.data(), false, want + 1);
             planner.pick_chain(window, guesses.data(), want + 1);
             if (window.lookup)
                 std::copy_n(planner.lookup_drafts(), window.T - 1, guesses.data());

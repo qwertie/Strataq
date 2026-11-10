@@ -1,6 +1,7 @@
 // src/models/deepseekv41/ds4_options.cpp - the model's own command-line options (ds4_model.hpp: read_option), which
 // strata-dsv41 and strata-ds41 both read, and the drafts' confidence cut both make.
 #include "ds4_model.hpp"
+#include "ds4_experts_rule.hpp"
 #include "strata/common/spec/confidence.hpp"
 
 #include <algorithm>
@@ -29,9 +30,13 @@ bool read_option(const std::string& a, const std::function<std::string(const cha
         for (int g : parse_ids(val("--gpus"))) o.gpus.push_back(g);
     } else if (a == "--max-context") o.max_context = std::atoll(val("--max-context").c_str());
     else if (a == "--reserve-mib") o.reserve_mib = std::atoll(val("--reserve-mib").c_str());
-    else if (a == "--vram-experts") o.vram_experts = std::atof(val("--vram-experts").c_str());
+    else if (a == "--vram-experts") {
+        o.vram_experts = std::atof(val("--vram-experts").c_str());
+        o.vram_experts_auto = false;
+    }
     else if (a == "--cpu-threads") o.cpu_threads = std::atoi(val("--cpu-threads").c_str());
     else if (a == "--expert-profile") o.profile = val("--expert-profile");
+    else if (a == "--profile-readonly") o.profile_readonly = true;   // (read the placement, never write the counts back)
     else if (a == "--ssd-cache") o.ssd_cache_gb = std::atof(val("--ssd-cache").c_str());
     else if (a == "--ssd-policy") {
         const std::string v = val("--ssd-policy");
@@ -64,18 +69,6 @@ bool read_option(const std::string& a, const std::function<std::string(const cha
 int Model::count_confident(const std::vector<float>& conf, int most, float conf_min, float cum_min) {
     return strata::spec::count_confident_drafts(conf.data(), std::min((int) conf.size(), most),
                                                conf_min, cum_min);
-}
-
-// The drafts' cut on the product of their confidences (DeepInfer's cumulative rule): a draft is verified while the
-// chance that it and every draft before it are kept stays at least this - a long window whose later drafts are likely
-// lost is not verified whole.  Off by default (not measured faster on code: H100 / owner PC); Project Maya runs 0.5 (a
-// Radeon 8065S: decode +6.5%, the same tokens).
-float Model::get_default_cum() {
-    static const float v = [] {
-        const char* e = std::getenv("STRATA_DS4_DSPARK_CUM");
-        return e != nullptr ? (float) std::atof(e) : 0.0f;
-    }();
-    return v;
 }
 
 }  // namespace strata::ds4

@@ -9,6 +9,7 @@
 
 #include "strata/models/qwen38/options.hpp"
 #include "strata/common/experts/hit_hook.hpp"
+#include "strata/common/experts/nibble_cache.hpp"
 #include "strata/common/kernels/cpu/pool.hpp"
 #include "strata/common/kernels/rope_scaling.hpp"
 #include "strata/core/expert_cache.hpp"
@@ -55,9 +56,13 @@ struct Drive {
     std::FILE* routing = nullptr;
 };
 
-/// Plan v0.3 P6: the pool for a verify window.
+/// Plan v0.3 P6: the pool for a verify window, with the CPU experts' Default arithmetic as every decode has always run.
 void drive_pool_multi(void* user, const float* x_f, const int32_t* ids, int64_t n_tok, int64_t k, float* out,
                       int64_t layer);
+/// The same with the window-invariant CPU arithmetic that a probabilistic (STRATA_SPEC_PROB) decode uses, so a row's
+/// target distribution does not depend on its window.
+void drive_pool_multi_invariant(void* user, const float* x_f, const int32_t* ids, int64_t n_tok, int64_t k,
+                                float* out, int64_t layer);
 
 /// Layer split: every verify stage shares one Drive (its counters, usage and failure flags); the GPU plan, the expert
 /// cache and the PCIe share the pool uses for a layer are those of the stage that runs it.
@@ -78,6 +83,9 @@ struct SplitDrive {
 /// Layer split: the pool for a verify window, routed to the stage that runs the layer (`user` is a SplitDrive).
 void drive_pool_split(void* user, const float* x_f, const int32_t* ids, int64_t n_tok, int64_t k, float* out,
                       int64_t layer);
+/// drive_pool_split with the window-invariant CPU arithmetic (drive_pool_multi_invariant).
+void drive_pool_split_invariant(void* user, const float* x_f, const int32_t* ids, int64_t n_tok, int64_t k,
+                                float* out, int64_t layer);
 
 /// Layer split across GPUs: a later stage on its own device, with its own copy of the dense weights, a session, an
 /// expert cache for its layers, a verify window and a prompt path; the last one also holds the head (the drafter
@@ -165,6 +173,13 @@ public:
 
     /// Gets the stage that runs layer `l` with a layer split (0: CUDA0's).
     int stage_of(int64_t l) const;
+    /// Gets the rows a verifier's window holds: the solo path's drafts (--spec rows), the plain batch windows (the
+    /// slots) and, with STRATA_PIPED_MTP, a group's rows (its slots, each its token and its proposals).  Final only once
+    /// load() has fitted the slots and the groups, at the verifiers' init.
+    int get_batch_max_t() const;
+    /// Tells whether strata-q38 loads this model: its page pools hold the experts and the conversations
+    /// (`open_expert_pages` is set), so the old engine's features that size slots or state by their own rules stay off.
+    bool is_paged() const { return (bool) open_expert_pages; }
     /// Gets the bytes of the GDN state that one snapshot of session `s0` copies.
     size_t gdn_snapshot_bytes(const strata::core::SessionState& s0) const;
 
@@ -206,6 +221,12 @@ public:
     float* half_stage = nullptr;      ///< --dump-halves: the pinned staging buffer the graphs copy into
     strata::core::Doorbell db;        ///< the GPU's hand-off to the CPU expert pool
     strata::kernels::PleTable ple_table;   ///< the per-layer embedding table (in the model's second GGUF shard)
+    /// The residency policy, not --ple-io ram, locked `ple_table` in RAM: the conversation cache may give the lock back
+    /// (#4518)
+    bool ple_lock_by_policy = false;
+    /// strata-q38: the bytes its RAM page pool will take (--ram-mib), which the PLE table's residency rule counts in
+    /// place of the expert arena; < 0: the arena (every expert's blob)
+    int64_t ram_pool_bytes = -1;
     float* d_parts = nullptr;         ///< the CPU pool's expert outputs, K rows, on the device
     std::vector<std::unique_ptr<GpuStage>> stages;   ///< a layer split's later stages, in layer order
     GpuStage* last_st = nullptr;      ///< the last of `stages` (it holds the head), or null without a split
@@ -213,10 +234,15 @@ public:
     std::vector<std::pair<int32_t, int32_t>> profile;          ///< CUDA0's (layer, expert) pairs, hottest first
     std::vector<std::pair<int32_t, int32_t>> profile_loaded;   ///< --expert-profile-save: the whole ranking as loaded
     bool pf_borrow = false;           ///< the prompt path borrows expert-cache slots instead of owning its buffers
+    int64_t split_pf_mib = 0;         ///< a layer split's own prompt buffers per stage, MiB (0: none or borrowed)
+    int64_t pipe_window_mib = 0;      ///< --pipeline-windows: the second verifier each stage allocates, MiB
     std::vector<std::pair<int32_t, int32_t>> profile_all;      ///< a layer split's whole ranking, before stages' shares
     /// The layer ranges a session is carved in, one per stage (the engine's own session and each batch slot's alike)
     std::vector<std::pair<int64_t, int64_t>> session_layers;
     bool batch_mtp = false;           ///< --batch-mtp or STRATA_BATCH_MTP: batch slots draft with the MTP layer
+    /// STRATA_PIPED_MTP (opt-in): --batch-mtp's proposals in the pipelined groups of a layer split, one slot per group
+    bool piped_mtp = false;
+    int pm_drafts = 0;                ///< STRATA_PIPED_MTP=N: the most proposals per slot and window (0: off)
     /// --batch: each slot's session, one per stage
     std::vector<std::vector<std::unique_ptr<strata::core::SessionState>>> bslot_ss;
     strata::core::MtpDrafter mtp;
@@ -249,6 +275,11 @@ public:
     /// in place of load()'s sizing of it from `st.profile` (load() then fills it as before).  Empty: load() sizes it.
     std::function<bool(GpuStage& st, std::string& err)> open_stage_pages;
     bool auto_cache = false;            ///< --expert-cache auto: the cache was sized to the free VRAM
+    /// STRATA_EXPERT_NIBBLE: the prompt chunk before load() adjusted it (an explicit --prefill N must stay N)
+    int64_t nib_chunk_asked = 0;
+    /// STRATA_EXPERT_NIBBLE: CUDA0's expert cache's converted slots (STRATA_EXPERT_NIBBLE_RECHECK hashes them again)
+    strata::core::NibbleCache nib_x;
+    std::vector<strata::core::NibbleCache> nib_st;   ///< ... and each layer-split stage's, in `stages` order
     bool reserve_adapted = false;       ///< #496: the auto sizing lowered the reserve so a small card's cache fits
     std::array<strata::core::RemoteExperts, 3> remote_experts;   ///< --expert-cache-remote: the helper GPUs' caches
     std::unique_ptr<strata::core::RemoteExpertOpt> remote_opt;   ///< --remote-expert-opt

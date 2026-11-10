@@ -386,6 +386,8 @@ int run_paged_engine(int argc, char** argv) {
     strata::core::session_set_pool_state(true);
     Model m(o);
     m.own_stages = true;
+    if (settings.ram_mib >= 0)
+        m.ram_pool_bytes = settings.ram_mib << 20;
     m.mtp.set_kv_in_pages(true);
     Conversation conv;
     PagedCards cards;

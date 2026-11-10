@@ -10,6 +10,7 @@
 #include "strata/common/kernels/iq_kernels.hpp"
 #include "strata/common/kernels/quantize_act.hpp"
 #include "strata/common/kernels/expert_scratch.hpp"
+#include "strata/common/kernels/window_limits.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -28,7 +29,7 @@ bool peer_portable() { return g_peer_portable; }
 namespace {
 
 constexpr int64_t H = strata::kernels::cpu::H;
-constexpr int64_t CAP = strata::kernels::cpu::MAXT * 10;   // entries per layer: MAXT tokens x top-10
+constexpr int64_t CAP = strata::kernels::kWindowMaxT * 10;   // entries per layer: a window's rows x top-10
 
 struct Meta {                           // one block, uploaded with one copy per layer
     unsigned long long ptr[CAP];

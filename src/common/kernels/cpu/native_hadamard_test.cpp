@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <bit>
 #include <random>
 #include <string>
 #include <vector>
@@ -283,7 +284,7 @@ int fwht_check() {
     double worst = 0;
     for (int r = 0; r < B; ++r) {
         double acc = 0;
-        for (int c = 0; c < B; ++c) acc += ((__builtin_popcount(r & c) & 1) ? -1.0 : 1.0) * s[c] * x[c];
+        for (int c = 0; c < B; ++c) acc += ((std::popcount(unsigned(r & c)) & 1) ? -1.0 : 1.0) * s[c] * x[c];
         worst = std::max(worst, std::fabs(acc / std::sqrt((double) B) - y[r]));
     }
     std::printf("FWHT vs dense normalized Sylvester matrix: max abs diff %.2e  %s\n", worst, worst < 1e-5 ? "ok" : "FAILED");

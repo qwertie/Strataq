@@ -4,6 +4,7 @@
 //     build/fused_gr_bench [iters] [T min] [T max] [cold sets]
 // With "cold sets" > 1 it also times the read with the weights rotating over that many copies (a layer's weights are
 // cold in the engine) and prints the per-stage split (norm / down / up) from the GPU stamps.
+#include "strata/base/platform/env.hpp"
 #include "strata/models/qwen38/kernels/fused_gr.hpp"
 #include "strata/models/qwen38/kernels/verify_kernels.hpp"
 
@@ -55,6 +56,8 @@ static std::vector<uint8_t> q8_0_of_bf16(const std::vector<uint16_t>& w, size_t 
 }
 
 int main(int argc, char** argv) {
+    // the bench's contract is the default kernels' bitwise hashes; the split read (a default on a 12.0 card since 0.2.7) is another summation order
+    strata::platform::set_env("STRATA_GR_V3", "0", false);
     setvbuf(stdout, nullptr, _IONBF, 0);
     const int iters = argc > 1 ? std::atoi(argv[1]) : 500;
     const int t_lo = argc > 2 ? std::atoi(argv[2]) : 1, t_hi = argc > 3 ? std::atoi(argv[3]) : 6;

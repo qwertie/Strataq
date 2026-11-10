@@ -97,7 +97,7 @@ class MemorySettings(FakeEngineCase):
 
     def test_bad_requests(self):
         self.start()
-        for body in ({"set": {"context": 0}}, {"set": {"rows": 0}}, {"set": {"rows": 9}},
+        for body in ({"set": {"context": 0}}, {"set": {"rows": 0}}, {"set": {"rows": 17}},
                      {"set": {"tokens_min": 1.5}}, {"set": {"concurrent": True}}, {"set": {"drafter": "yes"}},
                      {"set": {"drafter": 1}}, {"set": {}}, {"set": {"rows": 4}, "save": "forever"},
                      {"set": {"rows": 4}, "save": "default"}, {"nothing": 1}, b"not json"):

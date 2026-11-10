@@ -60,8 +60,8 @@ LIVE_FLAGS = {"memory_mib.gpu0": "--gpu-mib", "memory_mib.ram": "--ram-mib", "to
 # The live settings that are switches: CHANGE_SETTINGS and the run config spell them "on" or "off".
 _LIVE_SWITCHES = ("drafter", "save_on_shutdown")
 # The numeric live settings whose range is not "at least 0": (least, most); the engine checks the rest (concurrent
-# against its batch slots, lookahead against rows).
-_LIVE_RANGE = {"rows": (1, 8), "concurrent": (1, None), "context": (1, None), "vram_conversations": (1, None)}
+# against its batch slots, lookahead against rows, rows against its verify windows: 8, or 16 in a wide build).
+_LIVE_RANGE = {"rows": (1, 16), "concurrent": (1, None), "context": (1, None), "vram_conversations": (1, None)}
 
 
 def _arg(cfg: dict, flag: str):

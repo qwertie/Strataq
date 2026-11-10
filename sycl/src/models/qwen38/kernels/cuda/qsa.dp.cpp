@@ -43,6 +43,7 @@
 //    argument in this file for keeping both.
 #define DPCT_PROFILING_ENABLED
 #include <sycl/sycl.hpp>
+#include "strata/kprof.hpp"
 #include <dpct/dpct.hpp>
 #include "strata/sycl_queue.hpp"
 #include "strata/base/gpu/emulate.hpp"
@@ -878,7 +879,7 @@ void kv_append_step(uint16_t* k_pool, uint16_t* v_pool, const int32_t* page_tabl
         auto exp_props = sycl::ext::oneapi::experimental::properties{
             sycl::ext::oneapi::experimental::use_root_sync};
 
-        strata::q_of(stream)
+        strata::kprof::kp(strata::q_of(stream), __FILE__, __func__, __LINE__)
             ->submit([&](sycl::handler &cgh) {
                 KvHostPools host_host_KvHostPools_ct9 =
                     host ? *host : KvHostPools{};
@@ -925,8 +926,8 @@ void qsa_index_step(const float* pooled, const float* q_idx, const float* bias, 
             strata::q_of(stream)->get_device(),
             {sycl::aspect::fp64});
 
-        strata::q_of(stream)
-            ->parallel_for<dpct_kernel_name<class qsa_index_kernel_bb65cd>>(
+        strata::kprof::kp(strata::q_of(stream), __FILE__, __func__, __LINE__)
+            ->template parallel_for<dpct_kernel_name<class qsa_index_kernel_bb65cd>>(
                 sycl::nd_range<3>(sycl::range(1, 1, (unsigned)max_blocks) *
                                       sycl::range(1, 1, threads),
                                   sycl::range(1, 1, threads)),
@@ -960,8 +961,8 @@ void topk_512_step(const float* cell_scores, const QsaShapes& s, int64_t cap, co
         auto exp_props = sycl::ext::oneapi::experimental::properties{
             sycl::ext::oneapi::experimental::use_root_sync};
 
-        strata::q_of(stream)
-            ->parallel_for<dpct_kernel_name<class topk_kernel_97d5c9>>(
+        strata::kprof::kp(strata::q_of(stream), __FILE__, __func__, __LINE__)
+            ->template parallel_for<dpct_kernel_name<class topk_kernel_97d5c9>>(
                 sycl::nd_range<3>(sycl::range(1, 1, TOPK_THREADS),
                                   sycl::range(1, 1, TOPK_THREADS)),
                 exp_props, [=](sycl::nd_item<3> item_ct1) {
@@ -990,8 +991,8 @@ void kv_gather_step(const uint16_t* k_pool, const uint16_t* v_pool, const int32_
         auto exp_props = sycl::ext::oneapi::experimental::properties{
             sycl::ext::oneapi::experimental::use_root_sync};
 
-        strata::q_of(stream)
-            ->parallel_for<dpct_kernel_name<class kv_gather_kernel_3473e7>>(
+        strata::kprof::kp(strata::q_of(stream), __FILE__, __func__, __LINE__)
+            ->template parallel_for<dpct_kernel_name<class kv_gather_kernel_3473e7>>(
                 sycl::nd_range<3>(sycl::range(1, 1, grid_for(total, 256)) *
                                       sycl::range(1, 1, 256),
                                   sycl::range(1, 1, 256)),
@@ -1060,7 +1061,7 @@ void qsa_attend_step(const float *q, const uint16_t *k_scratch,
         auto exp_props = sycl::ext::oneapi::experimental::properties{
             sycl::ext::oneapi::experimental::use_root_sync};
 
-        strata::q_of(stream)
+        strata::kprof::kp(strata::q_of(stream), __FILE__, __func__, __LINE__)
             ->submit([&](sycl::handler &cgh) {
                 sycl::local_accessor<uint8_t, 1> dpct_local_acc_ct1(
                     sycl::range(smem), cgh);
@@ -1150,7 +1151,7 @@ void indexer_key_append(const float* raw, const int32_t* pos_dev, int32_t pos_ba
             strata::q_of(stream)->get_device(),
             {sycl::aspect::fp64});
 
-        strata::q_of(stream)
+        strata::kprof::kp(strata::q_of(stream), __FILE__, __func__, __LINE__)
             ->submit([&](sycl::handler &cgh) {
                 sycl::local_accessor<uint8_t, 1> dpct_local_acc_ct1(
                     sycl::range(smem), cgh);
@@ -1254,8 +1255,8 @@ void qsa_gate_apply_f32(const float* attn, const float* q_full, const QsaShapes&
             strata::q_of(stream)->get_device(),
             {sycl::aspect::fp64});
 
-        strata::q_of(stream)
-            ->parallel_for<
+        strata::kprof::kp(strata::q_of(stream), __FILE__, __func__, __LINE__)
+            ->template parallel_for<
                 dpct_kernel_name<class qsa_gate_apply_f32_kernel_7cff4f>>(
                 sycl::nd_range<3>(sycl::range(1, 1, grid_for(n, 256)) *
                                       sycl::range(1, 1, 256),
@@ -1279,8 +1280,8 @@ void qsa_gate_apply(const float* attn, const float* q_full, const QsaShapes& s, 
             strata::q_of(stream)->get_device(),
             {sycl::aspect::fp64});
 
-        strata::q_of(stream)
-            ->parallel_for<
+        strata::kprof::kp(strata::q_of(stream), __FILE__, __func__, __LINE__)
+            ->template parallel_for<
                 dpct_kernel_name<class qsa_gate_apply_kernel_650dec>>(
                 sycl::nd_range<3>(sycl::range(1, 1, grid_for(n, 256)) *
                                       sycl::range(1, 1, 256),

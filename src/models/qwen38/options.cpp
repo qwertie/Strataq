@@ -11,6 +11,7 @@
 #include "strata/common/kernels/cpu/pool.hpp"
 #include "strata/core/arch_defaults.hpp"
 #include "strata/core/nv_defaults.hpp"
+#include "strata/models/qwen38/adapt_decay.hpp"
 #include "strata/models/qwen38/logits_selection.hpp"
 
 #include <cuda_runtime.h>
@@ -517,7 +518,7 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         else if (a == "--mtp-window") o.mtp_window = std::atoll(next("--mtp-window"));
         else if (a == "--pcie-frac") o.pcie_frac = std::atof(next("--pcie-frac"));
         else if (a == "--adapt-every") { o.adapt_every = std::atoi(next("--adapt-every")); o.adapt_every_given = true; }
-        else if (a == "--adapt-decay") o.adapt_decay = (float) std::atof(next("--adapt-decay"));
+        else if (a == "--adapt-decay") o.adapt_decay = strata::program::adapt_decay_checked(std::atof(next("--adapt-decay")));   // #1284: outside 0..1 -> 0.7, said
         else if (a == "--adapt-min-gain") o.adapt_min_gain = (float) std::atof(next("--adapt-min-gain"));
         else if (a == "--adapt-async") { o.adapt_async = std::atoi(next("--adapt-async")) != 0 ? 1 : 0; o.adapt_async_given = o.adapt_async; }
         else if (a == "--spec-min-p") o.spec_min_p = std::atof(next("--spec-min-p"));
@@ -718,7 +719,27 @@ int apply_device_defaults(Options& o) {
                 const char* d1 = std::getenv("STRATA_GFX1151_DEFAULTS");
                 if (!(c1 != nullptr && c1[0] == '0') && !(d1 != nullptr && d1[0] == '0')) {
                     o.prefill_auto_cap = 0;
-                    o.prefill_chunk = std::max<int64_t>(o.prefill_chunk, 8192);
+                    // 0.2.8: 16,384 rather than 8,192.  The prompt reads every expert once per chunk, so a bigger chunk
+                    // reads them fewer times: measured on strix (engine 0.1.52, own prompt buffers, IQ3_S) 32K 1,260.0 ->
+                    // 1,307.9 tok/s and 64K 1,191.0 -> 1,238.2 (+3.8% / +4.0%); at 4K and 8K the chunk is the prompt, so
+                    // nothing changes there.  The buffers' reserve grows to ~10.9 GiB and the cache keeps all 24,576 slots
+                    // (the box reports 84.7 GiB free at a 64K context).  STRATA_GFX1151_CHUNK=0 keeps 6,144.
+                    o.prefill_chunk = std::max<int64_t>(o.prefill_chunk, 16384);
+                }
+            }
+            // 0.2.8: the Strix Halo prompt path keeps its own buffers instead of lending cache slots.  A lent slot's expert
+            // is re-read from the host arena during every chunk, and on this box that copy runs at ~0.5 GB/s (the arena is
+            // unregistered in UMA mode): measured on strix, engine 0.1.52, IQ3_S, 2026-10-27 - 823 slots = 2.75 s of a
+            // 3.3 s 4K prompt, 1,408 slots = 5.5 s of a 6.1 s 8K prompt.  Without lending every expert stays in the cache
+            // (24,576 slots) and the prompt reads VRAM only; the buffers' VRAM is reserved up front instead (the cache
+            // still fits: 46.84 GiB of experts against a 63.6 GB carve-out).  STRATA_PREFILL_BORROW=1 keeps 0.2.7's
+            // lending, STRATA_GFX1151_DEFAULTS=0 turns the whole gfx1151 block off.
+            if (win_host && all_igpu && std::strncmp(ad.gcnArchName, "gfx1151", 7) == 0) {
+                const char* pb = std::getenv("STRATA_PREFILL_BORROW");
+                const char* pd = std::getenv("STRATA_GFX1151_DEFAULTS");
+                if (!(pb != nullptr && pb[0] == '1') && !(pd != nullptr && pd[0] == '0')) {
+                    o.no_prefill_borrow = true;
+                    o.prefill_own_keep_chunk = true;
                 }
             }
         } else (void) cudaGetLastError();

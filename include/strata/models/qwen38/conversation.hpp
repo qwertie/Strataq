@@ -35,7 +35,9 @@ public:
     }
     /// Runs one verify window: `tokens[0..T)` at positions `pos0`.., `out[t]` the pick after token t.  The caller then
     /// commits the tokens it keeps (`ver.commit`).  Fails also when the CPU expert pool failed during the window.
-    bool run_window(int T, const int32_t* tokens, int64_t pos0, int32_t* out, std::string& err);
+    /// `invariant`: the CPU experts' window-invariant arithmetic, which a probabilistic (STRATA_SPEC_PROB) decode needs
+    /// so that a row's target distribution does not depend on its window (drive_pool_multi_invariant).
+    bool run_window(int T, const int32_t* tokens, int64_t pos0, int32_t* out, std::string& err, bool invariant = false);
     /// Decodes `tok` at `pos` and keeps it: `next` gets the token that follows it.
     bool decode(int32_t tok, int64_t pos, int32_t& next, std::string& err) {
         return run_window(1, &tok, pos, &next, err) && ver.commit(1, err);
@@ -52,8 +54,12 @@ public:
 private:
     /// Runs `window` (a verify window through the CPU expert pool) and fails also when the pool failed during it.
     bool run_through_pool(const std::function<bool()>& window, std::string& err);
-    /// Gets the CPU expert pool's entry the windows call, and its argument.
-    strata::core::PoolMultiFn get_pool() const { return split_ != nullptr ? &drive_pool_split : &drive_pool_multi; }
+    /// Gets the CPU expert pool's entry the windows call (`invariant`: run_window's), and its argument.
+    strata::core::PoolMultiFn get_pool(bool invariant = false) const {
+        if (split_ != nullptr)
+            return invariant ? &drive_pool_split_invariant : &drive_pool_split;
+        return invariant ? &drive_pool_multi_invariant : &drive_pool_multi;
+    }
     void* get_pool_user() const { return split_ != nullptr ? (void*) split_ : (void*) &m_->drive; }
 
     Model* m_ = nullptr;   ///< set by init_decode

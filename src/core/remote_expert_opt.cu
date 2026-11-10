@@ -5,6 +5,7 @@
 #include "strata/common/kernels/cpu/expert_layout.hpp"
 #include "strata/common/kernels/elementwise.hpp"
 #include "strata/common/kernels/window_ops.hpp"
+#include "strata/common/kernels/window_limits.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -12,7 +13,7 @@
 namespace strata::core {
 namespace {
 constexpr int64_t H = strata::kernels::cpu::H;
-constexpr int K = 10, MAXT = strata::kernels::cpu::MAXT, CAP = MAXT * K;
+constexpr int K = 10, MAXT = strata::kernels::kWindowMaxT, CAP = MAXT * K;   // (a window's rows)
 struct ReduceMeta { int32_t row[CAP]; float weight[CAP]; };
 
 bool check(cudaError_t status, std::string& err) {

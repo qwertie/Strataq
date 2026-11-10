@@ -16,6 +16,7 @@
 // A separate opt-in native postops path follows the pinned CUDA arithmetic after both projections.
 #define DPCT_PROFILING_ENABLED
 #include <sycl/sycl.hpp>
+#include "strata/kprof.hpp"
 #include <dpct/dpct.hpp>
 #include "strata/sycl_queue.hpp"
 #include "strata/models/qwen38/kernels/ple.hpp"
@@ -296,8 +297,8 @@ void ple_history_advance(float* hist, const float* normalized, void* stream) {
         auto exp_props = sycl::ext::oneapi::experimental::properties{
             sycl::ext::oneapi::experimental::use_root_sync};
 
-        strata::q_of(stream)
-            ->parallel_for<
+        strata::kprof::kp(strata::q_of(stream), __FILE__, __func__, __LINE__)
+            ->template parallel_for<
                 dpct_kernel_name<class history_advance_kernel_204159>>(
                 sycl::nd_range<3>(
                     sycl::range(1, 1, (NG_HC_DIM + THREADS - 1) / THREADS) *
@@ -438,7 +439,7 @@ void ple_block(const float* emb, const float* hidden, const float* hist_rows, co
             dpct::has_capability_or_fail(st->get_device(),
                                          {sycl::aspect::fp64});
 
-            st->submit([&](sycl::handler &cgh) {
+            strata::kprof::kp(st, __FILE__, __func__, __LINE__)->submit([&](sycl::handler &cgh) {
                 auto NG_RMS_EPS_ct4 = NG_RMS_EPS;
 
                 cgh.parallel_for<dpct_kernel_name<class gnorm_kernel_e2f600>>(
@@ -459,7 +460,7 @@ void ple_block(const float* emb, const float* hidden, const float* hist_rows, co
             dpct::has_capability_or_fail(st->get_device(),
                                          {sycl::aspect::fp64});
 
-            st->submit([&](sycl::handler &cgh) {
+            strata::kprof::kp(st, __FILE__, __func__, __LINE__)->submit([&](sycl::handler &cgh) {
                 auto NG_RMS_EPS_ct4 = NG_RMS_EPS;
 
                 cgh.parallel_for<dpct_kernel_name<class gnorm_kernel_92a6ef>>(
@@ -492,7 +493,7 @@ void ple_block(const float* emb, const float* hidden, const float* hist_rows, co
             auto exp_props = sycl::ext::oneapi::experimental::properties{
                 sycl::ext::oneapi::experimental::use_root_sync};
 
-            st->parallel_for<dpct_kernel_name<class to_bf16_kernel_ab93ff>>(
+            strata::kprof::kp(st, __FILE__, __func__, __LINE__)->template parallel_for<dpct_kernel_name<class to_bf16_kernel_ab93ff>>(
                 sycl::nd_range<3>(
                     sycl::range(1, 1, (n_embd + THREADS - 1) / THREADS) *
                         sycl::range(1, 1, THREADS),
@@ -507,7 +508,7 @@ void ple_block(const float* emb, const float* hidden, const float* hist_rows, co
             dpct::has_capability_or_fail(st->get_device(),
                                          {sycl::aspect::fp64});
 
-            st->parallel_for<dpct_kernel_name<class bf16_gemv_kernel_47d04d>>(
+            strata::kprof::kp(st, __FILE__, __func__, __LINE__)->template parallel_for<dpct_kernel_name<class bf16_gemv_kernel_47d04d>>(
                 sycl::nd_range<3>(
                     sycl::range(1, 1, (n_embd + THREADS - 1) / THREADS) *
                         sycl::range(1, 1, THREADS),
@@ -533,7 +534,7 @@ void ple_block(const float* emb, const float* hidden, const float* hist_rows, co
             dpct::has_capability_or_fail(st->get_device(),
                                          {sycl::aspect::fp64});
 
-            st->submit([&](sycl::handler &cgh) {
+            strata::kprof::kp(st, __FILE__, __func__, __LINE__)->submit([&](sycl::handler &cgh) {
                 auto sqrtf_float_n_embd_ct4 = 1.0f / sqrtf((float)n_embd);
 
                 cgh.parallel_for<dpct_kernel_name<class gate_kernel_ce83eb>>(
@@ -552,7 +553,7 @@ void ple_block(const float* emb, const float* hidden, const float* hist_rows, co
             auto exp_props = sycl::ext::oneapi::experimental::properties{
                 sycl::ext::oneapi::experimental::use_root_sync};
 
-            st->parallel_for<dpct_kernel_name<class bcast_kernel_79d1c2>>(
+            strata::kprof::kp(st, __FILE__, __func__, __LINE__)->template parallel_for<dpct_kernel_name<class bcast_kernel_79d1c2>>(
                 sycl::nd_range<3>(
                     sycl::range(1, 1, (hc_dim + THREADS - 1) / THREADS) *
                         sycl::range(1, 1, THREADS),
@@ -567,7 +568,7 @@ void ple_block(const float* emb, const float* hidden, const float* hist_rows, co
             dpct::has_capability_or_fail(st->get_device(),
                                          {sycl::aspect::fp64});
 
-            st->submit([&](sycl::handler &cgh) {
+            strata::kprof::kp(st, __FILE__, __func__, __LINE__)->submit([&](sycl::handler &cgh) {
                 auto NG_RMS_EPS_ct4 = NG_RMS_EPS;
 
                 cgh.parallel_for<dpct_kernel_name<class gnorm_kernel_dda9b4>>(
@@ -586,7 +587,7 @@ void ple_block(const float* emb, const float* hidden, const float* hist_rows, co
             auto exp_props = sycl::ext::oneapi::experimental::properties{
                 sycl::ext::oneapi::experimental::use_root_sync};
 
-            st->submit([&](sycl::handler &cgh) {
+            strata::kprof::kp(st, __FILE__, __func__, __LINE__)->submit([&](sycl::handler &cgh) {
                 auto PLE_CONV_KERNEL_ct5 = PLE_CONV_KERNEL;
                 auto NGRAM_SIZE_ct6 = NGRAM_SIZE;
                 auto NG_HIST_ct7 = NG_HIST;
@@ -607,7 +608,7 @@ void ple_block(const float* emb, const float* hidden, const float* hist_rows, co
             auto exp_props = sycl::ext::oneapi::experimental::properties{
                 sycl::ext::oneapi::experimental::use_root_sync};
 
-            st->parallel_for<dpct_kernel_name<class add3_kernel_26c4c6>>(
+            strata::kprof::kp(st, __FILE__, __func__, __LINE__)->template parallel_for<dpct_kernel_name<class add3_kernel_26c4c6>>(
                 sycl::nd_range<3>(
                     sycl::range(1, 1, (hc_dim + THREADS - 1) / THREADS) *
                         sycl::range(1, 1, THREADS),

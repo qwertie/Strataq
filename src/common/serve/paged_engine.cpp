@@ -380,10 +380,9 @@ private:
     bool is_decoding() const;
     /// Tells whether the drafter is switched on (the model has one and settings_.drafter).
     bool is_model_drafting() const { return settings_.drafter && facts_.has_drafter; }
-    /// Gets the most conversations one step of this model can run.
+    /// Gets the most conversations one step of this model can run: one row each.
     int get_most_concurrent() const {
-        const int slots = std::min(facts_.max_rows, 8);
-        return facts_.max_concurrent > 0 ? std::min(slots, facts_.max_concurrent) : slots;
+        return facts_.max_concurrent > 0 ? std::min(facts_.max_rows, facts_.max_concurrent) : facts_.max_rows;
     }
     /// Gives the step settings_' step settings, the lookahead 0 while the drafter is off.
     void apply_step_settings();

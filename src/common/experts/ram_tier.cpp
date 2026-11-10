@@ -55,6 +55,24 @@ bool pin_depends_on_reclaim(uint64_t free_now, uint64_t bytes, uint64_t reserve)
     return bytes > 0 && free_now < bytes + reserve;
 }
 
+bool wait_for_ram(uint64_t need, double max_wait_s, double step_s, double note_s,
+                  const std::function<bool(uint64_t&)>& sample, const std::function<void(double)>& sleep,
+                  const std::function<void(double, uint64_t)>& progress, double& waited, uint64_t& available) {
+    waited = 0.0;
+    if (!sample(available)) return false;
+    double next_note = 0.0;
+    while (available < need && waited < max_wait_s) {
+        if (progress && waited >= next_note) {
+            progress(waited, available);
+            next_note = waited + note_s;
+        }
+        sleep(step_s);
+        waited += step_s;
+        if (!sample(available)) return false;
+    }
+    return available >= need;
+}
+
 bool pin_step_fits(uint64_t available, uint64_t step, uint64_t reserve) {
     return available >= step + reserve;
 }

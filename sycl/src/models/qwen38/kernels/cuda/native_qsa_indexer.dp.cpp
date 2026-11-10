@@ -20,6 +20,7 @@
 
 #define DPCT_PROFILING_ENABLED
 #include <sycl/sycl.hpp>
+#include "strata/kprof.hpp"
 #include "strata/core/geometry.hpp"
 #include <dpct/dpct.hpp>
 #include "strata/sycl_queue.hpp"
@@ -406,7 +407,7 @@ void native_qsa_indexer_append_steps(const float* raw, const int32_t* relative_p
         auto exp_props = sycl::ext::oneapi::experimental::properties{
             sycl::ext::oneapi::experimental::use_root_sync};
 
-        ((sycl::queue *)(strata::q_of(stream)))
+        strata::kprof::kp(strata::q_of(stream), __FILE__, __func__, __LINE__)
             ->submit([&](sycl::handler &cgh) {
                 auto mrope_table_ct18 = mrope_table();
 
@@ -430,7 +431,7 @@ void native_qsa_indexer_append_steps(const float* raw, const int32_t* relative_p
         auto exp_props = sycl::ext::oneapi::experimental::properties{
             sycl::ext::oneapi::experimental::use_root_sync};
 
-        ((sycl::queue *)(strata::q_of(stream)))
+        strata::kprof::kp(strata::q_of(stream), __FILE__, __func__, __LINE__)
             ->submit([&](sycl::handler &cgh) {
                 auto mrope_table_ct18 = mrope_table();
 
@@ -502,7 +503,7 @@ void native_qsa_indexer_append_batch(const float* raw, int64_t n, int64_t p0, in
             auto exp_props = sycl::ext::oneapi::experimental::properties{
                 sycl::ext::oneapi::experimental::use_root_sync};
 
-            st->parallel_for<dpct_kernel_name<class append_first_ea2d1f,
+            strata::kprof::kp(st, __FILE__, __func__, __LINE__)->template parallel_for<dpct_kernel_name<class append_first_ea2d1f,
                                               dpct_kernel_scalar<true>>>(
                 sycl::nd_range<3>(sycl::range(1, 1, THREADS),
                                   sycl::range(1, 1, THREADS)),
@@ -517,7 +518,7 @@ void native_qsa_indexer_append_batch(const float* raw, int64_t n, int64_t p0, in
             auto exp_props = sycl::ext::oneapi::experimental::properties{
                 sycl::ext::oneapi::experimental::use_root_sync};
 
-            st->parallel_for<dpct_kernel_name<class append_first_ea2d1f,
+            strata::kprof::kp(st, __FILE__, __func__, __LINE__)->template parallel_for<dpct_kernel_name<class append_first_ea2d1f,
                                               dpct_kernel_scalar<false>>>(
                 sycl::nd_range<3>(sycl::range(1, 1, THREADS),
                                   sycl::range(1, 1, THREADS)),
@@ -538,7 +539,7 @@ void native_qsa_indexer_append_batch(const float* raw, int64_t n, int64_t p0, in
         auto exp_props = sycl::ext::oneapi::experimental::properties{
             sycl::ext::oneapi::experimental::use_root_sync};
 
-        st->parallel_for<dpct_kernel_name<class append_blocks_a6c94e,
+        strata::kprof::kp(st, __FILE__, __func__, __LINE__)->template parallel_for<dpct_kernel_name<class append_blocks_a6c94e,
                                           dpct_kernel_scalar<true>>>(
             sycl::nd_range<3>(sycl::range(1, 1, (unsigned)(hi - first + 1)) *
                                   sycl::range(1, 1, THREADS),
@@ -555,7 +556,7 @@ void native_qsa_indexer_append_batch(const float* raw, int64_t n, int64_t p0, in
         auto exp_props = sycl::ext::oneapi::experimental::properties{
             sycl::ext::oneapi::experimental::use_root_sync};
 
-        st->parallel_for<dpct_kernel_name<class append_blocks_a6c94e,
+        strata::kprof::kp(st, __FILE__, __func__, __LINE__)->template parallel_for<dpct_kernel_name<class append_blocks_a6c94e,
                                           dpct_kernel_scalar<false>>>(
             sycl::nd_range<3>(sycl::range(1, 1, (unsigned)(hi - first + 1)) *
                                   sycl::range(1, 1, THREADS),
@@ -572,7 +573,7 @@ void native_qsa_indexer_append_batch(const float* raw, int64_t n, int64_t p0, in
         auto exp_props = sycl::ext::oneapi::experimental::properties{
             sycl::ext::oneapi::experimental::use_root_sync};
 
-        st->parallel_for<dpct_kernel_name<class append_tail_e0658e>>(
+        strata::kprof::kp(st, __FILE__, __func__, __LINE__)->template parallel_for<dpct_kernel_name<class append_tail_e0658e>>(
             sycl::nd_range<3>(sycl::range(1, 1, R - 1) * sycl::range(1, 1, D),
                               sycl::range(1, 1, D)),
             exp_props, [=](sycl::nd_item<3> item_ct1) {

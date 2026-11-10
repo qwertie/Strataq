@@ -1,5 +1,6 @@
 """The app's "I already have the model" preview recognises an official DeepSeek-V4.1-Flash set (IST-DAS 1.75 / 2.00 / 2.25 bpw), under the
-file names of any of its layouts (6 shards, 4 shards, the first release's), from the pinned names and sizes. Qwen previews are unchanged (tests/terminal/test_models*.py)."""
+file names of any of its layouts (6 shards, 4 shards, the first release's; the 4-shard files also with the shard 1 ISTA-DASLab
+re-published on 2026-10-26, #4237), from the pinned names and sizes. Qwen previews are unchanged (tests/terminal/test_models*.py)."""
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,8 +11,13 @@ from strata_control import dsv41_sets, models
 T = dsv41_sets.tables()
 
 
-def files_of(model, layout=0, engram="official", drop=(), wrong=()):
+ISTA = [m for m in T["sets"] if m.startswith("IST-DAS")]      # the Unsloth UD-IQ1 sets have one layout only (tools/test_setup_udlow.py)
+
+
+def files_of(model, layout=0, engram="official", drop=(), wrong=(), newer_first=False):
     pinned = dict(T["sets"][model]["layouts"][layout])
+    if newer_first:                                   # the 4-shard files after ISTA-DASLab's 2026-10-26 re-publication of shard 1
+        pinned.update({n: size for n, size in T["new1"].items() if n in pinned})
     out = {n: (s + 1 if n in wrong else s) for n, s in pinned.items() if n not in drop}
     if engram:
         name = next(n for n in T["engram"] if (n.startswith("engram") == (engram == "legacy")))
@@ -31,13 +37,13 @@ class DeepSeekPreview(unittest.TestCase):
                 return models.plan_import(str(target)), folder
 
     def test_the_tables_come_from_setup_and_cover_the_three_official_sizes(self):
-        self.assertEqual(sorted(T["sets"]), ["IST-DAS-1.75bpw", "IST-DAS-2.00bpw", "IST-DAS-2.25bpw"])
+        self.assertEqual(sorted(T["sets"]), ["IST-DAS-1.75bpw", "IST-DAS-2.00bpw", "IST-DAS-2.25bpw", "UD-IQ1_M", "UD-IQ1_S"])
         self.assertEqual(len(T["engram"]), 2)
         self.assertEqual([len(layout) for layout in T["sets"]["IST-DAS-2.00bpw"]["layouts"]], [5, 4, 4])
         self.assertEqual([len(layout) for layout in T["sets"]["IST-DAS-1.75bpw"]["layouts"]], [5, 4])    # 1.75 had no first release
 
     def test_each_official_set_is_recognised_in_each_layout(self):
-        for model in T["sets"]:
+        for model in ISTA:
             for layout, names in enumerate(T["sets"][model]["layouts"]):
                 plan, folder = self.preview(files_of(model, layout, engram="legacy" if layout == 2 else "official"))
                 self.assertEqual(plan["file_set_status"], "plausible", (model, layout, plan["issues"]))
@@ -90,6 +96,31 @@ class DeepSeekPreview(unittest.TestCase):
         self.assertEqual(plan["candidate_selection"]["model"], "IST-DAS-2.00bpw")
         self.assertNotIn("unsupported_or_missing_architecture", plan["issues"])
         self.assertFalse(any("not supported" in m for m in plan["messages"]))
+
+    def test_the_four_shard_files_with_the_republished_first_shard_are_the_set_4237(self):
+        for model in ISTA:
+            plan, folder = self.preview(files_of(model, 1, newer_first=True))
+            self.assertEqual(plan["file_set_status"], "plausible", (model, plan["issues"]))
+            self.assertEqual(plan["candidate_selection"]["model"], model)
+            self.assertEqual(plan["issues"], [])
+            self.assertEqual(plan["file_count"], 5)
+            self.assertTrue(any("re-published" in m for m in plan["messages"]), plan["messages"])
+        first = sorted(T["sets"]["IST-DAS-2.00bpw"]["layouts"][1])[0]               # a cut copy of the new first shard is still refused
+        listing = files_of("IST-DAS-2.00bpw", 1, newer_first=True)
+        listing[first] = T["new1"][first] - (1 << 20)
+        plan, _ = self.preview(listing)
+        self.assertEqual(plan["missing_shards"], [first])
+
+    def test_a_folder_with_two_whole_layouts_of_one_set_is_that_set_once(self):
+        listing = {**files_of("IST-DAS-2.00bpw", 1), **files_of("IST-DAS-2.00bpw")}
+        plan, _ = self.preview(listing)
+        self.assertNotIn("multiple_model_groups", plan["issues"])
+        self.assertEqual(plan["candidate_selection"]["model"], "IST-DAS-2.00bpw")
+        self.assertEqual(plan["file_count"], 6)                                      # the newest layout's five files and the Engram
+        self.assertFalse(any("earlier release" in m for m in plan["messages"]))
+        listing = {**files_of("IST-DAS-2.00bpw"), **files_of("IST-DAS-2.25bpw", 1)}  # two different sets still ask
+        plan, _ = self.preview(listing)
+        self.assertIn("multiple_model_groups", plan["issues"])
 
     def test_other_files_are_not_claimed(self):
         with tempfile.TemporaryDirectory() as tmp:
