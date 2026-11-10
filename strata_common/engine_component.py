@@ -33,7 +33,8 @@ Checks, in order, and each one names what failed:
 * the runtime that is asking is new enough for `min_runtime`, and the GPU driver (when it can be read) for
   `min_driver`. A package that fails an integrity check is `EngineIntegrityError`: nothing is started.
 
-Nothing here imports anything outside the standard library and `strata_control`.
+Nothing here imports anything outside the standard library and Strata's own packages; `strata_control` is loaded only
+when needed, for the engines of model shapes (`shape_engine`) and the saved backend choice (`discovery`).
 """
 
 from __future__ import annotations

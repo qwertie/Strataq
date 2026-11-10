@@ -10,7 +10,9 @@ namespace strata::kernels {
 /// Counts how often token `v` occurs in the penalty window `h[0..n)`.
 __device__ __forceinline__ int history_count(const int* __restrict__ h, int n, int v) {
     int c = 0;
-    for (int i = 0; i < n; ++i) if (h[i] == v) ++c;
+    for (int i = 0; i < n; ++i)
+        if (h[i] == v)
+            ++c;
     return c;
 }
 

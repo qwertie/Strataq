@@ -1,6 +1,7 @@
-// include/strata/common/spec/window_planner.hpp - what one verify window holds after its first row: the MTP's drafts,
-// a lookup (suffix) window, or the MTP's drafts with a lookup chain after them; and what the draft policy learns from
-// the window's verdict. Used by both decode loops of src/program/generate.cpp (`--serve` and `--spec`).
+// include/strata/common/spec/window_planner.hpp - what one verify window holds after its first row: the drafter's
+// drafts (the MTP's or DFlash2's), a lookup (suffix) window, or the drafts with a lookup chain after them; and what
+// the draft policy learns from the window's verdict. Used by both decode loops of src/program/generate.cpp (`--serve`
+// and `--spec`).
 #pragma once
 
 #include "strata/common/spec/draft_policy.hpp"
@@ -111,10 +112,10 @@ public:
     /// Gets how many tokens the suffix drafter proposes for a lookup window of at most `look_rows` rows; they are
     /// lookup_drafts() until the next proposal, and their context match is sfx.last_match().
     int propose_lookup(int look_rows) { return sfx.propose(look_rows - 1, sbuf_.data()); }
-    /// Takes a lookup window of at most `look_rows` rows instead where the policy expects it to pay and its first token
-    /// agrees with the drafter's `drafts`.  `probabilistic` (the MTP's drafts are sampled, STRATA_SPEC_PROB): the
-    /// choice must not depend on the draw, so `source` chooses for the MTP's widest window and the first tokens need
-    /// not agree.
+    /// Takes a lookup window of at most `look_rows` rows instead where the policy expects it to pay and its first
+    /// token agrees with the drafter's `drafts`.  `probabilistic` (the MTP's drafts are sampled, STRATA_SPEC_PROB):
+    /// the choice must not depend on the draw, so `source` chooses for the MTP's widest window and the first tokens
+    /// need not agree.
     void pick_lookup(Window& w, const int32_t* drafts, bool probabilistic, int look_rows) {
         if (suffix_draft_ <= 0 || w.first) return;
         w.proposed = propose_lookup(look_rows);
@@ -175,7 +176,8 @@ public:
         count(w, a);
         return a;
     }
-    /// Counts the lookup drafts of `w`, of whose drafts the first `accepted` hold.
+    /// Adds `w`'s lookup and lookup-chain drafts to this request's tallies, given that its first `accepted` drafts
+    /// held.
     void count(const Window& w, int accepted) {
         if (w.lookup) lookup.add(w.T - 1, accepted);
         if (w.chain > 0) chained.add(w.chain, std::max(0, accepted - (w.T - 1)));

@@ -45,8 +45,8 @@ CHECKED_PY_PACKAGES = ("strata_base", "strata_common", "strata_control", "strata
 PY_RUNTIME_LOADERS = {"import_module", "__import__", "spec_from_file_location", "find_spec", "run_path", "run_module"}
 # The scripts in tools/ by the name an import uses (some callers put tools/ on sys.path)
 TOOL_MODULES = {path.stem for path in (ROOT / "tools").glob("*.py")}
-# Files of the checked packages that still load setup.py or tools/ at run time, and why. Remove an entry once its
-# file no longer does.
+# Files of the checked packages that still import a package of their own or a higher layer, or load setup.py or tools/
+# at run time, and why. Remove an entry once its file no longer does.
 KNOWN_UPWARD_LOADS = {
     "strata_cli/launch/catalog.py": "runs tools/strata_mcp.py's Strata object, the app's model list and fit code",
     "strata_control/calibration.py": "calls setup.py's hardware_key, runs tools/calibrate.py and strata_tokenizer.py",
@@ -54,9 +54,10 @@ KNOWN_UPWARD_LOADS = {
     "strata_control/engine_update.py": "upstream's engine update: reads the Terminal's launch folder, access and settings (strata_cli/launch)",
     "strata_control/intel_app.py": "upstream's Intel app install: adopts the model with strata_cli/launch/adopt.py and its card list",
     "strata_control/setup_config.py": "setup.py's run-config lines (moved by upstream): applies tools/calibrate.py's tuned settings",
-    "strata_common/engine_component.py": "upstream's shape engines and engine search: strata_control/shape_engine.py "
-                                          "(it needs the feed and the updater) and discovery.py",
-    "strata_server/server.py": "imports tools/strata_tokenizer.py, the tokenizer, and strata_control/runtime.py (upstream: the owner's host state)",
+    "strata_common/engine_component.py": "upstream's engines of model shapes: strata_control/shape_engine.py (it needs "
+                                          "the feed and the updater); the saved backend choice: discovery.py's settings file",
+    "strata_server/server.py": "imports tools/strata_tokenizer.py, the tokenizer, and strata_control/runtime.py for the "
+                               "runtime folder's activity lease (upstream's #4463)",
 }
 
 

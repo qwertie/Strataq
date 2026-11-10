@@ -1436,11 +1436,11 @@ class Runner:
         fam = MULTI_FILE_FAMILIES["deepseek41"]
         p = Path(model_path)
         order = ([prefer] if prefer in fam["models"] else []) + [m for m in fam["models"] if m != prefer]
+        sizes = fam["sha256"]
         for m in order:
             d = fam["models"][m]
             subs = [d.get("subdir"), d.get("legacy_subdir"), m]
             folders = [p, *[p / x for x in subs if x]] if p.is_dir() else [p.parent]
-            sizes = MULTI_FILE_FAMILIES["deepseek41"]["sha256"]
 
             def there(f, n):      # a set whose files have generic names (the ISTA-DAS Coder's) is only claimed by files of the pinned size
                 if not (f / n).exists():

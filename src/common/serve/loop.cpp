@@ -64,32 +64,32 @@ Input::Input(bool quit_ends_request) : shared_(std::make_shared<Shared>()) {
                 buf.append(chunk, (size_t) n);
             }
         };
+        auto stop_every_request = [&] {
+            st->stop.store(true);
+            st->stop_all.store(true);
+        };
         while (getline_fd(l)) {
             if (!l.empty() && l.back() == '\r') l.pop_back();
-            if (l == "STOP" || (quit_ends_request && l.rfind("STOP ", 0) == 0)) {
-                st->stop.store(true);
-                if (l == "STOP") {
-                    st->stop_all.store(true);
-                } else {
-                    std::lock_guard<std::mutex> lk(st->mu);
-                    st->stopped_ids.push_back(std::atoll(l.c_str() + 5));
-                }
+            if (l == "STOP") {
+                stop_every_request();
                 continue;
             }
-            if (quit_ends_request && l == "QUIT") {
+            if (quit_ends_request && l.rfind("STOP ", 0) == 0) {
                 st->stop.store(true);
-                st->stop_all.store(true);
+                std::lock_guard<std::mutex> lk(st->mu);
+                st->stopped_ids.push_back(std::atoll(l.c_str() + 5));
+                continue;
             }
+            if (quit_ends_request && l == "QUIT")
+                stop_every_request();
             std::lock_guard<std::mutex> lk(st->mu);
             st->lines.push_back(l);
             st->cv.notify_one();
         }
         std::lock_guard<std::mutex> lk(st->mu);
         st->eof = true;
-        if (quit_ends_request) {
-            st->stop.store(true);
-            st->stop_all.store(true);
-        }
+        if (quit_ends_request)
+            stop_every_request();
         st->cv.notify_one();
     }).detach();
 }

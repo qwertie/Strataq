@@ -5971,8 +5971,10 @@ def start_engine_or_fallback(cfg: dict, exe: str, effort_end: list[str] | None, 
     normal one instead, so a start never fails because of the option. Any other config starts exactly as before."""
     fb = cfg.get("split_fallback")
     try:
-        return engine_client.StrataEngine(exe, engine_client.engine_args(cfg, exe) + (effort_end or []), cwd=cfg.get("cwd"), log=cfg.get("log"), env=env, lazy=lazy,
-                            retry_args=engine_client.mtp_retry_args(cfg, exe, effort_end), retry_vram_args=engine_client.nodraft_retry_args(cfg, exe, effort_end))
+        return engine_client.StrataEngine(
+            exe, engine_client.engine_args(cfg, exe) + (effort_end or []), cwd=cfg.get("cwd"), log=cfg.get("log"), env=env,
+            lazy=lazy, retry_args=engine_client.mtp_retry_args(cfg, exe, effort_end),
+            retry_vram_args=engine_client.nodraft_retry_args(cfg, exe, effort_end))
     except Exception as e:
         if not isinstance(fb, dict) or not fb.get("exe"):
             raise
@@ -5999,8 +6001,10 @@ def start_engine_or_fallback(cfg: dict, exe: str, effort_end: list[str] | None, 
     env2 = engine_client.child_env(cfg2, offline=offline)
     configure_batch_telemetry_env(env2, cfg2, batch_telemetry)
     effort2 = effort_end_args(cfg2, exe2, tok)
-    engine = engine_client.StrataEngine(exe2, engine_client.engine_args(cfg2, exe2) + (effort2 or []), cwd=cfg2.get("cwd"), log=cfg2.get("log"), env=env2, lazy=lazy,
-                          retry_args=engine_client.mtp_retry_args(cfg2, exe2, effort2), retry_vram_args=engine_client.nodraft_retry_args(cfg2, exe2, effort2))
+    engine = engine_client.StrataEngine(
+        exe2, engine_client.engine_args(cfg2, exe2) + (effort2 or []), cwd=cfg2.get("cwd"), log=cfg2.get("log"), env=env2,
+        lazy=lazy, retry_args=engine_client.mtp_retry_args(cfg2, exe2, effort2),
+        retry_vram_args=engine_client.nodraft_retry_args(cfg2, exe2, effort2))
     engine.info["split_fallback"] = True
     return engine
 
