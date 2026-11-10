@@ -37,7 +37,9 @@ void sample_draft(const float* logits, int n_tokens, int n_vocab, const SamplerP
                   void* stream);
 // verify rows: the model's logits (n_tokens, n_vocab), the draft draft[t] drawn from q[t] (same p.seed / p.counter as
 // its sample_draft) -> out[t], distributed as sample_tokens' draw.  A draft q[t] does not hold gets the plain draw.
+// With penalties (p.penalty_last_n > 0) `history` holds each row's tokens as in sample_tokens: p is then the
+// penalized distribution, and the rule keeps every token distributed as sample_tokens' penalized draw.
 void sample_verify(const float* logits, int n_tokens, int n_vocab, const SamplerParams& p, const SpecList* q,
-                   const int* draft, int* out, void* stream);
+                   const int* draft, int* out, void* stream, const int* history = nullptr, int history_len = 0);
 
 }  // namespace strata::dsv41k

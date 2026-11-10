@@ -25,6 +25,9 @@ OLD_CPP_HEADERS_MOVING_TO = {"core/geometry.hpp": "models/common/geometry.hpp"}
 # file no longer does.
 KNOWN_UPWARD_INCLUDES = {
     "common/artifact/gguf_reader.hpp": "reads a model file's shape into core/geometry.hpp's ModelGeometry",
+    "common/kernels/cpu/expert.hpp": "sizes the CPU experts by the compiled geometry (STRATA_GEOMETRY)",
+    "common/kernels/cpu/native_expert.hpp": "sizes the CPU pool's activations by the compiled geometry (STRATA_GEOMETRY)",
+    "common/kernels/prefill/moe_fused.hpp": "sizes the fused prompt experts by the compiled geometry (STRATA_GEOMETRY)",
 }
 # The new C++ folders (relative to src/ or include/strata/) by layer. Files in one folder, including its subfolders,
 # may include each other; folders in one layer may not, except as CPP_SAME_LAYER_USES allows. A new model family
@@ -48,7 +51,12 @@ KNOWN_UPWARD_LOADS = {
     "strata_cli/launch/catalog.py": "runs tools/strata_mcp.py's Strata object, the app's model list and fit code",
     "strata_control/calibration.py": "calls setup.py's hardware_key, runs tools/calibrate.py and strata_tokenizer.py",
     "strata_control/drafting_fetch.py": "runs tools/dflash2_pack.py to pack the downloaded drafter",
-    "strata_server/server.py": "imports tools/strata_tokenizer.py, the tokenizer",
+    "strata_control/engine_update.py": "upstream's engine update: reads the Terminal's launch folder, access and settings (strata_cli/launch)",
+    "strata_control/intel_app.py": "upstream's Intel app install: adopts the model with strata_cli/launch/adopt.py and its card list",
+    "strata_control/setup_config.py": "setup.py's run-config lines (moved by upstream): applies tools/calibrate.py's tuned settings",
+    "strata_common/engine_component.py": "upstream's shape engines and engine search: strata_control/shape_engine.py "
+                                          "(it needs the feed and the updater) and discovery.py",
+    "strata_server/server.py": "imports tools/strata_tokenizer.py, the tokenizer, and strata_control/runtime.py (upstream: the owner's host state)",
 }
 
 

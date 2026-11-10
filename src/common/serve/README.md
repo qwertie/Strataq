@@ -22,7 +22,8 @@ and `BDONE` lines.
   `STOP`, `QUIT` and then closes stdin). Its `Engine::spec_step` takes the stop check as a function.
 - DeepSeek has no batch slots: its `Loop` has `list_conversations` only. Its `Input` is made with
   `quit_ends_request`, so QUIT and the end of stdin also end a running request, and `STOP <anything>` counts as
-  STOP. It reads its lines with `parse_request_line(..., keys_after_file)` (keys may follow GENI's picture file),
+  STOP. With `--parallel` it runs several requests at once and reads its lines with `Input::next` on a thread of its
+  own (no `Loop`): `STOP <rid>` ends request `rid` alone (`is_stop_requested(rid)`). It reads its lines with `parse_request_line(..., keys_after_file)` (keys may follow GENI's picture file),
   refuses a line without max_new (`has_max_new`), and sets `top_k = 64` before it reads the sampling keys. Its
   model's `set_cancel` asks `is_stop_requested`.
 

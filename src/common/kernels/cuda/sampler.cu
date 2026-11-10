@@ -20,6 +20,7 @@
 //   - `sampler_kernel` (`STRATA_OLD_SAMPLER=1`), the kernel of engine 0.1.20, kept as the reference.
 // The two new ones share `sampled_tail_warp` (top_p / min_p / temperature / draw on one warp).
 #include "strata/common/kernels/sampler.hpp"
+#include "strata/common/kernels/sampler_penalties.cuh"
 #include "strata/common/kernels/coupled_draft.hpp"
 #include "strata/common/kernels/spec_prob.hpp"
 #include "strata/common/kernels/spec_proposal.hpp"
@@ -78,24 +79,6 @@ __device__ __forceinline__ double gumbel_exp(uint64_t seed, uint64_t counter, ui
     z ^= z >> 31;
     const double u = ((double) (z >> 11) + 0.5) * (1.0 / 9007199254740992.0);   // (0, 1), never 0 or 1
     return -log(u);
-}
-
-// `count_in_history` and the penalty application, transcribed from `llama_sampler_penalties_apply`.
-// The repeat penalty MULTIPLIES for non-positive logits and DIVIDES for positive ones - dividing
-// unconditionally is the natural reading of the source paper and it INVERTS the penalty on half the
-// vocabulary.  The presence penalty is `float(count > 0)`, a boolean, not the count.
-__device__ __forceinline__ int history_count(const int* __restrict__ h, int n, int v) {
-    int c = 0;
-    for (int i = 0; i < n; ++i) if (h[i] == v) ++c;
-    return c;
-}
-
-__device__ __forceinline__ float apply_penalties(float logit, int count, const SamplerParams& p) {
-    if (count <= 0) return logit;
-    if (logit <= 0.0f) logit *= p.penalty_repeat;
-    else               logit /= p.penalty_repeat;
-    logit -= (float) count * p.penalty_freq + (count > 0 ? 1.0f : 0.0f) * p.penalty_present;
-    return logit;
 }
 
 /// **THE GREEDY ARGMAX, ONE BLOCK PER TOKEN, COVERING THE VOCABULARY.**

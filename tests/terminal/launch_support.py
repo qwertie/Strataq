@@ -33,14 +33,19 @@ class Home:
             "STRATA_RUNTIME_DIR": str(base / "runtime"),
             "XDG_STATE_HOME": str(base / "state"),
             "LOCALAPPDATA": str(base / "local"),
+            "APPDATA": str(base / "roaming"),            # Windows: %APPDATA%\Strata\settings.json (remembered Strata folders), profiles, connections
+            "XDG_CONFIG_HOME": str(base / "xdg-config"),  # Linux/macOS: ~/.config/strata/settings.json
             "HOME": str(base / "home"),
             "USERPROFILE": str(base / "home"),
         }
+        self.env_clear = ("STRATA_SETTINGS_FILE", "STRATA_CONNECTION_DIR", "CUDA_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES")   # a developer's own variables must not leak into a test either
         (base / "home").mkdir(parents=True, exist_ok=True)
         self.patch = mock.patch.dict(os.environ, self.env)
 
     def __enter__(self) -> "Home":
         self.patch.start()
+        for k in self.env_clear:                       # (patch.dict puts the original environment back on exit)
+            os.environ.pop(k, None)
         return self
 
     def __exit__(self, *exc) -> None:
@@ -68,3 +73,33 @@ def run_cli(argv: list[str]) -> tuple[int, str, str]:
         except SystemExit as e:
             code = int(e.code or 0)
     return code, out.getvalue(), err.getvalue()
+
+
+def not_intel(testcase) -> None:
+    """These fixtures describe an NVIDIA PC (catalog(HW_12)). Runner.intel_chosen asks the machine that runs the test, so on a box with an
+    Intel Arc (p1006) the launch became an Intel one and the plan words changed. Patched for the length of the test."""
+    from strata_cli.launch.runner import Runner
+    p = mock.patch.object(Runner, "intel_chosen", lambda self: False)
+    p.start()
+    testcase.addCleanup(p.stop)
+
+
+def with_current_imports(source: bytes) -> bytes:
+    """Points an earlier Control file's `from strata_control import ...` lines at the packages those modules live in in this
+    checkout (docs/REFACTOR_PLAN.md step A2 moved some to strata_base and strata_common), so the old file runs here.  Used by
+    the tests that load a released Control's feed.py (test_feed_models.py, test_shape_engine.py)."""
+    import re
+    root = Path(__file__).resolve().parents[2]
+
+    def home(name: str) -> str:
+        return next((pkg for pkg in ("strata_base", "strata_common") if (root / pkg / f"{name}.py").is_file()), "strata_control")
+
+    def split(m: re.Match) -> str:
+        groups: dict[str, list[str]] = {}
+        for name in (n.strip() for n in m.group(2).split(",")):
+            groups.setdefault(home(name.split(" as ")[0]), []).append(name)
+        return "\n".join(f"{m.group(1)}from {pkg} import {', '.join(names)}" for pkg, names in groups.items())
+
+    text = re.sub(r"(?m)^([ \t]*)from strata_control import ([\w ,]+)$", split, source.decode("utf-8"))
+    text = re.sub(r"\bfrom strata_control\.(\w+) import", lambda m: f"from {home(m.group(1))}.{m.group(1)} import", text)
+    return text.encode("utf-8")

@@ -1,4 +1,4 @@
-"""The app's "I already have the model" preview recognises an official DeepSeek-V4.1-Flash set (IST-DAS 1.75 / 2.00 / 2.25 bpw), under the
+"""The app's "I already have the model" preview recognises an official DeepSeek-V4.1-Flash set (ISTA-DAS 1.75 / 2.00 / 2.25 bpw), under the
 file names of any of its layouts (6 shards, 4 shards, the first release's; the 4-shard files also with the shard 1 ISTA-DASLab
 re-published on 2026-10-26, #4237), from the pinned names and sizes. Qwen previews are unchanged (tests/terminal/test_models*.py)."""
 import tempfile
@@ -11,7 +11,7 @@ from strata_control import dsv41_sets, models
 T = dsv41_sets.tables()
 
 
-ISTA = [m for m in T["sets"] if m.startswith("IST-DAS")]      # the Unsloth UD-IQ1 sets have one layout only (tools/test_setup_udlow.py)
+ISTA = [m for m in T["sets"] if m.startswith("IST-DAS-")]      # the Unsloth UD-IQ1 sets and the Coder have one layout only (tools/test_setup_udlow.py)
 
 
 def files_of(model, layout=0, engram="official", drop=(), wrong=(), newer_first=False):
@@ -37,7 +37,7 @@ class DeepSeekPreview(unittest.TestCase):
                 return models.plan_import(str(target)), folder
 
     def test_the_tables_come_from_setup_and_cover_the_three_official_sizes(self):
-        self.assertEqual(sorted(T["sets"]), ["IST-DAS-1.75bpw", "IST-DAS-2.00bpw", "IST-DAS-2.25bpw", "UD-IQ1_M", "UD-IQ1_S"])
+        self.assertEqual(sorted(T["sets"]), ["IST-DAS-1.75bpw", "IST-DAS-2.00bpw", "IST-DAS-2.25bpw", "ISTA-DAS-Coder", "UD-IQ1_M", "UD-IQ1_S"])
         self.assertEqual(len(T["engram"]), 2)
         self.assertEqual([len(layout) for layout in T["sets"]["IST-DAS-2.00bpw"]["layouts"]], [5, 4, 4])
         self.assertEqual([len(layout) for layout in T["sets"]["IST-DAS-1.75bpw"]["layouts"]], [5, 4])    # 1.75 had no first release

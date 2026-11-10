@@ -25,7 +25,8 @@ class Input {
 public:
     /// Starts the reading thread.  It may outlive this object (it can sit in a read when the process ends), so what
     /// it shares with the engine is kept alive by both.  With `quit_ends_request` (DeepSeek's habit), QUIT (queued
-    /// as usual) and the end of stdin also raise the stop flag, and `STOP <anything>` counts as STOP.
+    /// as usual) and the end of stdin also raise the stop flag, and `STOP <anything>` counts as STOP (and stops request
+    /// <anything> alone: is_stop_requested(request_id)).
     explicit Input(bool quit_ends_request = false);
 
     /// Takes the oldest queued line, waiting for one; false once stdin has ended and the queue is empty.
@@ -37,6 +38,12 @@ public:
     bool is_stop_requested() const;
     /// Forgets an earlier STOP (one that came between requests is stale).
     void clear_stop();
+    /// Tells whether request `request_id` of an engine that runs several at once must end: `STOP <request_id>` came
+    /// (with `quit_ends_request`), or a bare STOP - or, with `quit_ends_request`, QUIT or the end of stdin - ended
+    /// every request for good.
+    bool is_stop_requested(long long request_id) const;
+    /// Forgets the `STOP <request_id>` lines that came: the request is over, and its id may come again.
+    void forget_stop(long long request_id);
 
     /// Removes the queued `BSTOP <slot>` lines, giving each slot to `stop_slot`, and the queued `BYIELD <slot>` lines
     /// that `yield` accepts (it returns false to leave a line queued).  Used by a prompt read that batch slots

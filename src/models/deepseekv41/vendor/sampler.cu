@@ -6,10 +6,11 @@
 //
 //     top_k -> top_p -> min_p -> temperature -> pick
 //
-// (the penalties come first in that chain; these modes refuse them).  On Metal the three modes and the plain draw
-// run on the host (`host_sample`).
+// (the penalties come first in that chain: the draft refuses them, the verify takes them with its rows' histories).
+// On Metal the three modes and the plain draw run on the host (`host_sample`).
 #include "../ds4_launch.h"   // strata_ds4_launch: <<<>>> on CUDA and HIP, a dispatch on Metal
 #include "strata/models/deepseekv41/sampler.hpp"
+#include "strata/common/kernels/sampler_penalties.cuh"
 #if defined(STRATA_METAL)
 #include <ds4_metal_host.h>
 #endif
@@ -67,11 +68,37 @@ constexpr uint64_t kSpecDraftKey = 0x5bd1e9955bd1e995ull, kSpecAcceptKey = 0x9e3
 // ("too many resources requested for launch") wherever the NextN block sat on a Turing card
 template <int MODE>
 __global__ void __launch_bounds__(1024) sampler_kernel(const float* __restrict__ logits, int n_vocab, int n_tokens,
+                                                       const int* __restrict__ history, int history_len,
                                                        const SamplerParams p, int* __restrict__ out,
                                                        SpecList* __restrict__ ql, const int* __restrict__ draft) {
     const int t = blockIdx.x;
     if (t >= n_tokens) return;
     const float* l = logits + (size_t) t * n_vocab;
+
+    // the penalty window (the TAIL of this row's history) and its membership bitmap, as the shared sampler_kernel's
+    // (src/common/kernels/cuda/sampler.cu); only a verify launch with penalties sizes the bitmap
+    const int* hrow = history ? history + (size_t) t * history_len : nullptr;
+    int hlen = 0;
+    if (hrow) {
+        hlen = p.penalty_last_n < history_len ? p.penalty_last_n : history_len;
+        if (hlen < 0) hlen = 0;
+        hrow += history_len - hlen;
+    }
+    extern __shared__ unsigned int penal_bits[];
+    const int bits_words = (int) ((n_vocab + 31) / 32);
+    const bool use_bits = hrow != nullptr && hlen > 0 && bits_words > 0;
+    if (use_bits) {
+        for (int w = threadIdx.x; w < bits_words; w += blockDim.x) penal_bits[w] = 0u;
+        __syncthreads();
+        for (int i = threadIdx.x; i < hlen; i += blockDim.x)
+            if (hrow[i] >= 0 && hrow[i] < n_vocab)   // an id outside the vocabulary is never a candidate
+                atomicOr(&penal_bits[hrow[i] >> 5], 1u << (hrow[i] & 31));
+        __syncthreads();
+    }
+    auto hit_count = [&](int v) -> int {
+        if (!use_bits || !(penal_bits[v >> 5] & (1u << (v & 31)))) return 0;
+        return kernels::history_count(hrow, hlen, v);
+    };
 
     // Temperature is needed by BOTH stages below, so it is computed here; the chain still APPLIES it after
     // the truncation filters - the survivors are chosen on the raw logits and only then scaled.
@@ -119,7 +146,7 @@ __global__ void __launch_bounds__(1024) sampler_kernel(const float* __restrict__
         return (b & 0x80000000u) ? ~b : (b | 0x80000000u);
     };
     auto score = [&](int v) -> float {
-        return p.logit_bias ? l[v] + p.logit_bias[v] : l[v];
+        return kernels::apply_penalties(p.logit_bias ? l[v] + p.logit_bias[v] : l[v], hit_count(v), p);
     };
     for (int b = threadIdx.x; b < kBins; b += blockDim.x) coarse[b] = 0u;
     if (threadIdx.x == 0) sh_ncoarse = 0u;
@@ -512,8 +539,9 @@ void host_sample(const float* dlogits, int n_tokens, int n_vocab, const int* dhi
 }
 #endif
 
-void spec_check(const char* who, int n_tokens, int n_vocab, const SamplerParams& p) {
-    if (p.greedy || p.temperature <= 0.0f || p.penalty_last_n > 0 || n_vocab <= 0) {
+// (the draft's chain has no history: penalties only where the caller hands rows over - sample_verify)
+void spec_check(const char* who, int n_tokens, int n_vocab, const SamplerParams& p, bool history = false) {
+    if (p.greedy || p.temperature <= 0.0f || (p.penalty_last_n > 0 && !history) || n_vocab <= 0) {
         std::fprintf(stderr, "%s: a sampled request without penalties only (greedy %d, temperature %g, penalty_last_n "
                              "%d, n_vocab %d)\n", who, (int) p.greedy, p.temperature, p.penalty_last_n, n_vocab);
         std::exit(1);
@@ -539,20 +567,23 @@ void sample_draft(const float* logits, int n_tokens, int n_vocab, const SamplerP
     return;
 #endif
     strata_ds4_launch(sampler_kernel<1>, (unsigned) n_tokens, 1024, 0, (cudaStream_t) stream, logits, n_vocab, n_tokens,
-                      p, out, q, nullptr);
+                      nullptr, 0, p, out, q, nullptr);
     spec_launched("sample_draft", stream);
 }
 
 void sample_verify(const float* logits, int n_tokens, int n_vocab, const SamplerParams& p, const SpecList* q,
-                   const int* draft, int* out, void* stream) {
+                   const int* draft, int* out, void* stream, const int* history, int history_len) {
     if (n_tokens <= 0) return;
-    spec_check("sample_verify", n_tokens, n_vocab, p);
+    const bool pen = p.penalty_last_n > 0 && history != nullptr && history_len > 0;
+    spec_check("sample_verify", n_tokens, n_vocab, p, pen);
 #if defined(STRATA_METAL)
-    host_sample<2>(logits, n_tokens, n_vocab, nullptr, 0, p, out, const_cast<SpecList*>(q), draft);
+    host_sample<2>(logits, n_tokens, n_vocab, pen ? history : nullptr, pen ? history_len : 0, p, out,
+                   const_cast<SpecList*>(q), draft);
     return;
 #endif
-    strata_ds4_launch(sampler_kernel<2>, (unsigned) n_tokens, 1024, 0, (cudaStream_t) stream, logits, n_vocab, n_tokens,
-                      p, out, const_cast<SpecList*>(q), draft);
+    const unsigned shmem = pen ? (unsigned) ((n_vocab + 31) / 32) * sizeof(unsigned) : 0;   // the penalty bitmap
+    strata_ds4_launch(sampler_kernel<2>, (unsigned) n_tokens, 1024, shmem, (cudaStream_t) stream, logits, n_vocab, n_tokens,
+                      pen ? history : nullptr, pen ? history_len : 0, p, out, const_cast<SpecList*>(q), draft);
     spec_launched("sample_verify", stream);
 }
 

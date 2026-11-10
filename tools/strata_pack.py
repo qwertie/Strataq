@@ -24,7 +24,6 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
-import struct
 import sys
 
 import numpy as np

@@ -4,11 +4,13 @@
 #include "strata/base/platform/aux_cpus.hpp"
 #include "strata/base/platform/thread_name.hpp"
 
+#include <algorithm>
 #include <condition_variable>
 #include <cstdlib>
 #include <deque>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #if defined(_WIN32)
 #include <io.h>
@@ -21,10 +23,12 @@ namespace strata::serve {
 
 struct Input::Shared {
     std::atomic<bool> stop{false};
+    std::atomic<bool> stop_all{false};   ///< is_stop_requested(id) for every id
     std::mutex mu;
     std::condition_variable cv;
     std::deque<std::string> lines;
     bool eof = false;
+    std::vector<long long> stopped_ids;   ///< the ids of the `STOP <id>` lines not yet forgotten
     size_t seen = 0;   ///< the queue's length when take_slot_controls last looked (wait_for_line's "new line")
 };
 
@@ -64,18 +68,28 @@ Input::Input(bool quit_ends_request) : shared_(std::make_shared<Shared>()) {
             if (!l.empty() && l.back() == '\r') l.pop_back();
             if (l == "STOP" || (quit_ends_request && l.rfind("STOP ", 0) == 0)) {
                 st->stop.store(true);
+                if (l == "STOP") {
+                    st->stop_all.store(true);
+                } else {
+                    std::lock_guard<std::mutex> lk(st->mu);
+                    st->stopped_ids.push_back(std::atoll(l.c_str() + 5));
+                }
                 continue;
             }
-            if (quit_ends_request && l == "QUIT")
+            if (quit_ends_request && l == "QUIT") {
                 st->stop.store(true);
+                st->stop_all.store(true);
+            }
             std::lock_guard<std::mutex> lk(st->mu);
             st->lines.push_back(l);
             st->cv.notify_one();
         }
         std::lock_guard<std::mutex> lk(st->mu);
         st->eof = true;
-        if (quit_ends_request)
+        if (quit_ends_request) {
             st->stop.store(true);
+            st->stop_all.store(true);
+        }
         st->cv.notify_one();
     }).detach();
 }
@@ -100,6 +114,19 @@ bool Input::try_next(std::string& line) {
 bool Input::is_stop_requested() const { return shared_->stop.load(); }
 
 void Input::clear_stop() { shared_->stop.store(false); }
+
+bool Input::is_stop_requested(long long request_id) const {
+    if (shared_->stop_all.load()) return true;
+    std::lock_guard<std::mutex> lk(shared_->mu);
+    const auto& ids = shared_->stopped_ids;
+    return std::find(ids.begin(), ids.end(), request_id) != ids.end();
+}
+
+void Input::forget_stop(long long request_id) {
+    std::lock_guard<std::mutex> lk(shared_->mu);
+    auto& ids = shared_->stopped_ids;
+    ids.erase(std::remove(ids.begin(), ids.end(), request_id), ids.end());
+}
 
 void Input::take_slot_controls(const std::function<void(int)>& stop_slot, const std::function<bool(int)>& yield) {
     std::lock_guard<std::mutex> lk(shared_->mu);
