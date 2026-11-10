@@ -30,7 +30,7 @@ int take_paged_options(int& argc, char** argv, const std::string& program, Paged
         std::string* text = nullptr;   ///< instead of `value`, for a word
     };
     int64_t rows = s.step.rows, lookahead = -1, concurrent = -1, mtp_rows = 0;   // -1: chosen after parsing
-    std::string drafter = "on", save_on_shutdown = "off", gpu_mib;
+    std::string drafter = "on", save_on_shutdown = "off", gpu_mib, popularity_decay;
     const Own own[] = {{"--tokens-min", &s.tokens_min},       {"--tokens-max", &s.tokens_max},
                        {"--conversation-tokens", &s.conversation_context},
                        {"--vram-conversations", &s.vram_conversations},
@@ -46,6 +46,7 @@ int take_paged_options(int& argc, char** argv, const std::string& program, Paged
                        {"--pause-dir", nullptr, &s.pause_dir}, {"--copy-back", nullptr, &s.copy_back},
                        {"--drafter", nullptr, &drafter},      {"--remote-experts", nullptr, &s.remote_experts},
                        {"--save-on-shutdown", nullptr, &save_on_shutdown},
+                       {"--expert-popularity-decay", nullptr, &popularity_decay},
                        {"--step-profile", &s.step_profile}};
     const char* const name = program.c_str();
     int out = 1;
@@ -90,6 +91,11 @@ int take_paged_options(int& argc, char** argv, const std::string& program, Paged
     }
     if (s.copy_back != "auto" && s.copy_back != "on" && s.copy_back != "off") {
         std::fprintf(stderr, "%s: --copy-back takes auto, on or off\n", name);
+        return 2;
+    }
+    if (!popularity_decay.empty() &&
+        !((s.popularity_decay = std::strtod(popularity_decay.c_str(), nullptr)) > 0 && s.popularity_decay <= 1)) {
+        std::fprintf(stderr, "%s: --expert-popularity-decay takes a factor above 0 and at most 1\n", name);
         return 2;
     }
     if (s.remote_experts != "auto" && s.remote_experts != "on" && s.remote_experts != "off") {

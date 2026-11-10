@@ -88,14 +88,6 @@ int RamExperts::refill(int max, uint64_t& wait_ms, std::string& err) {
     return loaded;
 }
 
-void RamExperts::rank_gpu_experts_last(const std::vector<int32_t>& residency) {
-    std::vector<ExpertKey> ranking = pages_.get_ranking();
-    std::stable_partition(ranking.begin(), ranking.end(), [&](ExpertKey key) {
-        return residency[index_of(key.layer, key.expert)] < 0;
-    });
-    pages_.set_ranking(ranking, (int64_t) first_page_.size());
-}
-
 bool RamExperts::keep_copy(ExpertKey key, const uint8_t* bytes) {
     if ((size_t) key.layer >= blob_bytes_.size() || holds(key.layer, key.expert))
         return false;

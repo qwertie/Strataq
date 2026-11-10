@@ -45,9 +45,6 @@ public:
     /// Puts up to `max` of the experts the pool wants into free pages (ExpertPages::refill), reading them from the
     /// SSD in one batch of requests.  Gets how many, or -1 (with `err`) when the read failed; then none of them stays.
     int refill(int max, uint64_t& wait_ms, std::string& err);
-    /// Moves the experts the GPUs' pools hold (`residency`: per expert, its GPU page, or negative) behind the others
-    /// in the pool's ranking, each group keeping its order, so that refills bring in what the GPUs lack first.
-    void rank_gpu_experts_last(const std::vector<int32_t>& residency);
     /// Takes or gives back chunks so that the pool and the staging ring hold `bytes` (ExpertPages::resize).
     PoolResize resize(uint64_t bytes) { return pages_.resize(bytes > ring_bytes() ? bytes - ring_bytes() : 0); }
     /// Copies expert `key` in from `bytes` (any memory: a GPU's pages it is leaving) when the pool does not hold it

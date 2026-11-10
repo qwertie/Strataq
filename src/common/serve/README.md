@@ -16,14 +16,14 @@ engine).
   sampling keys every engine reads.
 - `paged_engine.hpp`: the paged engine (docs/MEMORY_MANAGER_PLAN.md, "One shared paged engine"): conversations in
   page pools, several decoding at once, pausing to RAM and the SSD, priorities, `CHANGE_SETTINGS`, the pools' resizes
-  and refills, the adaptive tier, the layer cut's planning and moves. It runs a model through `paged_model.hpp`
+  and start-up fill, the adaptive tier, the layer cut's planning and moves. It runs a model through `paged_model.hpp`
   (`PagedModel`: per card the state layout, experts and a cut move; per conversation its state on each card,
   `PagedPart`; the prompt, the step, the drafter and the `INFO` and `DONE` lines, each in its old engine's fields).
   strata-q38 runs it for Qwen3.8 (`src/models/qwen38/paged_model.cpp`), strata-ds41 for DeepSeek
   (`src/models/deepseekv41/paged_model.cpp`). What each model's start does before it, `paged_start.cpp`: the engine's
   own options, the runtime's environment, the cards' links, the pools' sizes and their GPU memory, and the RAM's pool
   and the copy-back rule (`open_ram_pool`). The pools open empty: the engine says `READY` and then fills them while
-  it serves, the GPUs' first, and the RAM's with the experts the GPUs lack first.
+  it serves, the GPUs' first, and the RAM's with the experts no GPU holds.
 - `decode_selection.hpp`: selects the highest-priority requests for a paged decode step. Equal priorities keep
   request order until completion or preemption; requests waiting for a turn do not rotate into the selected set.
   Cancellations drain first without generating rows. `concurrent` limits this selected set, not admitted requests
@@ -37,7 +37,7 @@ engine).
   A separate `vram_conversations` count limits fixed state as well as idle caches, independently of token counts.
   Its default adds one cached place to decode concurrency, plus one more for Qwen on cards with at least 10 GiB.
   Extra conversations wait or move to RAM/SSD, releasing their fixed pool regions too. Its live value cannot fall
-  below `concurrent`. `conversation_idle_seconds` defaults to 66: old idle state may give way to expert refill or
+  below `concurrent`. `conversation_idle_seconds` defaults to 66: old idle state may give way to
   conversation allocations, between steps, while active decode and prompt reads remain protected.
 - `state_bytes.hpp` in common/state: bounded host-state fields shared by Qwen, DeepSeek and the pause-file wrapper.
   Qwen's recurrent rewind snapshots and DeepSeek's ring/compressor checkpoints live in ordinary RAM. Both travel

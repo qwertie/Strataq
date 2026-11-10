@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -31,7 +32,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -42,6 +42,10 @@ namespace strata::serve {
 namespace {
 
 using Clock = std::chrono::steady_clock;
+
+/// The free bytes beyond the pages kept for --tokens-min above which a card's pool makes the adaptive tier run a round
+/// every decode step instead of every --adapt-every steps: experts the conversations use then come in sooner.
+constexpr uint64_t kEveryStepFreeBytes = 1ull << 30;
 
 template <class F>
 auto time_step_if(bool enabled, double& elapsed, F&& operation) -> decltype(operation());
@@ -183,21 +187,18 @@ private:
     /// would lack a layer's dense weights, or the model cannot run its layers: PagedModel::can_run_layers).
     std::vector<int64_t> plan_cut() const;
     /// Moves the layer cut to `cut` between two steps: every conversation is paused into the RAM's pool, each card
-    /// takes its new layers (the pool's layout for them and their experts, the conversations' state and the model's
-    /// side of the card), the decoding conversations come back, and each card fills its pool with its experts before
-    /// the next step, so that the steps compute the same experts on the GPUs as before.  False (and `err`) when a
-    /// conversation did not fit in the RAM's pool, or a pool cannot have the new layout: the cut stays.
+    /// takes its new layers (the pool's layout for them, the conversations' state and the model's side of the card)
+    /// and drops the experts of the layers it gave up, and the decoding conversations come back.  The adaptive tier
+    /// then brings the experts the conversations use into the freed pages.  False (and `err`) when a conversation
+    /// did not fit in the RAM's pool, or a pool cannot have the new layout: the cut stays.
     bool move_cut(const std::vector<int64_t>& cut, std::string& err);
     /// Updates model ownership while conversations have no GPU pages.
     bool set_layers(const std::vector<int64_t>& cut, std::string& err);
-    /// Gives each card's pool the experts it wants that fit (refill), waiting for pages that open soon; then uploads
-    /// the residency tables.  move_cut uses it, so that the next step computes the same experts on the GPUs.
-    bool fill_cards(std::string& err);
     /// Gives each card's pool the experts it is to hold (ExpertPages::set_ranking): its layers' share of the profile's
     /// first --expert-cache (PagedModel::get_card_ranking), or with `lend`, while the cards lend pages (holder_),
     /// those that place_experts puts on it, which may be of another card's layers that their card has no room for,
-    /// where a hop beats the CPU (is_hop_wanted).  The experts it no longer holds leave now; refills bring in the
-    /// others.
+    /// where a hop beats the CPU (is_hop_wanted).  The experts it no longer holds leave now; the start-up fill brings
+    /// in the others while it runs.
     void place_card_experts(bool lend);
     /// Tells whether a card's pool may hold the experts of another card's layers, which `holder` then computes in one
     /// hop: always with --remote-experts on; with auto, when one hop over its link costs less than the CPU computing
@@ -356,17 +357,21 @@ private:
     /// Gets the paused conversation that goes first, the lowest priority then the least recently used, among those in
     /// RAM (`in_ram`) or on the SSD; paused_.end() when there is none.
     std::vector<Paused>::iterator find_lowest(bool in_ram);
-    /// Every --adapt-every steps (the old engine's adaptive tier, with its options): counts a use, in the GPUs' pools,
-    /// of the experts there that the steps since the last round routed to; then the experts decoding routed to most
-    /// that the pools do not hold take the pages of the least-routed ones of their layer (at most --adapt-swaps,
-    /// each by --adapt-min-gain more routings).  False (ERR printed) when a copy failed.
+    /// Runs a round of the old engine's adaptive tier, with its options, every decode step while a card's pool has
+    /// more than kEveryStepFreeBytes free beyond --tokens-min's pages, else every --adapt-every steps: counts a use,
+    /// in the GPUs' pools, of the experts there that the steps since the last round routed to; then the experts
+    /// routed to most that the pools do not hold come in (at most --adapt-swaps): into free pages while there are
+    /// some, else into the pages of the least-routed expert of their layer when they beat it by --adapt-min-gain
+    /// routings.  The routing counts then decay by popularity_decay_ per step.  False (ERR printed) when a copy
+    /// failed.
     bool adapt_experts();
-    /// Puts a batch of the experts the pools want into them (the GPUs' first, then the RAM's): those the pools have
-    /// lacked since the start, which open empty, or that conversations evicted; or waits until pages open to them:
-    /// the serve loop's work between requests.  False when a copy failed (said on stderr).
-    bool refill_experts();
-    /// Tells whether a pool wants experts back (ExpertPages::is_refill_wanted).
-    bool is_refill_wanted() const;
+    /// Loads a batch of the start-up fill: the experts the GPUs' pools want, in the profile's order, then those the
+    /// RAM's pool wants that no GPU took; or waits until pages open to them.  Ends the fill (filling_since_) for good
+    /// once no pool can take more of them.  The serve loop runs it between requests, and decode_step after each step,
+    /// while the fill runs.  False when a copy failed (said on stderr).
+    bool fill_experts();
+    /// Tells whether a pool can take more of the start-up fill's experts now (ExpertPages::is_refill_wanted).
+    bool is_fill_wanted() const;
     /// Uploads the cards' residency tables when experts came or left since the last upload.
     bool publish_residency(std::string& err);
     /// Carries targeted cancellations into the scheduler before its next model step.
@@ -395,8 +400,7 @@ private:
     }
     /// Describes the conversations for LIST_CONVERSATIONS and GET_CONTEXT_WINDOWS.
     std::vector<strata::core::HeldConversation> list_conversations() const;
-    /// Describes the memories for GET_MEMORY_USE, and the experts' fill (EXPERT_FILL): loaded while no pool wants
-    /// experts it can take now (is_refill_wanted), so an eviction or a grown pool also clears it after the start.
+    /// Describes the memories for GET_MEMORY_USE, and the start-up fill (EXPERT_FILL): loaded once it has ended.
     strata::serve::MemoryReport describe_memory() const;
     /// Gets the step's view of the model: PagedModel's rows over the conversations' state.
     strata::spec::StepModel get_step_model();
@@ -434,17 +438,20 @@ private:
     /// holders), or -1; empty while the cards lend no pages (one card, or --remote-experts off)
     std::vector<int32_t> holder_;
     int pipeline_peak_ = 0; ///< The most stages occupied together, reported when it increases.
-    int64_t steps_ = 0;                ///< the decode steps so far (adapt_experts' rounds)
-    /// decode_step refills experts too, until none are wanted: a pool grew, or is filling after the start
-    /// (ExpertPages::open)
-    bool refilling_ = true;
-    /// The RAM's pool still ranks the experts in the profile's order, so refill_experts does not fill it yet: once no
-    /// GPU's pool wants more, it moves the GPUs' experts last (RamExperts::rank_gpu_experts_last) and starts.
-    bool ram_ranking_pending_ = true;
-    /// When the engine began to serve with its pools empty, until refill_experts first finds them full and says on
-    /// stderr how long the fill took.
+    int64_t steps_ = 0;                ///< the decode steps so far
+    int64_t adapted_at_ = 0;           ///< steps_ at adapt_experts' last round
+    /// The factor by which each decode step multiplies the routing counts (--expert-popularity-decay, or
+    /// --adapt-decay's per 4 steps to the power 0.25)
+    double popularity_decay_;
+    /// The GPUs' part of the start-up fill is over: the RAM's pool has stopped wanting the experts they took, and
+    /// fills.
+    bool gpus_filled_ = false;
+    /// When the engine began to serve with its pools empty, while the start-up fill runs; fill_experts resets it, and
+    /// says on stderr how long the fill took.
     std::optional<Clock::time_point> filling_since_;
-    std::vector<float> seen_;          ///< the model's usage counts when adapt_experts last decayed them
+    /// the model's usage counts when adapt_experts last decayed them, or serve() seeded them: a count above its entry
+    /// is a use since then
+    std::vector<float> seen_;
     int64_t swapped_ = 0;              ///< the experts adapt_experts moved into the GPU's pool, since the last report
     double adapt_ms_ = 0;              ///< the time those took
     int64_t copied_back_ = 0;          ///< the experts the GPU's pool evicted that were copied to RAM, since then
@@ -528,7 +535,9 @@ namespace {
 PagedEngine::PagedEngine(PagedModel& model, PagedCards& cards, strata::core::RamExperts& ram, bool copy_back,
                          const PagedSettings& settings)
     : model_(model), facts_(model.facts), cards_(cards), ram_(ram), settings_(settings),
-      step_(get_step_model(), model.facts.end_tokens) {
+      step_(get_step_model(), model.facts.end_tokens),
+      popularity_decay_(settings.popularity_decay > 0 ? settings.popularity_decay
+                                                      : std::pow((double) model.facts.adapt_decay, 0.25)) {
     if (settings_.tokens_max < 0)
         settings_.tokens_max = facts_.context;
     if (settings_.vram_conversations < 0) {
@@ -630,6 +639,18 @@ bool PagedEngine::init() {
 
 int PagedEngine::serve() {
     filling_since_ = Clock::now();
+    // the profile's order seeds the routing counts below the tier's threshold of 2, so that until the conversations'
+    // own use takes over, a full pool gives up the profile's least popular experts first
+    if (std::vector<float>& usage = model_.get_usage(); !usage.empty()) {
+        for (const PagedCard& card : cards_) {
+            const std::vector<strata::core::ExpertKey>& ranking = card.experts.get_ranking();
+            for (size_t i = 0; i < ranking.size(); ++i) {
+                float& u = usage[(size_t) (ranking[i].layer * facts_.n_expert + ranking[i].expert)];
+                u = std::max(u, 1.0f - (float) i / (float) ranking.size());
+            }
+        }
+        seen_ = usage;
+    }
     residency_changed_ = true;   // no expert has moved yet, but the devices need their first, empty tables
     if (std::string err; !publish_residency(err)) {
         say("publishing the initial expert addresses: %s\n", err.c_str());
@@ -654,10 +675,10 @@ int PagedEngine::serve() {
         "READY %lld stop conversations memory preempt settings requests\n", (long long) settings_.conversation_context);
     strata::serve::EngineHooks hooks;
     hooks.before_line = [this](const std::string&) { return wait_model_state(); };
-    hooks.is_busy = [this] { return !pending_.empty() || is_decoding() || is_refill_wanted(); };
+    hooks.is_busy = [this] { return !pending_.empty() || is_decoding() || filling_since_.has_value(); };
     hooks.step = [this] {
         return fatal_error_.empty() && admit_pending_request() &&
-               (is_decoding() ? decode_step() : !is_refill_wanted() || refill_experts());
+               (is_decoding() ? decode_step() : !filling_since_ || fill_experts());
     };
     hooks.list_conversations = [this] { return list_conversations(); };
     hooks.describe_memory = [this] { return describe_memory(); };
@@ -1286,9 +1307,8 @@ bool PagedEngine::decode_step() {
         finish_request(*h, d.finish);
     }
     strata::core::progress_beat();
-    refilling_ = is_refill_wanted();
     const bool ok = time_step_if(settings_.step_profile != 0, pages_ms_,
-        [&] { return adapt_experts() && (!refilling_ || refill_experts()); });
+        [&] { return adapt_experts() && (!filling_since_ || fill_experts()); });
     if (settings_.step_profile)
         say("step-profile rows=%d draft=%.3f verify=%.3f commit=%.3f pages=%.3f total=%.3f ms\n",
             step_rows_, draft_ms_, verify_ms_, commit_ms_, pages_ms_, get_ms_since(started));
@@ -1796,7 +1816,12 @@ std::vector<Paused>::iterator PagedEngine::find_lowest(bool in_ram) {
 
 bool PagedEngine::adapt_experts() {
     std::vector<float>& usage = model_.get_usage();
-    if (usage.empty() || steps_ % model_.get_adapt_interval(steps_) != 0)
+    const bool roomy = std::any_of(cards_.begin(), cards_.end(), [&](const PagedCard& card) {
+        const strata::core::PagePool& pool = card.experts.pool();
+        const uint64_t free = pool.report().free.pages, kept = pool.pages_for(settings_.tokens_min);
+        return (free - std::min(free, kept)) * pool.page_bytes() > kEveryStepFreeBytes;
+    });
+    if (usage.empty() || steps_ - adapted_at_ < (roomy ? 1 : facts_.adapt_every))
         return true;
     const Clock::time_point t0 = Clock::now();
     std::vector<int32_t>& residency = model_.get_residency();
@@ -1810,41 +1835,40 @@ bool PagedEngine::adapt_experts() {
             if (holder != nullptr)
                 holder->experts.note_use({(int32_t) l, (int32_t) e});
         }
-    std::vector<strata::core::ExpertSwap> swaps = strata::core::choose_expert_swaps(
+    const std::vector<strata::core::ExpertSwap> swaps = strata::core::choose_expert_swaps(
         usage, residency, facts_.n_layers, n_expert, facts_.adapt_min_gain,
-        [this](int64_t l, int32_t e) { return is_lent(l, e); });
-    if (swaps.size() > (size_t) facts_.adapt_swaps)
-        swaps.resize((size_t) facts_.adapt_swaps);
+        [this](int64_t l, int32_t e) { return is_lent(l, e); }, true);
     std::string err;
-    for (const strata::core::ExpertSwap& s : swaps)
-        if (!get_card_of(s.layer).experts.replace(s.layer, s.out, s.in, err)) {
+    int moved = 0;
+    for (size_t i = 0; i < swaps.size() && moved < facts_.adapt_swaps; ++i) {
+        const strata::core::ExpertSwap& s = swaps[i];
+        const int got = get_card_of(s.layer).experts.replace(s.layer, s.out, s.in, err);
+        if (got < 0) {
             print_response("ERR moving an expert into the GPU's pool: %s\n", err.c_str());
             return false;
         }
+        moved += got;
+    }
+    const float decay = (float) std::pow(popularity_decay_, (double) (steps_ - adapted_at_));
+    adapted_at_ = steps_;
     for (float& u : usage)
-        u *= facts_.adapt_decay;
+        u *= decay;
     seen_ = usage;
     if (!publish_residency(err)) {
         print_response("ERR %s\n", err.c_str());
         return false;
     }
-    swapped_ += (int64_t) swaps.size();
+    swapped_ += moved;
     adapt_ms_ += get_ms_since(t0);
     return true;
 }
 
-bool PagedEngine::refill_experts() {
+bool PagedEngine::fill_experts() {
     std::string err;
     uint64_t wait_ms = 0;
     int loaded = 0;
     for (PagedCard& card : cards_) {
         uint64_t card_wait_ms = 0;
-        if (card.experts.is_refill_pending() && !card.experts.is_refill_wanted())
-            if (Held* stale = find_stale()) {
-                if (!wait_model_state())
-                    return false;
-                pause_or_forget(*stale);
-            }
         const int got = card.experts.is_refill_wanted() ? card.experts.refill(card.refill_batch, card_wait_ms, err) : 0;
         loaded = got < 0 ? -1 : loaded + got;
         if (card_wait_ms > 0 && (wait_ms == 0 || card_wait_ms < wait_ms))
@@ -1852,22 +1876,25 @@ bool PagedEngine::refill_experts() {
         if (loaded < 0)
             break;
     }
-    if (ram_ranking_pending_ &&
+    if (!gpus_filled_ &&
         std::none_of(cards_.begin(), cards_.end(), [](const auto& card) { return card.experts.is_refill_wanted(); })) {
-        ram_.rank_gpu_experts_last(model_.get_residency());
-        ram_ranking_pending_ = false;
+        const std::vector<int32_t>& residency = model_.get_residency();
+        ram_.pages().stop_wanting_if([&](strata::core::ExpertKey k) {
+            return residency[(size_t) (k.layer * facts_.n_expert + k.expert)] >= 0;
+        });
+        gpus_filled_ = true;
     }
-    if (loaded == 0 && !ram_ranking_pending_ && ram_.pages().is_refill_wanted()) {   // the GPUs' first: hotter experts
+    if (loaded == 0 && gpus_filled_ && ram_.pages().is_refill_wanted()) {   // the GPUs' first: hotter experts
         uint64_t ram_wait_ms = 0;
         loaded = ram_.refill(kRefillBatch, ram_wait_ms, err);
         if (ram_wait_ms > 0 && (wait_ms == 0 || ram_wait_ms < wait_ms))
             wait_ms = ram_wait_ms;
     }
     if (loaded < 0 || !publish_residency(err)) {
-        say("putting experts back in their pools: %s\n", err.c_str());
+        say("filling the expert pools: %s\n", err.c_str());
         return false;
     }
-    if (filling_since_ && !is_refill_wanted()) {
+    if (!is_fill_wanted()) {
         say("experts loaded after READY in %.0f ms\n", get_ms_since(*filling_since_));
         filling_since_.reset();
     }
@@ -1876,13 +1903,9 @@ bool PagedEngine::refill_experts() {
     return true;
 }
 
-bool PagedEngine::is_refill_wanted() const {
-    if (ram_.pages().is_refill_wanted() ||
-        std::any_of(cards_.begin(), cards_.end(), [](const auto& card) { return card.experts.is_refill_wanted(); }))
-        return true;
-    return find_stale() != nullptr && std::any_of(cards_.begin(), cards_.end(), [](const auto& card) {
-        return card.experts.is_refill_pending();
-    });
+bool PagedEngine::is_fill_wanted() const {
+    return ram_.pages().is_refill_wanted() ||
+           std::any_of(cards_.begin(), cards_.end(), [](const auto& card) { return card.experts.is_refill_wanted(); });
 }
 
 bool PagedEngine::publish_residency(std::string& err) {
@@ -1939,8 +1962,8 @@ std::vector<strata::core::HeldConversation> PagedEngine::list_conversations() co
 strata::serve::MemoryReport PagedEngine::describe_memory() const {
     const strata::core::PagePoolReport rr = ram_.pages().pool().report();
     strata::serve::MemoryReport report;
-    report.experts_loaded = !is_refill_wanted();
-    report.experts_pending = ram_.pages().get_missing_count();
+    report.experts_loaded = !filling_since_;
+    report.experts_pending = filling_since_ ? ram_.pages().get_missing_count() : 0;
     report.pause_directory = std::filesystem::absolute(pause_prefix_).parent_path().string();
     for (const PagedCard& card : cards_) {
         const strata::core::PagePoolReport r = card.experts.pool().report();
@@ -1954,7 +1977,7 @@ strata::serve::MemoryReport PagedEngine::describe_memory() const {
         gpu.setting = r.total.bytes;
         gpu.smallest = get_smallest_gpu(card, settings_.tokens_min);
         gpu.largest = get_largest_gpu(card);
-        report.experts_pending += card.experts.get_missing_count();
+        report.experts_pending += filling_since_ ? card.experts.get_missing_count() : 0;
     }
     strata::serve::Memory& ram = report.at("ram");
     ram.add_blocks(ram_.pages().pool().get_memory_blocks());
@@ -2168,7 +2191,8 @@ std::string PagedEngine::change_settings(const SettingValues& values, std::strin
             note("moving the layer cut: ", err);
         if ((!move || cut != get_cut()) && !holder_.empty()) {   // (a cut move places them for its new cut)
             place_card_experts(true);
-            refilling_ = true;
+            if (!publish_residency(err))
+                note("", err);
         }
     }
     if (s.tokens_min != min_first)
@@ -2215,7 +2239,6 @@ std::string PagedEngine::resize_gpu(PagedCard& card, uint64_t bytes) {
         end_preempted((size_t) victim->position);
         pause_or_forget(*victim);
     }
-    refilling_ = refilling_ || pool.report().total.pages > before.total.pages;
     std::string err;
     for (const std::unique_ptr<Held>& h : held_)   // a shrink moved conversation blocks
         if (PagedPart& part = *h->parts[card.index]; part.is_ready() && !part.refresh(err))
@@ -2242,7 +2265,6 @@ std::string PagedEngine::resize_ram(uint64_t bytes) {
             return r.refusal;
         move_to_ssd(p);
     }
-    refilling_ = refilling_ || ram_.pages().pool().report().total.pages > before.total.pages;
     trim_ram();
     report_resize("RAM", before, ram_.pages().pool().report(), t0);
     return {};
@@ -2364,7 +2386,8 @@ bool PagedEngine::move_cut(const std::vector<int64_t>& cut, std::string& err) {
         place_card_experts(false);
         if (!holder_.empty())
             place_card_experts(true);
-        residency_changed_ = refilling_ = true;
+        residency_changed_ = true;
+        (void) publish_residency(rollback_error);
         bring_back(true);
         err = failure;
         return false;
@@ -2374,10 +2397,10 @@ bool PagedEngine::move_cut(const std::vector<int64_t>& cut, std::string& err) {
     place_card_experts(false);
     if (!holder_.empty())
         place_card_experts(true);
-    residency_changed_ = refilling_ = true;
+    residency_changed_ = true;
     bring_back(false);
     trim_ram();   // the conversations left paused went to RAM beyond --tokens-max's budget
-    if (!fill_cards(err))
+    if (!publish_residency(err))
         return false;
     std::string layers;
     for (const PagedCard& card : cards_)
@@ -2398,18 +2421,6 @@ bool PagedEngine::set_layers(const std::vector<int64_t>& cut, std::string& err) 
             h->parts[k]->set_layers(card.lb, card.le);
     }
     return true;
-}
-
-bool PagedEngine::fill_cards(std::string& err) {
-    for (PagedCard& card : cards_)
-        while (card.experts.is_refill_wanted()) {
-            uint64_t wait_ms = 0;
-            if (card.experts.refill(card.refill_batch, wait_ms, err) < 0)
-                return false;
-            if (wait_ms > 0)
-                std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
-        }
-    return publish_residency(err);
 }
 
 void PagedEngine::place_card_experts(bool lend) {

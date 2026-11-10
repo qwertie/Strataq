@@ -447,13 +447,15 @@ pages and pins the RAM complement. The new engine also uses host staging, into p
 experts during these warmed decode rounds. Startup order is not evidence for the remaining steady-state gap.
 
 Since then the paged engines say `READY` right after the dense weights load, and fill their expert pools while they
-serve. The GPUs' pools come first, in the profile's order. Then the RAM's pool takes the experts the GPUs lack, before
-the others. There is no setting for it. The memory report says how far the fill is (`EXPERT_FILL`, and `"expert_fill"`
-in `GET /v1/memory`), and the speed tools wait for it before they time anything
-([DETAILS.md](DETAILS.md#the-memory-panel)). The adaptive tier puts the experts the conversations use into free pages
-too, and trades experts only when a pool is full. So the fill and the conversations share the free pages, and the fill
-stops when the pools are full. On the Strix Halo Qwen3.8 said `READY` after about 9 s instead of 38 s and DeepSeek
-after 12-19 s instead of 58 s; the measurements are in DETAILS.md.
+serve. The GPUs' pools come first, in the profile's order. Then the RAM's pool takes the experts no GPU holds. There
+is no setting for it. The memory report says how far the fill is (`EXPERT_FILL`, and `"expert_fill"` in `GET
+/v1/memory`), and the speed tools wait for it before they time anything ([DETAILS.md](DETAILS.md#the-memory-panel)).
+This start-up fill is the only loading in the profile's order; it ends for good when the pools are full. After it,
+only the adaptive tier moves experts, by the conversations' use (prompts included on Qwen). It uses free pages while
+there are some and trades experts only in a full pool. It runs every decode step while a pool has more than 1 GiB free
+beyond `--tokens-min`'s room. The profile only seeds the use counts, below the tier's threshold. On the Strix Halo
+Qwen3.8 said `READY` after 9-10 s instead of 38 s and DeepSeek after 14-18 s instead of 58 s; the measurements are in
+DETAILS.md.
 
 The owner's task-only watchdog floors were 3 GiB free commit and 4 GiB free physical RAM. All main matrix
 runs passed: minimums 3.538 and 18.356 GiB. The commit limit stayed at 127.295 GiB; observed system charge

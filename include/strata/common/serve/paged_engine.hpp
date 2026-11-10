@@ -6,8 +6,8 @@
 // It answers the server's line protocol (`--serve` is implied) like `strata --serve --batch N`: GEN, BGEN, STOP,
 // BSTOP, QUIT, LIST_CONVERSATIONS, GET_CONTEXT_WINDOWS, GET_MEMORY_USE and CHANGE_SETTINGS (BYIELD is dropped: a
 // prompt read never gives way).  Each conversation's state takes page-pool pages as it grows; the experts are in the
-// same pool (ExpertPages): a growing conversation takes the least-used experts' pages, and between requests the
-// experts take back the pages conversations left.  Up to `concurrent` conversations decode together, each step one
+// same pool (ExpertPages): a growing conversation takes the least-used experts' pages, and the adaptive tier
+// fills the pages conversations left with experts.  Up to `concurrent` conversations decode together, each step one
 // pass per group through the model with a row per conversation and the rows left over shared among their guesses
 // (strata::spec::Step). Opt-in --batch-groups overlaps groups on separate stages; every wave drains before the
 // serve loop can admit, pause, restore or change settings. A prompt is read in passes of its own, a chunk at a time
@@ -59,10 +59,11 @@ namespace strata::serve {
 constexpr int64_t kDefaultTokensMin = 8192;
 /// The SSD space paused conversations may take when --ssd-pause-mib is not given.
 constexpr int64_t kDefaultSsdPauseMib = 8192;
-/// The most evicted experts put back in one step of the serve loop, so that a request waits little for it.
+/// The most experts the start-up fill loads into a pool in one step of the serve loop, so that a request waits
+/// little for it.
 constexpr int kRefillBatch = 16;
-/// The time the experts put back into the GPU's pool in one step of the serve loop may take on its link: a slow link
-/// puts back fewer (get_refill_batch).
+/// The time the experts the start-up fill loads into a GPU's pool in one step of the serve loop may take on its link:
+/// a slow link takes fewer (get_refill_batch).
 constexpr double kRefillBudgetMs = 10.0;
 /// The step in which the pools take memory and give it back (PagePoolConfig::chunk_bytes).  An expert may not cross a
 /// chunk's end, so each chunk ends in a run too short for any expert: 0.36% of the Strix Halo's GPU pool in chunks of
@@ -91,6 +92,9 @@ struct PagedSettings {
     std::string copy_back = "auto";                ///< --copy-back
     std::string batch_groups = "1";             ///< --batch-groups: live-concurrency divisor or auto.
     std::string remote_experts = "auto";           ///< --remote-experts
+    /// --expert-popularity-decay: the factor by which each decode step multiplies the adaptive tier's routing counts;
+    /// 0: --adapt-decay's (a factor per 4 steps) to the power 0.25
+    double popularity_decay = 0;
     int64_t lookup_chain = 0, lookup_chain_min = 3; ///< Existing lookup-chain length and match floor.
     int64_t suffix_draft = 0; ///< --suffix-draft: minimum repeated context; 0 disables prompt lookup.
     bool drafter = true;                           ///< --drafter on|off: its weights loaded (with --lookahead)
@@ -144,16 +148,17 @@ uint64_t get_ram_pool_bytes(const PagedSettings& s, uint64_t headroom, uint64_t 
 /// of kChunkBytes in whole pages.
 strata::core::PagePoolConfig get_ram_pool_config(const PagedCard& card);
 /// Gets the order in which the RAM's pool takes experts: those of `profile` (hottest first), then the other experts
-/// of the `blob_bytes.size()` layers of `n_expert`.  Once the GPUs' pools are full, the engine moves the experts they
-/// hold to the end (RamExperts::rank_gpu_experts_last), so that RAM holds first what the GPUs lack.
+/// of the `blob_bytes.size()` layers of `n_expert`.  Its start-up fill skips the experts the GPUs' pools took
+/// (ExpertPages::stop_wanting_if), so that RAM holds what the GPUs lack.
 std::vector<strata::core::ExpertKey> get_ram_ranking(const std::vector<strata::core::ExpertKey>& profile,
                                                      const std::vector<uint64_t>& blob_bytes, int64_t n_expert);
 /// Opens the RAM's page pool `ram` over `files` (the experts on the SSD) and gets whether an expert a GPU's pool evicts
 /// is copied back to it (`copy_back`: --copy-back; auto by the speeds of copying from `gpu_bytes`, the start of
 /// `card`'s pool's first chunk, and of reading the SSD, measured here).  The pool takes --ram-mib, by default
 /// get_ram_room(`headroom`) but no more than every expert and its staging ring of `ring` buffers take; its
-/// conversations are `layout`'s, its pages `card`'s (get_ram_pool_config).  It opens empty: the engine's refills
-/// bring in the experts in get_ram_ranking's order as far as they fit.  Says on stderr after `program` what it took.
+/// conversations are `layout`'s, its pages `card`'s (get_ram_pool_config).  It opens empty: the engine's start-up
+/// fill brings in the experts in get_ram_ranking's order as far as they fit.  Says on stderr after `program` what it
+/// took.
 bool open_ram_pool(const std::string& program, const PagedSettings& s, strata::core::ExpertSource& files,
                    uint64_t headroom, int ring, const strata::core::StateLayout& layout, const PagedCard& card,
                    const std::vector<uint64_t>& blob_bytes, int64_t n_expert,

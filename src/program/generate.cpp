@@ -4641,7 +4641,8 @@ int main(int argc, char** argv) {
             ram_adapt2.seed.assign((size_t) (g.n_layers * g.n_expert), 0.0f);
             sp.on_routes = [&](int64_t l, const int32_t* ids, int64_t n) {
                 if (l < 0 || l >= g.n_layers || n <= 0) return;
-                const float per = ram_adapt2.prompt_w * 20.0f * (float) g.n_expert_used / (float) n;   // = w x 20 / tokens
+                const float per =
+                    strata::core::get_prompt_routing_weight(ram_adapt2.prompt_w * 20.0f, g.n_expert_used, n);
                 float* sd = ram_adapt2.seed.data() + l * g.n_expert;
                 for (int64_t i = 0; i < n; ++i)
                     if (ids[i] >= 0 && ids[i] < g.n_expert) sd[ids[i]] += per;

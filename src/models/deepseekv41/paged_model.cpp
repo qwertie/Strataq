@@ -63,7 +63,7 @@ struct ProgramOptions {
     /// round M5b measured
     int adapt_swaps = 8;
     float adapt_min_gain = 1.5f;   ///< --adapt-min-gain: the routings a move must gain (choose_expert_swaps)
-    float adapt_decay = 0.7f;      ///< --adapt-decay: the routing counts' factor after each round
+    float adapt_decay = 0.7f;      ///< --adapt-decay: the routing counts' factor per 4 decode steps
     std::string layer_split, split_device;  ///< Existing stage bounds and physical devices.
     bool trim_stage_weights = false;       ///< Keeps the cut within the initial dense-weight ranges.
     bool drafting = true;          ///< --dspark is not off: the drafter starts switched on (--drafter)
@@ -316,7 +316,6 @@ public:
     std::vector<int32_t>& get_residency() override { return residency_; }
     bool publish_residency(const PagedCard& card, std::string& err) override;
     std::vector<float>& get_usage() override { return m_.get_usage(); }
-    int get_adapt_interval(int64_t) const override { return x_.adapt_every; }
     bool set_card_layers(const PagedCard& card, std::string& err) override {
         return m_.set_stage_layers((int) card.index, (int) card.lb, (int) card.le, err);
     }
@@ -700,6 +699,7 @@ PagedDeepSeek::PagedDeepSeek(Model& m, const Options& o, const ProgramOptions& x
     facts.draft_limits.max_conversations = facts.has_drafter ? 0 : 1;
     facts.draft_limits.cool_after_rejection = true;
     facts.gpu_experts = x.gpu_experts;
+    facts.adapt_every = x.adapt_every;
     facts.adapt_swaps = x.adapt_swaps;
     facts.adapt_min_gain = x.adapt_min_gain;
     facts.adapt_decay = x.adapt_decay;

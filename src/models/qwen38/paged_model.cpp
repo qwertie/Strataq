@@ -11,6 +11,7 @@
 #include "strata/models/qwen38/prompt_images.hpp"
 #include "strata/common/experts/card_rules.hpp"
 #include "strata/common/experts/expert_pages.hpp"
+#include "strata/common/experts/expert_swaps.hpp"
 #include "strata/common/experts/ram_experts.hpp"
 #include "strata/common/kernels/cpu/expert_layout.hpp"
 #include "strata/common/kernels/mrope.hpp"
@@ -182,7 +183,6 @@ public:
     std::vector<int32_t>& get_residency() override { return m_.host_res; }
     bool publish_residency(const PagedCard& card, std::string& err) override;
     std::vector<float>& get_usage() override { return m_.drive.d.usage; }
-    int get_adapt_interval(int64_t steps) const override { return m_.o.adapt_iv(steps); }
     bool set_card_layers(const PagedCard& card, std::string& err) override;
     strata::core::LayerSizes get_layer_sizes(uint64_t page_bytes) const override;
     bool can_run_layers(int64_t lb, int64_t le) const override;
@@ -483,6 +483,7 @@ PagedQwen::PagedQwen(Model& m, Conversation& conv, const PagedCards& cards, Mode
     for (size_t i = 0; i < m.profile_all.size() && (int64_t) i < o.expert_cache; ++i)
         facts.split_ranking.push_back({m.profile_all[i].first, m.profile_all[i].second});
     facts.gpu_experts = o.expert_cache;
+    facts.adapt_every = o.adapt_every;
     facts.adapt_swaps = o.adapt_swaps;
     facts.adapt_min_gain = o.adapt_min_gain;
     facts.adapt_decay = o.adapt_decay;
@@ -641,6 +642,24 @@ bool PagedQwen::publish_residency(const PagedCard& card, std::string& err) {
         err = "the expert residency table of " + card.id + ": " + cudaGetErrorString(e);
         return false;
     }
+    // the adaptive tier counts a prompt's routings too, which costs a download of its ids per layer: only while the
+    // card lacks some of its layers' experts, since the tier can move none in otherwise
+    const int64_t ne = m_.g.n_expert;
+    const bool lacking = !m_.drive.d.usage.empty() &&
+                         std::any_of(m_.host_res.begin() + card.lb * ne, m_.host_res.begin() + card.le * ne,
+                                     [](int32_t slot) { return slot < 0; });
+    auto& on_routes = cards_[card.index].sp->on_routes;
+    if (!lacking) {
+        on_routes = nullptr;
+        return true;
+    }
+    on_routes = [this](int64_t layer, const int32_t* ids, int64_t n) {
+        const float per =
+            strata::core::get_prompt_routing_weight(strata::core::kPromptRoutings, m_.g.n_expert_used, n);
+        for (int64_t i = 0; i < n; ++i)
+            if (ids[i] >= 0 && ids[i] < m_.g.n_expert)
+                m_.drive.d.usage[(size_t) (layer * m_.g.n_expert + ids[i])] += per;
+    };
     return true;
 }
 

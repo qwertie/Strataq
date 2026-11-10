@@ -3286,7 +3286,7 @@ int Model::load() {
     // ONCE: with `slots` pairs and `slots` slots the cache is full when this returns, so the decode-time
     // admission finds no room and every non-profiled expert stays a CPU miss.  That is what makes the profile
     // the policy rather than a hint.  (With open_expert_pages, strata-q38's, the pools are filled after READY
-    // instead, by PagedEngine::refill_experts; so are a layer split's stages with open_stage_pages, below.)
+    // instead, by PagedEngine::fill_experts; so are a layer split's stages with open_stage_pages, below.)
     int64_t prefilled = 0;
     if (!open_expert_pages && !profile.empty() && srcp != nullptr) {
         // #369 (dag08): per layer, a full layer skips only its own pairs - each layer takes its hottest experts until

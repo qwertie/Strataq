@@ -116,9 +116,9 @@ struct PagedModelFacts {
     /// would hold); empty without a split
     std::vector<strata::core::ExpertKey> split_ranking;
     int64_t gpu_experts = 0;                ///< the most experts the GPUs' pools hold (--expert-cache)
-    /// the adaptive tier (the old engine's --adapt-swaps, --adapt-min-gain and --adapt-decay; the interval is
-    /// PagedModel::get_adapt_interval)
-    int adapt_swaps = 0;
+    /// the adaptive tier (the old engine's --adapt-every, --adapt-swaps, --adapt-min-gain and --adapt-decay, a factor
+    /// per 4 decode steps)
+    int adapt_every = 4, adapt_swaps = 0;
     float adapt_min_gain = 0, adapt_decay = 1;
     uint64_t row_bytes = 0;                 ///< the bytes of one row's hidden state, which a hop carries each way
     /// the ms the CPU takes for one routed expert of a decode step, against which a hop to another card is weighed
@@ -193,8 +193,6 @@ public:
     /// Gets the routings each expert (layer * n_expert + expert) had in the decode steps, which the adaptive tier
     /// counts and decays; empty when the tier is off.
     virtual std::vector<float>& get_usage() = 0;
-    /// Gets the decode steps between two rounds of the adaptive tier at step `steps`.
-    virtual int get_adapt_interval(int64_t steps) const = 0;
     /// Makes the model run layers [card.lb, card.le) on `card` (the layer cut moved); false (and `err`) when its
     /// dense tensors could not reload or its windows could not discard the old layers. The engine calls it
     /// with the card's new range while every conversation is paused, before updating its parts' ranges.

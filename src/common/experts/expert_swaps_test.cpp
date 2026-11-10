@@ -37,6 +37,12 @@ int main() {
                                                              [](int64_t l, int32_t e) { return l == 2 && e == 2; });
     check(kept.size() == 2 && is_swap(kept[0], 2, 3, 0) && is_swap(kept[1], 0, 2, 0),
           "an expert held elsewhere is no candidate");
+    const std::vector<ExpertSwap> free = choose_expert_swaps(usage, res, 3, 4, 1.5f, none, true);
+    check(free.size() == 4 && is_swap(free[2], 0, 2, 0) && is_swap(free[3], 1, 2, -1) && free[3].gain == 4.0f,
+          "unpaired: a candidate without a partner it beats by the margin comes for free pages, its gain its count");
+    check(choose_expert_swaps(std::vector<float>{3.0f, 0.0f}, std::vector<int32_t>{-1, -1}, 1, 2, 1.5f, none, true)
+                  .size() == 1,
+          "unpaired: a layer with no expert on the GPU still brings in its candidates");
     std::printf("expert_swaps_test: %d checks passed\n", checks);
     return 0;
 }

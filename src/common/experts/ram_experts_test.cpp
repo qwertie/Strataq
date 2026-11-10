@@ -114,12 +114,14 @@ int main() {
         check(later_ssd.reads == 0, "the startup pool is empty");
         std::vector<int32_t> residency(3 * kExperts, -1);
         residency[0] = 0;
-        later.rank_gpu_experts_last(residency);
+        later.pages().stop_wanting_if([&](ExpertKey k) {
+            return residency[(size_t) (k.layer * kExperts + k.expert)] >= 0;
+        });
         uint64_t ms = 0;
         check(later.refill(1, ms, err) == 1 && later.holds(1, 0) && !later.holds(0, 0),
-              "RAM fills experts absent from the GPU first");
-        check(!later.holds(1, 5) && later.pages().replace(1, 0, 5, err) && later.holds(1, 0) && later.holds(1, 5) &&
-                  is_expert(later.blob(1, 5), 1, 5),
+              "the RAM's fill skips an expert a GPU holds");
+        check(!later.holds(1, 5) && later.pages().replace(1, 0, 5, err) == 1 && later.holds(1, 0) &&
+                  later.holds(1, 5) && is_expert(later.blob(1, 5), 1, 5),
               "while the pool has free pages, an expert brought in pushes none out");
         check(is_expert(later.blob(2, 7), 2, 7), "a conversation can read before refill completes");
         later_ssd.fail = true;
@@ -162,8 +164,8 @@ int main() {
     while (ram.holds(2, in))
         ++in;
     const int before = ssd.reads;
-    check(ram.pages().replace(2, gone, in, err) && ram.holds(2, in) && !ram.holds(2, gone) && ssd.reads == before + 1 &&
-              is_expert(ram.blob(2, in), 2, in),
+    check(ram.pages().replace(2, gone, in, err) == 1 && ram.holds(2, in) && !ram.holds(2, gone) &&
+              ssd.reads == before + 1 && is_expert(ram.blob(2, in), 2, in),
           "an expert replaced in place leaves, and the other takes its pages with its own bytes");
     const auto check_bytes = [&] {
         for (int64_t l = 0; l < 3; ++l)

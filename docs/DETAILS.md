@@ -154,7 +154,8 @@ Some engine settings depend on the PC more than on the model:
 | `--pcie-frac` | Share of the experts missing from VRAM that are copied to the GPU instead of computed by the CPU. A fast PCIe link and a slow CPU want more; a laptop's narrow link wants less. |
 | `--spec-min-p` | How sure the draft layer must be to add another guess to a check. |
 | `--pool-workers` | How many CPU threads compute experts. On CPUs with efficiency cores, fewer can be faster. |
-| `--adapt-every`, `--adapt-swaps`, `--adapt-decay` | How busily the VRAM expert cache follows the conversation. A CPU that reads missed experts slowly (DDR3 or DDR4 in few channels) gains from more swaps. |
+| `--adapt-every`, `--adapt-swaps`, `--adapt-decay` | How busily the VRAM expert cache follows the conversation. A CPU that reads missed experts slowly (DDR3 or DDR4 in few channels) gains from more swaps. `--adapt-decay` fades the experts' use counts once per 4 decode steps. |
+| `--expert-popularity-decay` | The page-pool engines (strata-q38, strata-ds41) only: how much the experts' use counts fade at each decode step. By default `--adapt-decay` to the power 0.25 (0.7 gives 0.915), the same fading spread over the 4 steps. |
 | `--prefill-pipe` | On two or more cards (layer split), the prompt chunks that keep the cards reading at once. See [MULTI_GPU.md](MULTI_GPU.md). |
 
 The defaults were measured on a Ryzen 5 7600 with an RTX 5070. From a source checkout, `START-HERE.bat --calibrate` (Linux: `./setup.sh --calibrate`)
@@ -865,32 +866,40 @@ The engine's command (include/strata/common/serve/memory_report.hpp; the engine'
   `SETTINGS`. The server's `GET /v1/memory` returns it as `"expert_fill": {"loaded", "pending"}`.
 
 How the page-pool engines start: they say `READY` as soon as the dense weights are loaded, so the server takes
-requests at once. Their expert pools start empty. The engine fills them between and during requests, in the order of
-the expert profile. The GPUs' pools come first. Then the RAM's pool takes the experts the GPUs do not hold, before the
-others. An expert that is in no pool yet is read from the SSD. The fill takes only free pages. An expert the
-conversations use also takes free pages while there are any. Only a full pool trades a little-used expert for one they
-use. So the fill stops when the pools are full. There is no setting for this. `loaded` is 1 when no pool can take
-more experts now. It turns back to 0 when a pool can take experts again, after conversations took their pages or a
-pool grew. `pending` counts the experts the pools should hold and do not, including those that wait for pages a
-conversation holds. Strata's speed tools wait for `loaded` before they time anything (at most 30 minutes); an engine
-without `EXPERT_FILL` counts as loaded.
+requests at once. Their expert pools start empty. A start-up fill loads experts between and during requests, in the
+order of the expert profile. The GPUs' pools come first. Then the RAM's pool takes the experts no GPU holds. An
+expert that is in no pool yet is read from the SSD. The fill takes only free pages, and it ends for good when the
+pools are full or hold every expert. There is no setting for this. `loaded` turns to 1 when the start-up fill ends,
+and stays 1. `pending` counts the experts the fill still wants. Strata's speed tools wait for `loaded` before they
+time anything (at most 30 minutes); an engine without `EXPERT_FILL` counts as loaded.
+
+After the start-up fill, the profile is only the first guess of how popular each expert is. Only the adaptive tier
+moves experts onto a GPU, by how often the conversations route to them. On Qwen, prompts count too: an expert that
+every token of a prompt chunk routes to counts like 5 routings while decoding. DeepSeek counts only decoding. The tier
+puts an expert into free pages while a pool has some. Only a full pool trades a little-used expert for one used more
+(by at least `--adapt-min-gain` routings). The tier runs after every decode step while a card's pool has more than
+1 GiB free beyond the room kept for `--tokens-min`, and after every `--adapt-every` steps otherwise. It moves at most
+`--adapt-swaps` experts each time. The pages a conversation gives up, a grown pool and a moved layer cut are filled
+this way too. The tier moves an expert only onto the card that runs its layer, so after the start-up fill no card
+loads experts of another card's layers (`--remote-experts`).
 
 Measured on the Strix Halo (Windows, 2026-11-09), old start against new:
 
 | | Qwen3.8 IQ3_S, 48 GiB GPU pool, 5 GiB RAM pool | DeepSeek V4.1 2.00 bpw, 60 GiB GPU, 20 GiB RAM |
 |---|---|---|
 | `READY`, old | 38.4 s, everything loaded | 57.7 s, everything loaded |
-| `READY`, new | 8.8-9.4 s | 12.2-19.1 s (33.4 s at the first start) |
-| Fully loaded, new, no requests meanwhile | 40.8-43.1 s | 68.7-93.9 s |
-| Fully loaded, new, three requests meanwhile | 92.1-94.3 s | 146.5 s |
-| Answering while it fills (160 tokens each) | 5.6, 9.9, 14.1 tok/s | 3.5, 2.8, 8.1 tok/s |
-| Answering once loaded, old / new | 38-59 / 40-59 tok/s | 9.0-11.6 / 8.2-10.7 tok/s |
-| A 14,192-token prompt once loaded, old / new | 845 / 845 tok/s | not measured |
+| `READY`, new | 9.4-10.1 s | 13.9-18.1 s |
+| Fully loaded, new, no requests meanwhile | 41.0-43.6 s | 70.1-71.1 s |
+| Fully loaded, new, three requests meanwhile | 75.4-75.5 s | 111.0 s |
+| Answering while it fills (160 tokens each) | 7.3, 14.6, 17.1 tok/s | 4.3, 5.7, 11.0 tok/s |
+| Answering once loaded, old / new | 38-59 / 38-59 tok/s | 9.0-11.6 / 7.6-13.2 tok/s |
+| A 14,192-token prompt once loaded, old / new | 845 / 847-849 tok/s | not measured |
 
 Once loaded, Qwen's greedy answers matched the old start's when no request ran during the fill. With requests during
-the fill, and on DeepSeek, the answers parted after 9 to 25 tokens. The likely cause, not confirmed, is a slightly
-different set of experts on the GPU. DeepSeek's fill is slower than its old start: the old start read every expert
-before `READY`, and filling while serving takes 11-36 s longer when no request comes.
+the fill, and on DeepSeek, the answers parted after 15 to 19 tokens. The likely cause, not confirmed, is a slightly
+different set of experts on the GPU. With requests during the fill, the experts they read from the SSD stay in the
+RAM's pool, so it held copies of GPU experts afterwards: 2,489 of its 2,489 on Qwen, 1,297 of 2,424 on DeepSeek.
+Without requests it held none. DeepSeek's fill ends about 12 s later than its old start's `READY`.
 
 What each engine says:
 

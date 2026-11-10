@@ -132,6 +132,10 @@ bool ExpertPages::is_refill_wanted() const {
     return !evicted_.empty() && pool_->report().free.pages != blocked_at_free_;
 }
 
+void ExpertPages::stop_wanting_if(const std::function<bool(ExpertKey)>& is_held_elsewhere) {
+    std::erase_if(evicted_, [&](int32_t rank) { return is_held_elsewhere(ranked_[(size_t) rank]); });
+}
+
 int ExpertPages::refill(int max, uint64_t& wait_ms, std::string& err) {
     wait_ms = 0;
     int loaded = 0;
@@ -173,24 +177,26 @@ int32_t ExpertPages::admit(int64_t layer, int64_t expert, uint64_t used_at) {
     return get_slot(page);
 }
 
-bool ExpertPages::replace(int32_t layer, int32_t out, int32_t in, std::string& err) {
+int ExpertPages::replace(int32_t layer, int32_t out, int32_t in, std::string& err) {
     const ExpertKey gone{layer, out}, key{layer, in};
     if (pool_->find_expert(key) != no_page)
-        return true;
+        return 0;
     if (const int32_t free_slot = admit_free(key); free_slot != kNotResident) {
         if (!hooks_.load(key, free_slot, err)) {
             pool_->remove_expert(key);
             if (cache_ != nullptr)
                 cache_->evict(layer, in);
-            return false;
+            return -1;
         }
         hooks_.moved(key, free_slot);
         note_use(key);
-        return true;
+        return 1;
     }
+    if (out < 0)
+        return 0;
     const PageId first = pool_->replace_expert(gone, key);
     if (first == no_page)
-        return true;
+        return 0;
     if (hooks_.leaving)
         hooks_.leaving(gone, pool_->page_address(first));
     hooks_.moved(gone, kNotResident);
@@ -205,12 +211,12 @@ bool ExpertPages::replace(int32_t layer, int32_t out, int32_t in, std::string& e
         pool_->remove_expert(key);
         if (cache_ != nullptr)
             cache_->evict(layer, out);
-        return false;
+        return -1;
     }
     if (cache_ != nullptr)
         cache_->replace(layer, out, in);
     hooks_.moved(key, slot);
-    return true;
+    return 1;
 }
 
 /// Brings `key` into free pages without evicting anything, for `refill` and `replace`: through the cache when there
