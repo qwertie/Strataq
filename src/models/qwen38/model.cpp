@@ -947,9 +947,9 @@ int Model::load() {
         const bool nvfp4_pack = native_pack && !lay0.fmt.empty() && lay0.fmt[0].gu_type == 40;
         const char* pfd = std::getenv("STRATA_PCIE_FRAC_DEFAULT");
         const bool pf_old = pfd != nullptr && std::strcmp(pfd, "old") == 0;
-        // 0.2.7: gfx12 native packs start at 0.15 (see pcie_share_gfx12_default); other cards,
-        // STRATA_PCIE_FRAC_DEFAULT=old and strata-q38 (not measured with it) keep the x16 share measured for them.
-        const double base = strata::pcie_start_frac(nvfp4_pack, native_pack, pcie_share_gfx12_default() && !is_paged(),
+        // 0.2.7: gfx12 native packs start at 0.15 (see pcie_share_gfx12_default), in strata-q38 as well; other cards
+        // and STRATA_PCIE_FRAC_DEFAULT=old keep the x16 share measured for them.
+        const double base = strata::pcie_start_frac(nvfp4_pack, native_pack, pcie_share_gfx12_default(),
                                                     pf_old, strata::qwen_defaults_026());
         std::string bursts;
 #if !defined(STRATA_USE_HIP) && defined(_WIN32)
