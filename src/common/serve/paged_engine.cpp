@@ -275,7 +275,7 @@ private:
     /// (plan_restore_points, whose `tail` the read's times measure for tail_cost_); `read_to` gets how far it got.
     /// Conversations that decode meanwhile take steps between the prompt's turns (PagedSettings::decode_share_percent
     /// and prompt_turn_ms).  False with `err` "cancelled" after a STOP, else on a failure that ends the engine
-    /// (`fatal`: a decode step failed, its ERR printed).
+    /// (`fatal`: a decode step failed, its ERR printed, or an expert fill failed, reported on stderr).
     bool read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t from, int64_t to,
                      const std::vector<strata::core::MarkAt>& cuts, int64_t tail, Clock::time_point t0,
                      int64_t& read_to, bool& fatal, std::string& err);
@@ -396,11 +396,19 @@ private:
     /// routings.  The routing counts then decay by popularity_decay_ per step.  False (ERR printed) when a copy
     /// failed.
     bool adapt_experts();
-    /// Loads a batch of the start-up fill: the experts the GPUs' pools want, in the profile's order, then those the
-    /// RAM's pool wants that no GPU took; or waits until pages open to them.  Ends the fill (filling_since_) for good
-    /// once no pool can take more of them.  The serve loop runs it between requests, and decode_step after each step,
-    /// while the fill runs.  False when a copy failed (said on stderr).
+    /// Loads a batch of the start-up fill (fill_round), or waits until pages open to its experts.  The serve loop runs
+    /// it between requests, and decode_step after each step, while the fill runs.  False on a load or residency
+    /// upload failure (reported on stderr).
     bool fill_experts();
+    /// Runs fill batches until no more experts can load immediately.  read_prompt uses it before non-final chunks
+    /// to avoid repeated SSD reads, while one-chunk prompts can start immediately.  False on a load or residency
+    /// upload failure (reported on stderr).
+    bool finish_fill();
+    /// Loads a batch of the fill: the experts the GPUs' pools want, in the profile's order, then those the RAM's pool
+    /// wants that no GPU took.  Ends the current fill (filling_since_) once no pool can take more of them.  Gets how
+    /// many experts came in, or -1 on a load or residency upload failure; `wait_ms` gets 0, or the milliseconds until
+    /// pages open to the next expert.
+    int fill_round(uint64_t& wait_ms);
     /// Tells whether a pool can take more of the start-up fill's experts now (ExpertPages::is_refill_wanted).
     bool is_fill_wanted() const;
     /// Uploads the cards' residency tables when experts came or left since the last upload.
@@ -1353,6 +1361,12 @@ bool PagedEngine::read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t 
         if (next_cut < cuts.size() && cuts[next_cut].pos < q + n)
             n = cuts[next_cut].pos - q;
         ok = model_.wait_state(err);
+        if (ok && filling_since_ && q + n < to) {
+            // Expert refills can change the prompt's cache between the two measured runs.
+            measure_tail = false;
+            fatal = !finish_fill();
+            ok = !fatal;
+        }
         const Clock::time_point r0 = Clock::now();
         ok = ok && model_.read_prompt(h.parts, ids, q, n, is_model_drafting(), on_chunk, err);
         if (ok && measure_tail)
@@ -2135,8 +2149,24 @@ bool PagedEngine::adapt_experts() {
 }
 
 bool PagedEngine::fill_experts() {
-    std::string err;
     uint64_t wait_ms = 0;
+    if (fill_round(wait_ms) < 0)
+        return false;
+    if (wait_ms > 0)
+        input_.wait_for_line(std::chrono::milliseconds(wait_ms), [] { return false; });
+    return true;
+}
+
+bool PagedEngine::finish_fill() {
+    int loaded = 1;
+    for (uint64_t wait_ms = 0; filling_since_ && loaded > 0;)
+        loaded = fill_round(wait_ms);
+    return loaded >= 0;
+}
+
+int PagedEngine::fill_round(uint64_t& wait_ms) {
+    std::string err;
+    wait_ms = 0;
     int loaded = 0;
     for (PagedCard& card : cards_) {
         uint64_t card_wait_ms = 0;
@@ -2163,7 +2193,7 @@ bool PagedEngine::fill_experts() {
     }
     if (loaded < 0 || !publish_residency(err)) {
         say("filling the expert pools: %s\n", err.c_str());
-        return false;
+        return -1;
     }
     if (!is_fill_wanted()) {
         say(refilling_ ? "the experts a prompt's buffers evicted are back after %.0f ms\n"
@@ -2171,9 +2201,7 @@ bool PagedEngine::fill_experts() {
         filling_since_.reset();
         refilling_ = false;
     }
-    if (wait_ms > 0)
-        input_.wait_for_line(std::chrono::milliseconds(wait_ms), [] { return false; });
-    return true;
+    return loaded;
 }
 
 bool PagedEngine::is_fill_wanted() const {
