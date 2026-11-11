@@ -568,7 +568,7 @@ int run_paged_engine(int argc, char** argv) {
                     const int64_t mib = settings.gpu_mib.empty() ? -1 :
                         settings.gpu_mib[std::min(i, settings.gpu_mib.size() - 1)];
                     pools.push_back(mib < 0 ?
-                        strata::serve::get_gpu_room(stage_devices[i], (uint64_t) o.reserve_mib << 20, 0) / copies :
+                        strata::serve::get_gpu_room(stage_devices[i], (uint64_t) o.reserve_mib << 20) / copies :
                         (uint64_t) mib << 20);
                 }
                 auto problem = strata::core::make_paged_split_problem(sizes, pools, 1, settings.tokens_min);
@@ -633,7 +633,7 @@ int run_paged_engine(int argc, char** argv) {
     const std::vector<uint64_t> blobs = m.get_expert_bytes();
     strata::core::StateLayout layout;
     ConversationRegions at;
-    bool copy_back = false;
+    double copy_back_gain = 0;
     if (!describe_conversation(g, 0, g.nl, has_drafter, layout, at, err) || !m.place_experts(err) ||
         !files.open(m.get_file_paths(), m.get_expert_files(), err)) {
         std::fprintf(stderr, "%s: %s\n", kProgram.c_str(), err.c_str());
@@ -676,11 +676,11 @@ int run_paged_engine(int argc, char** argv) {
         prompt += model.get_prompt_buffers(c, model.get_prompt_ceiling(), model.get_prompt_ceiling()).host;
     if (!strata::serve::open_ram_pool(kProgram, settings, files, kRamHeadroom, kCpuLaneExperts, layout, card, trunk,
                                       g.n_exp, get_ranking(m, 0, g.nl, false), card.experts.pool().page_address(0),
-                                      prompt, ram, copy_back, err)) {
+                                      prompt, ram, copy_back_gain, err)) {
         std::fprintf(stderr, "%s: %s\n", kProgram.c_str(), err.c_str());
         return 1;
     }
-    const int status = strata::serve::serve_paged_model(model, cards, ram, copy_back, settings);
+    const int status = strata::serve::serve_paged_model(model, cards, ram, copy_back_gain, settings);
     m.save_profile();
     return status;
 }
@@ -1400,7 +1400,7 @@ bool open_card_pool(const Model& m, const PagedSettings& s, const strata::core::
                            m.geometry().n_exp, max_experts, ranking, err))
         return false;
     card.experts.set_ranking(ranking, max_experts);   // (opened without a cache, it wants none of them until then)
-    strata::serve::say_gpu_pool(kProgram, card, room, config.chunk_bytes);
+    strata::serve::say_gpu_pool(kProgram, card, room, config.chunk_bytes, mib);
     return true;
 }
 

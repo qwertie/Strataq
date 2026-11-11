@@ -58,6 +58,12 @@ bool RamExperts::open(ExpertSource& files, uint64_t bytes, int ring, const State
     }
     ExpertPages::Hooks hooks;
     hooks.load = [this](ExpertKey key, int32_t first, std::string& e) {
+        if (copy_from_ != nullptr) {
+            if (gpu_copy(get_page(first), copy_from_, (size_t) blob_bytes_[(size_t) key.layer]))
+                return true;
+            e = "copying layer " + std::to_string(key.layer) + " expert " + std::to_string(key.expert) + " in failed";
+            return false;
+        }
         if (refill_reads_ != nullptr) {
             refill_reads_->add(key.layer, key.expert, get_page(first));
             return true;
@@ -88,18 +94,29 @@ int RamExperts::refill(int max, uint64_t& wait_ms, std::string& err) {
     return loaded;
 }
 
-bool RamExperts::keep_copy(ExpertKey key, const uint8_t* bytes) {
+bool RamExperts::keep_copy(ExpertKey key, const uint8_t* bytes, const std::vector<float>& usage) {
+    const std::unique_lock lock(mu_);
     if ((size_t) key.layer >= blob_bytes_.size() || holds(key.layer, key.expert))
         return false;
-    const int32_t first = pages_.admit(key.layer, key.expert);
-    if (first == kNotResident)
-        return false;
-    if (gpu_copy(get_page(first), bytes, (size_t) blob_bytes_[(size_t) key.layer])) {
-        first_page_[index_of(key.layer, key.expert)] = first;
-        return true;
+    copy_from_ = bytes;
+    std::string err;
+    int got = pages_.replace({-1, -1}, key, err);   // free pages, which need no search
+    if (got == 0) {
+        const auto count = [&](ExpertKey k) {
+            const size_t i = index_of(k.layer, k.expert);
+            return i < usage.size() ? usage[i] : 0.0f;
+        };
+        ExpertKey least{-1, -1};
+        for (size_t i = 0; i < first_page_.size(); ++i)
+            if (const ExpertKey k{(int32_t) (i / (size_t) n_expert_), (int32_t) (i % (size_t) n_expert_)};
+                first_page_[i] != kNotResident && blob_bytes_[(size_t) k.layer] == blob_bytes_[(size_t) key.layer] &&
+                (least.layer < 0 || count(k) < count(least)))
+                least = k;
+        if (least.layer >= 0 && count(least) < count(key))
+            got = pages_.replace(least, key, err);
     }
-    pages_.pool().remove_expert(key);
-    return false;
+    copy_from_ = nullptr;
+    return got > 0;
 }
 
 double RamExperts::time_ssd_reads(int round) {

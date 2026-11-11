@@ -30,7 +30,9 @@
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <optional>
 #include <string>
@@ -159,7 +161,7 @@ struct PendingRequest {
 class PagedEngine {
 public:
     /// See serve_paged_model.
-    PagedEngine(PagedModel& model, PagedCards& cards, strata::core::RamExperts& ram, bool copy_back,
+    PagedEngine(PagedModel& model, PagedCards& cards, strata::core::RamExperts& ram, double copy_back_gain,
                 const PagedSettings& settings);
     /// Drains state writes and deletes the paused conversations' files.
     ~PagedEngine();
@@ -461,6 +463,8 @@ private:
     std::string fatal_error_; ///< Stops serving when the model cannot recover its layer ownership.
     bool residency_changed_ = false;   ///< the model's residency table changed since the devices' were uploaded
     bool prompt_lent_ = false;         ///< the pools lend the prompt path its buffers (lend_prompt_buffers)
+    /// While try_lend_prompt's GPU lends run: an expert evicted now leaves for a prompt's buffers (is_copy_back_worth)
+    bool lending_ = false;
     /// Per layer, the card whose pool holds the layer's experts that its own card's does not (the model's hop
     /// holders), or -1; empty while the cards lend no pages (one card, or --remote-experts off)
     std::vector<int32_t> holder_;
@@ -485,6 +489,7 @@ private:
     double adapt_ms_ = 0;              ///< the time those took
     int64_t copied_back_ = 0;          ///< the experts the GPU's pool evicted that were copied to RAM, since then
     double copy_back_ms_ = 0;          ///< the time the copies back took (all evictions', failed copies too)
+    double copy_back_gain_;            ///< see serve_paged_model
     /// the model's usage counts before the step that runs now: the experts whose count grows were routed to in the step
     std::vector<float> routed_before_;
     int step_rows_ = 0;                ///< the rows the last step ran
@@ -518,6 +523,57 @@ uint64_t get_commit_room() {
     return strata::core::detail::host_available_memory(hm) ? hm.commit : UINT64_MAX;
 }
 
+/// Gets how full integrated GPU `dev`'s dedicated share (read_share_use) gets, every program's bytes in it together,
+/// before a pool's next chunk (get_gpu_chunk_memory, kChunkBytes) no longer fits in it and Windows puts the chunk in
+/// the system RAM the GPU borrows; no value for another GPU.  No figure Windows reports gives it, and it depends on the
+/// allocations' size: on the Strix Halo (a 63.8 GiB share) a test program filled it to 55.6 GiB in chunks of 256 MiB,
+/// 58.7 in chunks of 64 MiB and 48.7 in hipMalloc's 1 GiB pieces, and the engines' starts to 59.1-62.3 GiB.  So the
+/// first call for `dev` measures it, taking chunks until one lands outside (or is refused) and giving them all back,
+/// and says so on stderr; later calls get that figure.  A chunk lands outside when this process's bytes in the GPU's
+/// apertures grow by half a chunk or more. Concurrent aperture frees can hide a spill; other programs can also
+/// change residency after the probe, so this is an estimate, not a residency guarantee.
+std::optional<uint64_t> get_share_top(int dev) {
+    static std::mutex mutex;
+    static std::map<int, std::optional<uint64_t>> tops;
+    const std::lock_guard<std::mutex> lock(mutex);
+    if (const auto it = tops.find(dev); it != tops.end())
+        return it->second;
+    strata::platform::GpuLocalMemory share;
+    if (!strata::core::read_share_use(dev, share))
+        return tops[dev] = std::nullopt;
+    uint64_t top = share.all;
+    const uint64_t size = share.size;
+    const Clock::time_point t0 = Clock::now();
+    const strata::core::ChunkMemory memory = get_gpu_chunk_memory(dev, kChunkBytes, false);
+    using ProbeChunk = std::unique_ptr<uint8_t, decltype(memory.free)>;
+    std::vector<ProbeChunk> taken;
+    taken.reserve((size_t) (size / kChunkBytes + 1));
+    for (uint64_t outside = share.mine_elsewhere; taken.size() * kChunkBytes < share.size;
+         outside = share.mine_elsewhere) {
+        top = share.all;
+        ProbeChunk chunk(memory.alloc(kChunkBytes), memory.free);
+        if (!chunk)
+            break;
+        taken.push_back(std::move(chunk));
+        strata::platform::GpuLocalMemory next;
+        if (!strata::core::read_share_use(dev, next))
+            break;
+        if (next.mine_elsewhere > outside && next.mine_elsewhere - outside >= kChunkBytes / 2) {
+            top = std::min(top, next.all);
+            break;
+        }
+        share = next;
+        top = share.all;
+    }
+    taken.clear();
+    top = std::min(top, size);
+    std::fprintf(stderr, "strata: GPU %d's dedicated memory takes %.2f of its %.2f GiB in chunks of %.0f MiB, every "
+                         "program's together (estimated in %.1f s)\n",
+                 dev, (double) top / 1073741824.0, (double) size / 1073741824.0,
+                 (double) kChunkBytes / 1048576.0, get_ms_since(t0) / 1000.0);
+    return tops[dev] = top;
+}
+
 /// Gets `bytes` rounded to the nearest whole number of `pool`'s chunks (a size given in MiB is seldom one).
 uint64_t round_to_chunks(const strata::core::PagePool& pool, uint64_t bytes) {
     return (bytes + pool.chunk_bytes() / 2) / pool.chunk_bytes() * pool.chunk_bytes();
@@ -525,9 +581,9 @@ uint64_t round_to_chunks(const strata::core::PagePool& pool, uint64_t bytes) {
 
 }  // namespace
 
-int serve_paged_model(PagedModel& model, PagedCards& cards, strata::core::RamExperts& ram, bool copy_back,
+int serve_paged_model(PagedModel& model, PagedCards& cards, strata::core::RamExperts& ram, double copy_back_gain,
                       const PagedSettings& settings) {
-    PagedEngine engine(model, cards, ram, copy_back, settings);
+    PagedEngine engine(model, cards, ram, copy_back_gain, settings);
     return engine.init() ? engine.serve() : 1;
 }
 
@@ -542,13 +598,16 @@ std::string get_step_settings_problem(const strata::spec::StepSettings& s, int m
     return {};
 }
 
-uint64_t get_gpu_room(int dev, uint64_t keep, uint64_t mapped) {
+uint64_t get_gpu_room(int dev, uint64_t keep) {
     const strata::core::OnDevice on(dev);
     uint64_t free_b = 0;
-    if (strata::core::get_share_room(dev, mapped, free_b))
-        free_b = std::min(free_b, get_commit_room());
-    else
+    strata::platform::GpuLocalMemory share;
+    if (const auto top = get_share_top(dev); top.has_value()) {
+        if (strata::core::read_share_use(dev, share))
+            free_b = std::min(*top > share.all ? *top - share.all : 0, get_commit_room());
+    } else {
         free_b = strata::core::device_free_bytes();
+    }
     return free_b > keep ? free_b - keep : 0;
 }
 
@@ -561,12 +620,13 @@ uint64_t get_ram_room(uint64_t headroom) {
 
 namespace {
 
-PagedEngine::PagedEngine(PagedModel& model, PagedCards& cards, strata::core::RamExperts& ram, bool copy_back,
+PagedEngine::PagedEngine(PagedModel& model, PagedCards& cards, strata::core::RamExperts& ram, double copy_back_gain,
                          const PagedSettings& settings)
     : model_(model), facts_(model.facts), cards_(cards), ram_(ram), settings_(settings),
       step_(get_step_model(), model.facts.end_tokens),
       popularity_decay_(settings.popularity_decay > 0 ? settings.popularity_decay
-                                                      : std::pow((double) model.facts.adapt_decay, 0.25)) {
+                                                      : std::pow((double) model.facts.adapt_decay, 0.25)),
+      copy_back_gain_(copy_back_gain) {
     if (settings_.tokens_max < 0)
         settings_.tokens_max = facts_.context;
     if (settings_.vram_conversations < 0) {
@@ -611,12 +671,13 @@ PagedEngine::PagedEngine(PagedModel& model, PagedCards& cards, strata::core::Ram
             (own ? model_.get_residency()[i] : c.lent[i]) = slot;
             residency_changed_ = residency_changed_ || own;
         };
-        if (copy_back)
-            hooks.leaving = [this](strata::core::ExpertKey key, const uint8_t* bytes) {
-                const Clock::time_point t0 = Clock::now();
-                copied_back_ += ram_.keep_copy(key, bytes);
-                copy_back_ms_ += get_ms_since(t0);
-            };
+        hooks.leaving = [this](strata::core::ExpertKey key, const uint8_t* bytes) {
+            if (!strata::core::is_copy_back_worth(copy_back_gain_, lending_))
+                return;
+            const Clock::time_point t0 = Clock::now();
+            copied_back_ += ram_.keep_copy(key, bytes, model_.get_usage());
+            copy_back_ms_ += get_ms_since(t0);
+        };
         card.experts.set_hooks(std::move(hooks));
     }
 }
@@ -1653,14 +1714,24 @@ bool PagedEngine::try_lend_prompt(int64_t chunk, const std::vector<PromptBuffers
         evicted += lend.experts_evicted;
     };
     uint64_t lent = 0;
-    bool refused = false;
     prompt_lent_ = true;   // (from here give_back_prompt_buffers gives back what is lent)
+    // the RAM's first, so that the experts the GPUs' lends copy back to RAM stay out of its lent run
+    bool refused = false;
+    if (host > 0) {
+        strata::core::PoolLend lend;
+        refused = (ram = ram_.lend(host, lend)) == nullptr;
+        count(lend);
+    }
+    const int64_t copied_before = copied_back_;
+    const double copy_ms_before = copy_back_ms_;
     for (PagedCard& card : cards_) {
-        if (need[card.index].device == 0)
+        if (refused || need[card.index].device == 0)
             continue;
         const strata::core::OnDevice on(card.dev);
         strata::core::PoolLend lend;
+        lending_ = true;
         device[card.index] = card.experts.lend(need[card.index].device, lend);
+        lending_ = false;
         count(lend);
         lent += need[card.index].device;
         for (const std::unique_ptr<Held>& h : held_)   // a lend moved these conversations' blocks
@@ -1668,13 +1739,7 @@ bool PagedEngine::try_lend_prompt(int64_t chunk, const std::vector<PromptBuffers
                 part.is_ready() && std::find(lend.moved.begin(), lend.moved.end(), part.id()) != lend.moved.end() &&
                 !part.refresh(err))
                 return false;
-        if ((refused = device[card.index] == nullptr))
-            break;
-    }
-    if (!refused && host > 0) {
-        strata::core::PoolLend lend;
-        refused = (ram = ram_.lend(host, lend)) == nullptr;
-        count(lend);
+        refused = device[card.index] == nullptr;
     }
     if (refused)
         give_back_prompt_buffers();
@@ -1689,8 +1754,9 @@ bool PagedEngine::try_lend_prompt(int64_t chunk, const std::vector<PromptBuffers
         at += need[card.index].host;
     }
     say("the pools lent %.2f GiB of VRAM and %.2f GiB of RAM to the prompt path for chunks of %lld tokens in %.0f ms "
-        "(%u experts moved, %u evicted)\n", (double) lent / 1073741824.0, (double) host / 1073741824.0,
-        (long long) chunk, get_ms_since(t0), moved, evicted);
+        "(%u experts moved, %u evicted; %lld copied back to RAM in %.1f ms)\n", (double) lent / 1073741824.0,
+        (double) host / 1073741824.0, (long long) chunk, get_ms_since(t0), moved, evicted,
+        (long long) (copied_back_ - copied_before), copy_back_ms_ - copy_ms_before);
     return true;
 }
 
@@ -2022,7 +2088,7 @@ bool PagedEngine::adapt_experts() {
     int moved = 0;
     for (size_t i = 0; i < swaps.size() && moved < facts_.adapt_swaps; ++i) {
         const strata::core::ExpertSwap& s = swaps[i];
-        const int got = get_card_of(s.layer).experts.replace(s.layer, s.out, s.in, err);
+        const int got = get_card_of(s.layer).experts.replace({s.layer, s.out}, {s.layer, s.in}, err);
         if (got < 0) {
             print_error_or_exit("moving an expert into the GPU's pool: " + err);
             return false;
@@ -2777,8 +2843,7 @@ uint64_t PagedEngine::get_smallest_gpu(const PagedCard& card, int64_t tokens_min
 uint64_t PagedEngine::get_largest_gpu(const PagedCard& card) const {
     const strata::core::PagePool& pool = card.experts.pool();
     const uint64_t chunk = pool.chunk_bytes();
-    return (pool.report().total.bytes + get_gpu_room(card.dev, model_.get_gpu_keep(card), ram_.get_mapped_bytes())) /
-           chunk * chunk;
+    return (pool.report().total.bytes + get_gpu_room(card.dev, model_.get_gpu_keep(card))) / chunk * chunk;
 }
 
 uint64_t PagedEngine::get_smallest_ram() const {

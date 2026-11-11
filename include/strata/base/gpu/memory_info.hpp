@@ -38,25 +38,20 @@ inline void read_gpu_memory(int device, std::string& name, uint64_t& total, uint
 #endif
 }
 
-/// Gets how many bytes of integrated GPU `device`'s dedicated share (the part of the system RAM the BIOS gives it)
-/// this process may still take: the share less what the process holds on the GPU.  Past the share, the GPU's
-/// allocations borrow system RAM.  `mapped`: the page-locked host memory the process holds that the GPU maps, which
-/// Windows counts in the GPU's local use as well (on the Strix Halo, 4 GiB of hipHostMalloc raised it by 4 GiB) but
-/// which is system RAM, not the share.  False for a discrete GPU, and where the share is not known (elsewhere than
-/// Windows).
-inline bool get_share_room(int device, uint64_t mapped, uint64_t& room) {
+/// Reads integrated GPU `device`'s dedicated share (the part of the system RAM the BIOS gives it; past it, the GPU's
+/// allocations borrow system RAM, which it reads more slowly) into `share` (platform::gpu_local_memory).  False for a
+/// discrete GPU, and where the share is not known (elsewhere than Windows).
+inline bool read_share_use(int device, platform::GpuLocalMemory& share) {
     std::string name, why;
-    uint64_t total = 0, free = 0, share = 0, usage = 0;
+    uint64_t total = 0, free = 0;
     bool integrated = false;
     read_gpu_memory(device, name, total, free, integrated);
     cudaDeviceProp p{};
     if (!integrated || cudaGetDeviceProperties(&p, device) != cudaSuccess ||
-        !platform::gpu_dedicated_memory(p.luid, share, usage, why)) {
+        !platform::gpu_local_memory(p.luid, share, why)) {
         (void) cudaGetLastError();
         return false;
     }
-    const uint64_t on_gpu = usage > mapped ? usage - mapped : 0;
-    room = share > on_gpu ? share - on_gpu : 0;
     return true;
 }
 

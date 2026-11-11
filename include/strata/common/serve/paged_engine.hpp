@@ -111,9 +111,10 @@ struct PagedSettings {
 
 /// Runs the engine over `model`, whose start made `cards` (the GPUs' pools) and `ram` (the RAM's pool: experts and
 /// paused conversations, its conversation layout the whole model's regions): carves each conversation's state on each
-/// card, then answers the server's commands until QUIT or the end of stdin.  `copy_back`: an expert a GPU's pool
-/// evicts is copied to `ram`. Gets the exit status.
-int serve_paged_model(PagedModel& model, PagedCards& cards, strata::core::RamExperts& ram, bool copy_back,
+/// card, then answers the server's commands until QUIT or the end of stdin.  `copy_back_gain`: how many times faster
+/// copying an expert a GPU's pool evicts to `ram` is than reading it from the SSD (open_ram_pool), which decides
+/// whether the copy is made (is_copy_back_worth). Gets the exit status.
+int serve_paged_model(PagedModel& model, PagedCards& cards, strata::core::RamExperts& ram, double copy_back_gain,
                       const PagedSettings& settings);
 
 // ---- a model's start (paged_start.cpp): what every model's start does before serve_paged_model
@@ -136,7 +137,7 @@ void measure_card(PagedCard& card, const std::string& program, uint64_t expert_b
 /// initializes every page before use.
 strata::core::ChunkMemory get_gpu_chunk_memory(int dev, uint64_t chunk_bytes, bool zeroed = true);
 /// Gets the bytes a pool on GPU `dev` takes: `gpu_mib` (--gpu-mib), but no more than `room`; -1: `room` but no more
-/// than `most`.  `room` gets what the pool could take: get_gpu_room(dev, keep, 0).
+/// than `most`.  `room` gets what the pool could take: get_gpu_room(dev, keep).
 uint64_t get_gpu_pool_bytes(int dev, uint64_t keep, int64_t gpu_mib, uint64_t most, uint64_t& room);
 /// Gets the most bytes one conversation of `tokens` tokens in `layout` takes in pages of `page_bytes`: its regions'
 /// bytes and each region's last block, which it may fill only in part.
@@ -145,8 +146,10 @@ uint64_t get_conversation_bytes(const strata::core::StateLayout& layout, int64_t
 /// whole pages and, with virtual memory, whole units of its granularity.
 uint64_t get_chunk_bytes(uint64_t pool_bytes, uint64_t page_bytes);
 /// Says on stderr after `program` what `card`'s open pool took: of `room` it could take, its chunks of `chunk_bytes`
-/// (in one virtual range or not), its pages and the conversation tokens kept for the conversations.
-void say_gpu_pool(const std::string& program, const PagedCard& card, uint64_t room, uint64_t chunk_bytes);
+/// (in one virtual range or not), its pages and the conversation tokens kept for the conversations; and that
+/// `gpu_mib` (--gpu-mib, -1 when not given) asked for more than `room`, when it did.
+void say_gpu_pool(const std::string& program, const PagedCard& card, uint64_t room, uint64_t chunk_bytes,
+                  int64_t gpu_mib);
 /// Gets the bytes the RAM's pool and its staging ring take: --ram-mib (`s`), by default get_ram_room(`headroom`) but
 /// no more than `most`.
 uint64_t get_ram_pool_bytes(const PagedSettings& s, uint64_t headroom, uint64_t most);
@@ -158,9 +161,10 @@ strata::core::PagePoolConfig get_ram_pool_config(const PagedCard& card);
 /// (ExpertPages::stop_wanting_if), so that RAM holds what the GPUs lack.
 std::vector<strata::core::ExpertKey> get_ram_ranking(const std::vector<strata::core::ExpertKey>& profile,
                                                      const std::vector<uint64_t>& blob_bytes, int64_t n_expert);
-/// Opens the RAM's page pool `ram` over `files` (the experts on the SSD) and gets whether an expert a GPU's pool evicts
-/// is copied back to it (`copy_back`: --copy-back; auto by the speeds of copying from `gpu_bytes`, the start of
-/// `card`'s pool's first chunk, and of reading the SSD, measured here).  The pool takes --ram-mib, by default
+/// Opens the RAM's page pool `ram` over `files` (the experts on the SSD) and gets how many times faster copying an
+/// expert a GPU's pool evicts back to it is than reading it from the SSD (`copy_back_gain`, get_copy_back_gain: by the
+/// speeds of copying from `gpu_bytes`, the start of `card`'s pool's first chunk, and of reading the SSD, measured
+/// here; --copy-back on makes it huge, off 0).  The pool takes --ram-mib, by default
 /// get_ram_room(`headroom`) but no more than every expert and its staging ring of `ring` buffers take; its
 /// conversations are `layout`'s, its pages `card`'s (get_ram_pool_config), its chunks at least the `prompt_bytes`
 /// the model's prompt paths borrow from it at most (PagedModel::get_prompt_buffers).  It opens
@@ -170,17 +174,17 @@ bool open_ram_pool(const std::string& program, const PagedSettings& s, strata::c
                    uint64_t headroom, int ring, const strata::core::StateLayout& layout, const PagedCard& card,
                    const std::vector<uint64_t>& blob_bytes, int64_t n_expert,
                    const std::vector<strata::core::ExpertKey>& profile, const uint8_t* gpu_bytes,
-                   uint64_t prompt_bytes, strata::core::RamExperts& ram, bool& copy_back, std::string& err);
+                   uint64_t prompt_bytes, strata::core::RamExperts& ram, double& copy_back_gain, std::string& err);
 
 /// Gets why the engine cannot decode with `s` on a model whose steps run at most `max_rows` rows (empty: it can).
 std::string get_step_settings_problem(const strata::spec::StepSettings& s, int max_rows);
 /// Gets the memory a pool on device `dev` may take besides what it holds: what the GPU has free less `keep`.  On
-/// Windows, for a GPU whose memory is the system RAM, what is free is what is free of the share the BIOS gives it
-/// (get_share_room, `mapped` the RAM's page-locked pool), not the runtime's free memory: that is the share and what
-/// the GPU may borrow beyond it, and HIP takes page-locked host memory off it twice (on the Strix Halo, 8 GiB of
-/// hipHostMalloc took 16 GiB off it).  Its memory counts in Windows' commit charge, so no more than get_commit_room
-/// either.  Cards on one GPU each see what is free of it.
-uint64_t get_gpu_room(int dev, uint64_t keep, uint64_t mapped);
+/// Windows, for a GPU whose memory is the system RAM, what is free is what the share the BIOS gives it still takes
+/// of a pool's chunks (read_share_use, below the top the first call measures), not the runtime's free memory: that
+/// is the share and what the GPU may borrow beyond it, more slowly, and HIP takes page-locked host memory off it
+/// twice (on the Strix Halo, 8 GiB of hipHostMalloc took 16 GiB off it).  Its memory counts in Windows' commit
+/// charge, so no more than get_commit_room either.  Cards on one GPU each see what is free of it.
+uint64_t get_gpu_room(int dev, uint64_t keep);
 /// Gets the RAM a pool may take by default besides what the pools hold: what is available less `headroom`, and no more
 /// than get_commit_room.
 uint64_t get_ram_room(uint64_t headroom);

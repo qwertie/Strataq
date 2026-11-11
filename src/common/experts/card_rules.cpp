@@ -2,6 +2,7 @@
 #include "strata/common/experts/card_rules.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace strata::core {
 
@@ -20,7 +21,11 @@ int get_refill_batch(const LinkSpeed& link, uint64_t bytes, double budget_ms, in
     return std::clamp((int) (budget_ms / get_copy_ms(bytes, link.to_gbps)), 1, most);
 }
 
-bool is_copy_back_worth(double back_gbps, double ssd_gbps) { return back_gbps >= kCopyBackFactor * ssd_gbps; }
+bool is_copy_back_worth(double gain, bool lent) { return gain >= (lent ? kLendCopyBackFactor : kCopyBackFactor); }
+
+double get_copy_back_gain(double back_gbps, double ssd_gbps) {
+    return back_gbps <= 0 ? 0.0 : ssd_gbps > 0 ? back_gbps / ssd_gbps : HUGE_VAL;
+}
 
 std::string get_hop_refusal(const std::vector<int>& devices) {
     for (size_t i = 0; i < devices.size(); ++i)

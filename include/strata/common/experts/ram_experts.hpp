@@ -47,10 +47,12 @@ public:
     int refill(int max, uint64_t& wait_ms, std::string& err);
     /// Takes or gives back chunks so that the pool and the staging ring hold `bytes` (ExpertPages::resize).
     PoolResize resize(uint64_t bytes) { return pages_.resize(bytes > ring_bytes() ? bytes - ring_bytes() : 0); }
-    /// Copies expert `key` in from `bytes` (any memory: a GPU's pages it is leaving) when the pool does not hold it
-    /// and has room for it among colder experts of its size; tells whether it did.  An expert of a layer past the
-    /// pool's (DeepSeek's drafter, whose experts only the GPU's pool holds) is never copied.
-    bool keep_copy(ExpertKey key, const uint8_t* bytes);
+    /// Copies expert `key` in from `bytes` (any memory: a GPU's pages it is leaving) when the pool does not hold it:
+    /// into free pages, else into those of the expert of its size used least, when that one's count in `usage` (the
+    /// adaptive tier's decayed routing counts, per layer * n_expert + expert; none counts 0) is below `key`'s.  Tells
+    /// whether it did.  An expert of a layer past the pool's (DeepSeek's drafter, whose experts only the GPU's pool
+    /// holds) is never copied.
+    bool keep_copy(ExpertKey key, const uint8_t* bytes, const std::vector<float>& usage);
     /// Lends a run at the top of the pool for a prompt path's host buffers (ExpertPages::lend); a moved expert is read
     /// from its new pages.  Gets the run's address, or null (`lend.refusal` says why).
     uint8_t* lend(uint64_t bytes, PoolLend& lend) {
@@ -71,10 +73,6 @@ public:
     bool is_page_locked() const { return page_locked_; }
     /// Gets the bytes of the staging ring (outside the pool).
     uint64_t ring_bytes() const { return ring_slots_ * slot_bytes_; }
-    /// Gets the RAM the GPU maps: the pool and the staging ring when they are page-locked, else 0.
-    uint64_t get_mapped_bytes() const {
-        return page_locked_ ? pages_.pool().report().total.bytes + ring_bytes() : 0;
-    }
     /// Times reading a staging ring's worth of experts (one of every layer in turn) from the SSD, in GB/s; each
     /// `round` reads other experts, so that no read finds the drive's own cache warm.
     double time_ssd_reads(int round);
@@ -117,6 +115,8 @@ private:
     /// While `refill` runs, the batch it reads from the SSD after admitting its experts (the `load` hook adds them);
     /// null otherwise, when the hook reads each expert at once.
     Reads* refill_reads_ = nullptr;
+    /// While keep_copy runs, the bytes the `load` hook copies in instead of reading the SSD; null otherwise.
+    const uint8_t* copy_from_ = nullptr;
     ExpertSource* files_ = nullptr;
     /// The memory is page-locked (the GPU reads it in place), else pageable: decided by the first allocation.
     bool page_locked_ = true;
@@ -133,8 +133,8 @@ private:
     /// one read from the SSD, as the layer's work may still read it (the previous layers' work is done).  0 before
     /// the first layer: only lower-ranked experts give way.
     uint64_t layer_t0_ = 0;
-    /// Held by blob, prefetch and refill, which change the pool and the ring; shared by copy_blobs, which only reads
-    /// them
+    /// Held by blob, prefetch, refill and keep_copy, which change the pool and the ring; shared by copy_blobs,
+    /// which only reads them
     mutable std::shared_mutex mu_;
 };
 

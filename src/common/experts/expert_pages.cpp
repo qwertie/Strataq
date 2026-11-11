@@ -190,22 +190,21 @@ int32_t ExpertPages::admit(int64_t layer, int64_t expert, uint64_t used_at) {
     return get_slot(page);
 }
 
-int ExpertPages::replace(int32_t layer, int32_t out, int32_t in, std::string& err) {
-    const ExpertKey gone{layer, out}, key{layer, in};
+int ExpertPages::replace(ExpertKey gone, ExpertKey key, std::string& err) {
     if (pool_->find_expert(key) != no_page)
         return 0;
     if (const int32_t free_slot = admit_free(key); free_slot != kNotResident) {
         if (!hooks_.load(key, free_slot, err)) {
             pool_->remove_expert(key);
             if (cache_ != nullptr)
-                cache_->evict(layer, in);
+                cache_->evict(key.layer, key.expert);
             return -1;
         }
         hooks_.moved(key, free_slot);
         note_use(key);
         return 1;
     }
-    if (out < 0)
+    if (gone.layer < 0)
         return 0;
     const PageId first = pool_->replace_expert(gone, key);
     if (first == no_page)
@@ -223,11 +222,11 @@ int ExpertPages::replace(int32_t layer, int32_t out, int32_t in, std::string& er
     if (!hooks_.load(key, slot, err)) {
         pool_->remove_expert(key);
         if (cache_ != nullptr)
-            cache_->evict(layer, out);
+            cache_->evict(gone.layer, gone.expert);
         return -1;
     }
     if (cache_ != nullptr)
-        cache_->replace(layer, out, in);
+        cache_->replace(key.layer, gone.expert, key.expert);
     hooks_.moved(key, slot);
     return 1;
 }

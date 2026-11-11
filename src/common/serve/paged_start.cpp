@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -196,7 +197,7 @@ strata::core::ChunkMemory get_gpu_chunk_memory(int dev, uint64_t chunk_bytes, bo
 }
 
 uint64_t get_gpu_pool_bytes(int dev, uint64_t keep, int64_t gpu_mib, uint64_t most, uint64_t& room) {
-    room = get_gpu_room(dev, keep, 0);
+    room = get_gpu_room(dev, keep);
     return gpu_mib >= 0 ? std::min((uint64_t) gpu_mib << 20, room) : std::min(room, most);
 }
 
@@ -213,17 +214,22 @@ uint64_t get_chunk_bytes(uint64_t pool_bytes, uint64_t page_bytes) {
     return std::max<uint64_t>(std::min(kChunkBytes, pool_bytes) / unit, 1) * unit;
 }
 
-void say_gpu_pool(const std::string& program, const PagedCard& card, uint64_t room, uint64_t chunk_bytes) {
+void say_gpu_pool(const std::string& program, const PagedCard& card, uint64_t room, uint64_t chunk_bytes,
+                  int64_t gpu_mib) {
     const strata::core::PagePool& pool = card.experts.pool();
+    char capped[128] = "";
+    if (gpu_mib >= 0 && ((uint64_t) gpu_mib << 20) > room)
+        std::snprintf(capped, sizeof capped, "; --gpu-mib %lld asked for more than the GPU has room for",
+                      (long long) gpu_mib);
     std::fprintf(stderr, "%s: the page pool of %s (layers %lld-%lld): %.2f GiB (of %.2f GiB it could take) in chunks "
                          "of %.0f MiB%s, pages of %llu bytes, for the experts and the conversations, %lld tokens of it "
-                         "kept for the conversations\n",
+                         "kept for the conversations%s\n",
                  program.c_str(), card.id.c_str(), (long long) card.lb, (long long) card.le - 1,
                  (double) pool.report().total.bytes / 1073741824.0, (double) room / 1073741824.0,
                  (double) chunk_bytes / 1048576.0,
                  card.experts.is_contiguous() ? " mapped back to back in one virtual range" : "",
                  (unsigned long long) pool.page_bytes(),
-                 (long long) pool.tokens_min());
+                 (long long) pool.tokens_min(), capped);
 }
 
 uint64_t get_ram_pool_bytes(const PagedSettings& s, uint64_t headroom, uint64_t most) {
@@ -255,7 +261,7 @@ bool open_ram_pool(const std::string& program, const PagedSettings& s, strata::c
                    uint64_t headroom, int ring, const strata::core::StateLayout& layout, const PagedCard& card,
                    const std::vector<uint64_t>& blob_bytes, int64_t n_expert,
                    const std::vector<strata::core::ExpertKey>& profile, const uint8_t* gpu_bytes,
-                   uint64_t prompt_bytes, strata::core::RamExperts& ram, bool& copy_back, std::string& err) {
+                   uint64_t prompt_bytes, strata::core::RamExperts& ram, double& copy_back_gain, std::string& err) {
     uint64_t every = 0;
     for (const uint64_t b : blob_bytes)
         every += b * (uint64_t) n_expert;
@@ -278,13 +284,19 @@ bool open_ram_pool(const std::string& program, const PagedSettings& s, strata::c
         ssd = std::max(ssd, ram.time_ssd_reads(round));
         back = std::max(back, ram.time_copy_in(gpu_bytes, timed));
     }
-    copy_back = s.copy_back == "on" || (s.copy_back == "auto" && strata::core::is_copy_back_worth(back, ssd));
+    copy_back_gain = s.copy_back == "on"    ? HUGE_VAL
+                     : s.copy_back == "off" ? 0.0
+                                            : strata::core::get_copy_back_gain(back, ssd);
     std::fprintf(stderr, "%s: the RAM's page pool: %.2f GiB%s, opened in %.1f s; it takes experts while the engine "
                          "serves, and an expert it does not hold is read from the SSD without the file cache.  An "
                          "expert the GPU evicts is %s (copying it back: %.1f GB/s, reading the SSD: %.1f GB/s; "
                          "--copy-back %s)\n",
                  program.c_str(), (double) (ram.pages().pool().report().total.bytes) / 1073741824.0,
-                 ram.is_page_locked() ? ", page-locked" : "", open_s, copy_back ? "copied back to RAM" : "dropped",
+                 ram.is_page_locked() ? ", page-locked" : "", open_s,
+                 strata::core::is_copy_back_worth(copy_back_gain, false) ? "copied back to RAM"
+                 : strata::core::is_copy_back_worth(copy_back_gain, true)
+                     ? "copied back to RAM when a prompt's buffers evict it, else dropped"
+                     : "dropped",
                  back, ssd, s.copy_back.c_str());
     return true;
 }

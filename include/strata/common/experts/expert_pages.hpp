@@ -107,12 +107,13 @@ public:
     /// Gets its first page, or kNotResident when it may not come in or there is no room.  Its bytes are the caller's
     /// to copy in.
     int32_t admit(int64_t layer, int64_t expert, uint64_t used_at = 0);
-    /// Brings expert `in` of `layer` into free pages while the pool has some for it; else into the pages of expert
-    /// `out` of the same layer (none when `out` is negative), which leaves as it would for a conversation (the
-    /// `leaving` and `moved` hooks) but is not put back by `refill`.  Copies `in`'s bytes in.  Gets 1 when `in` came
-    /// in; 0 when nothing changed: the pool already holds `in`, or has no free pages for it and does not hold `out`;
-    /// -1 (and `err`) when the copy failed: then `in` is not in the pool (nor `out`, when it gave way).
-    int replace(int32_t layer, int32_t out, int32_t in, std::string& err);
+    /// Brings expert `key` into free pages while the pool has some for it; else into the pages of expert `gone` (none
+    /// when its layer is negative), which must take as many pages (in a pool with a cache, be of `key`'s layer) and
+    /// leaves as it would for a conversation (the `leaving` and `moved` hooks) but is not put back by `refill`.
+    /// Copies `key`'s bytes in.  Gets 1 when `key` came in; 0 when nothing changed: the pool already holds `key`, or
+    /// has no free pages for it and does not hold `gone`; -1 (and `err`) when the copy failed: then `key` is not in
+    /// the pool (nor `gone`, when it gave way).
+    int replace(ExpertKey gone, ExpertKey key, std::string& err);
     /// Counts a use of an expert the pool holds, so that a conversation evicts it after the experts used less
     /// recently (nothing when the pool does not hold it).
     void note_use(ExpertKey key) { (void) pool_->use_expert(key); }

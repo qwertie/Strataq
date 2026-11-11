@@ -107,6 +107,31 @@ int main() {
               "a refill evicts no expert: it waits for free pages");
     }
     {
+        Ssd full_ssd;
+        RamExperts full;
+        check(full.open(full_ssd, 12 * kPage + 2 * 2 * kPage, 2, layout, config, kBlobs, kExperts, ranking, err),
+              err.c_str());
+        uint64_t ms = 0;
+        check(full.refill(16, ms, err) == 9 && full.pages().pool().report().free.pages == 0, "the full pool fills");
+        std::vector<float> usage(3 * kExperts, 1.0f);   // the adaptive tier's routing counts
+        usage[2 * kExperts + 0] = 0.2f;                  // (2, 0): the least used of the one-page experts held
+        usage[0 * kExperts + 5] = 0.1f;
+        std::vector<uint8_t> gpu(kPage);
+        for (uint64_t i = 0; i < kPage; ++i)
+            gpu[i] = get_byte(0, 5, i);
+        check(!full.keep_copy({0, 5}, gpu.data(), usage) && !full.holds(0, 5) && full.holds(2, 0),
+              "a full pool keeps no copy of an expert used less than every one of its size it holds");
+        usage[0 * kExperts + 5] = 0.2f;
+        check(!full.keep_copy({0, 5}, gpu.data(), usage) && full.holds(2, 0),
+              "equal routing counts do not displace a RAM expert");
+        check(!full.keep_copy({0, 5}, gpu.data(), {}) && full.holds(2, 0),
+              "missing routing counts count as zero and do not displace an expert");
+        usage[0 * kExperts + 5] = 0.3f;
+        check(full.keep_copy({0, 5}, gpu.data(), usage) && full.holds(0, 5) && !full.holds(2, 0) &&
+                  is_expert(full.blob(0, 5), 0, 5) && full_ssd.reads == 9,
+              "a copy takes the pages of the least used expert of its size when that is used less");
+    }
+    {
         Ssd later_ssd;
         RamExperts later;
         check(later.open(later_ssd, 12 * kPage + 4 * kPage, 2, layout, config, kBlobs,
@@ -120,7 +145,7 @@ int main() {
         uint64_t ms = 0;
         check(later.refill(1, ms, err) == 1 && later.holds(1, 0) && !later.holds(0, 0),
               "the RAM's fill skips an expert a GPU holds");
-        check(!later.holds(1, 5) && later.pages().replace(1, 0, 5, err) == 1 && later.holds(1, 0) &&
+        check(!later.holds(1, 5) && later.pages().replace({1, 0}, {1, 5}, err) == 1 && later.holds(1, 0) &&
                   later.holds(1, 5) && is_expert(later.blob(1, 5), 1, 5),
               "while the pool has free pages, an expert brought in pushes none out");
         check(is_expert(later.blob(2, 7), 2, 7), "a conversation can read before refill completes");
@@ -150,8 +175,11 @@ int main() {
     for (uint64_t i = 0; i < kPage; ++i)
         gpu[i] = get_byte(0, 7, i);
     pool.remove_conversation(9);
-    ram.keep_copy({0, 7}, gpu.data());   // a GPU's evicted expert, colder than those the conversation took
-    check(ram.holds(0, 7) && is_expert(ram.blob(0, 7), 0, 7), "an expert a GPU evicts is copied in when there is room");
+    std::vector<float> usage(3 * kExperts, 0.0f);   // the adaptive tier's routing counts
+    usage[7] = 1.0f;
+    ram.keep_copy({0, 7}, gpu.data(), usage);   // a GPU's evicted expert, used more than any the pool holds
+    check(ram.holds(0, 7) && is_expert(ram.blob(0, 7), 0, 7),
+          "an expert a GPU evicts is copied in when there is room or a less used expert of its size");
     uint64_t wait_ms = 0;
     check(ram.pages().is_refill_wanted() && ram.refill(16, wait_ms, err) >= 1, "the evicted experts come back");
     std::this_thread::sleep_for(std::chrono::milliseconds(2));   // the pool's clock counts milliseconds
@@ -164,7 +192,7 @@ int main() {
     while (ram.holds(2, in))
         ++in;
     const int before = ssd.reads;
-    check(ram.pages().replace(2, gone, in, err) == 1 && ram.holds(2, in) && !ram.holds(2, gone) &&
+    check(ram.pages().replace({2, gone}, {2, in}, err) == 1 && ram.holds(2, in) && !ram.holds(2, gone) &&
               ssd.reads == before + 1 && is_expert(ram.blob(2, in), 2, in),
           "an expert replaced in place leaves, and the other takes its pages with its own bytes");
     const auto check_bytes = [&] {

@@ -1166,8 +1166,8 @@ capacity as `slots`; the server can admit that many requests, and the live setti
 Two more defaults were checked and kept: the
 conversation token minimum (8,192 tokens, about 0.24 GiB of the pool) made no measurable difference to a new 4,000-token
 prompt with three idle conversations in a 16 GiB GPU pool (prompt 8.5 s against 8.7 s without it and 8.7 s with 32,768,
-four alternating runs, medians); and copying an evicted expert back to RAM (`--copy-back auto`, chosen when the copy
-measures at least twice as fast as an SSD read: 35-41 GB/s against 2.4-2.5 GB/s here) took at most 40 ms in the three
+four alternating runs, medians); and copying an evicted expert back to RAM (`--copy-back auto`, which copies here: the
+copy measured 35-41 GB/s against 2.4-2.5 GB/s for an SSD read) took at most 40 ms in the three
 rounds of any configuration above, as the RAM pool seldom had room for a colder expert. The NVIDIA test PC's numbers are
 to come: `tools/nvidia_session/README.md` says how to repeat the measurement there.
 

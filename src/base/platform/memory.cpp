@@ -5,6 +5,8 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <winternl.h>   // (NTSTATUS, which d3dkmthk.h uses and WIN32_LEAN_AND_MEAN leaves out)
+#include <d3dkmthk.h>
 #include <dxgi1_4.h>
 #include <cstring>
 #include <functional>
@@ -113,7 +115,7 @@ void unlock_resident(void* p, uint64_t bytes) {
 namespace {
 /// Queries the DXGI adapter whose LUID is the 8 bytes at `luid`: `query` gets its description and its memory
 /// information for `segment` and returns whether the answer is usable (setting `why` when not).  For
-/// gpu_shared_memory_budget and gpu_dedicated_memory.
+/// gpu_shared_memory_budget.
 bool query_adapter(const void* luid, DXGI_MEMORY_SEGMENT_GROUP segment, std::string& why,
                    const std::function<bool(const DXGI_ADAPTER_DESC1&, const DXGI_QUERY_VIDEO_MEMORY_INFO&)>& query) {
     // dxgi.dll is loaded when asked, not linked: a start that never needs this keeps the imports it had
@@ -166,15 +168,49 @@ bool gpu_shared_memory_budget(const void* luid, uint64_t& budget, uint64_t& usag
                          });
 }
 
-bool gpu_dedicated_memory(const void* luid, uint64_t& dedicated, uint64_t& usage, std::string& why) {
-    dedicated = usage = 0;
-    return query_adapter(luid, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, why,
-                         [&](const DXGI_ADAPTER_DESC1& d, const DXGI_QUERY_VIDEO_MEMORY_INFO& info) {
-                             dedicated = d.DedicatedVideoMemory;
-                             usage = info.CurrentUsage;
-                             if (dedicated == 0) why = "the adapter reports no dedicated memory";
-                             return dedicated > 0;
-                         });
+bool gpu_local_memory(const void* luid, GpuLocalMemory& m, std::string& why) {
+    m = {};
+    // gdi32.dll exports the kernel's call; it is looked up, not linked, like dxgi.dll above
+    static const auto query_statistics = (PFND3DKMT_QUERYSTATISTICS) (void*) GetProcAddress(
+        LoadLibraryA("gdi32.dll"), "D3DKMTQueryStatistics");
+    if (query_statistics == nullptr) {
+        why = "gdi32.dll has no D3DKMTQueryStatistics";
+        return false;
+    }
+    D3DKMT_QUERYSTATISTICS q{};
+    q.Type = D3DKMT_QUERYSTATISTICS_ADAPTER;
+    std::memcpy(&q.AdapterLuid, luid, sizeof q.AdapterLuid);
+    if (query_statistics(&q) < 0) {
+        why = "D3DKMTQueryStatistics found no adapter with the CUDA device's LUID";
+        return false;
+    }
+    for (ULONG segment = 0, n = q.QueryResult.AdapterInformation.NbSegments; segment < n; ++segment) {
+        D3DKMT_QUERYSTATISTICS s{};
+        s.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+        s.AdapterLuid = q.AdapterLuid;
+        s.QuerySegment.SegmentId = segment;
+        D3DKMT_QUERYSTATISTICS p{};
+        p.Type = D3DKMT_QUERYSTATISTICS_PROCESS_SEGMENT;
+        p.AdapterLuid = q.AdapterLuid;
+        p.hProcess = GetCurrentProcess();
+        p.QueryProcessSegment.SegmentId = segment;
+        if (query_statistics(&s) < 0 || query_statistics(&p) < 0) {
+            m = {};
+            why = "D3DKMTQueryStatistics could not read every memory segment";
+            return false;
+        }
+        const uint64_t own = p.QueryResult.ProcessSegmentInformation.BytesCommitted;
+        if (s.QueryResult.SegmentInformation.Aperture) {
+            m.mine_elsewhere += own;
+            continue;
+        }
+        m.size += s.QueryResult.SegmentInformation.CommitLimit;
+        m.all += s.QueryResult.SegmentInformation.BytesCommitted;
+        m.mine += own;
+    }
+    if (m.size == 0)
+        why = "the adapter reports no memory segment of its own";
+    return m.size > 0;
 }
 
 uint64_t total_physical_memory() {
@@ -219,9 +255,9 @@ bool gpu_shared_memory_budget(const void*, uint64_t& budget, uint64_t& usage, st
     return false;
 }
 
-bool gpu_dedicated_memory(const void*, uint64_t& dedicated, uint64_t& usage, std::string& why) {
-    dedicated = usage = 0;
-    why = "DXGI is Windows-only";
+bool gpu_local_memory(const void*, GpuLocalMemory& m, std::string& why) {
+    m = {};
+    why = "D3DKMT is Windows-only";
     return false;
 }
 

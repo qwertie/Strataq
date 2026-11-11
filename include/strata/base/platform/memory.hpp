@@ -35,10 +35,18 @@ void unlock_resident(void* p, uint64_t bytes);
 /// 8 bytes at `luid` (cudaDeviceProp::luid).  Page-locked host memory the GPU maps is charged there.  False (and
 /// `why` says so) when the query is not possible - always elsewhere than Windows.
 bool gpu_shared_memory_budget(const void* luid, uint64_t& budget, uint64_t& usage, std::string& why);
-/// Windows: the size of the GPU's dedicated memory (DXGI_ADAPTER_DESC1::DedicatedVideoMemory; on a GPU whose memory
-/// is the system RAM, the share the BIOS gives it) and this process's use of the GPU's local memory, for the adapter
-/// whose LUID is at `luid`.  False (and `why` says so) when the query is not possible - always elsewhere than Windows.
-bool gpu_dedicated_memory(const void* luid, uint64_t& dedicated, uint64_t& usage, std::string& why);
+/// A GPU's own memory: its memory segments, not its apertures onto system RAM (on a GPU whose memory is the system
+/// RAM, the share the BIOS gives it), as gpu_local_memory reads it.
+struct GpuLocalMemory {
+    uint64_t size = 0;
+    uint64_t all = 0;              ///< committed in it by every process
+    uint64_t mine = 0;             ///< committed in it by this process
+    /// What this process holds in the GPU's apertures instead: system RAM, page-locked host memory the GPU maps too
+    uint64_t mine_elsewhere = 0;
+};
+/// Windows: reads the own memory (`m`) of the GPU whose LUID is at `luid` from D3DKMTQueryStatistics.  False (and
+/// `why` says so) when the query is not possible - always elsewhere than Windows.
+bool gpu_local_memory(const void* luid, GpuLocalMemory& m, std::string& why);
 
 /// The machine's physical RAM in bytes (0 when unknown).
 uint64_t total_physical_memory();

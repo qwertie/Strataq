@@ -24,12 +24,18 @@ int main() {
     CHECK(get_refill_batch(thunderbolt, expert, 5.0, 16) == 6);
     CHECK(get_refill_batch(thunderbolt, expert, 0.1, 16) == 1);
     CHECK(get_refill_batch(LinkSpeed{}, expert, 5.0, 16) == 16);
-    // copying an evicted expert back: worth it from an x16 card, not from an x4 one or a Thunderbolt enclosure, whose
-    // copies are about as fast as reading a fast NVMe drive again
-    CHECK(is_copy_back_worth(x16.from_gbps, nvme_gbps));
-    CHECK(!is_copy_back_worth(x4.from_gbps, nvme_gbps));
-    CHECK(!is_copy_back_worth(thunderbolt.from_gbps, nvme_gbps));
-    CHECK(is_copy_back_worth(thunderbolt.from_gbps, 0.5));   // a slow SATA drive
+    // copying an evicted expert back: worth it from an x16 card; from an x4 one, as fast as reading a fast NVMe drive
+    // again, only when a prompt's buffers evicted it; never from a Thunderbolt enclosure, which is slower
+    const double x16_gain = get_copy_back_gain(x16.from_gbps, nvme_gbps),
+                 x4_gain = get_copy_back_gain(x4.from_gbps, nvme_gbps),
+                 thunderbolt_gain = get_copy_back_gain(thunderbolt.from_gbps, nvme_gbps);
+    CHECK(is_copy_back_worth(x16_gain, false) && is_copy_back_worth(x16_gain, true));
+    CHECK(!is_copy_back_worth(x4_gain, false) && is_copy_back_worth(x4_gain, true));
+    CHECK(!is_copy_back_worth(thunderbolt_gain, false) && !is_copy_back_worth(thunderbolt_gain, true));
+    CHECK(is_copy_back_worth(get_copy_back_gain(thunderbolt.from_gbps, 0.5), false));   // a slow SATA drive
+    CHECK(is_copy_back_worth(get_copy_back_gain(1.0, 0), false) && get_copy_back_gain(0, 3.0) == 0);
+    CHECK(!is_copy_back_worth(1.199, false) && is_copy_back_worth(1.2, false));
+    CHECK(!is_copy_back_worth(0.999, true) && is_copy_back_worth(1.0, true));
     // one hop of 8 rows (16 KiB in, 16 KiB out each) against the CPU at 0.1 ms per expert from RAM
     const uint64_t row = 16384;
     const double hop_x4 = get_hop_ms(x4, 8, row, row), hop_tb = get_hop_ms(thunderbolt, 8, row, row);

@@ -327,7 +327,7 @@ PagedCard& add_card(Model& m, Conversation& conv, PagedCards& cards, ModelCards&
 bool open_pages(Model& m, PagedCard& card, ModelCard& mc, int64_t tokens_min, int64_t gpu_mib, int64_t max_experts,
                 std::string& err);
 bool open_ram(Model& m, const PagedCards& cards, const ModelCards& model_cards, const PagedSettings& s,
-              strata::core::RamExperts& ram, bool& copy_back, std::string& err);
+              strata::core::RamExperts& ram, double& copy_back_gain, std::string& err);
 bool init_card_paths(Model& m, Conversation& conv, PagedCards& cards, ModelCards& model_cards, SplitDrive& split,
                      int handoff_rows, std::string& err);
 std::string get_unsupported_reason(const Model& m);
@@ -456,8 +456,8 @@ int run_paged_engine(int argc, char** argv) {
         m.drive.d.usage.assign((size_t) (m.g.n_layers * m.g.n_expert), 0.0f);
     std::string err;
     strata::core::RamExperts ram;
-    bool copy_back = false;
-    if (!open_ram(m, cards, model_cards, settings, ram, copy_back, err)) {
+    double copy_back_gain = 0;
+    if (!open_ram(m, cards, model_cards, settings, ram, copy_back_gain, err)) {
         std::fprintf(stderr, "strata-q38: %s\n", err.c_str());
         return 1;
     }
@@ -481,7 +481,7 @@ int run_paged_engine(int argc, char** argv) {
         m.unload_drafter();
     PagedQwen model(m, conv, cards, model_cards, split, ram, drafting ? &drafter : nullptr, slots,
                     window_rows.total);
-    return strata::serve::serve_paged_model(model, cards, ram, copy_back, settings);
+    return strata::serve::serve_paged_model(model, cards, ram, copy_back_gain, settings);
 }
 
 namespace {
@@ -1521,16 +1521,16 @@ bool open_pages(Model& m, PagedCard& card, ModelCard& mc, int64_t tokens_min, in
         !card.experts.open(*mc.cache, std::move(memory), pool_b, layout, config, blobs, m.g.n_expert, max_experts,
                            ranking, err))
         return false;
-    strata::serve::say_gpu_pool(kProgram, card, room, chunk);
+    strata::serve::say_gpu_pool(kProgram, card, room, chunk, gpu_mib);
     return true;
 }
 
-/// Opens the RAM's page pool `ram` beside the cards' (open_ram_pool) and gets whether an expert a GPU's pool evicts is
-/// copied back to it (`copy_back`); it takes the profile's experts once the engine serves.  Its conversation layout
-/// has the whole model's regions, so that a paused conversation is one conversation in it wherever the layer cut is
-/// (PagedQwen::get_ram_span).
+/// Opens the RAM's page pool `ram` beside the cards' (open_ram_pool) and gets how many times faster copying an expert
+/// a GPU's pool evicts back to it is than an SSD read (`copy_back_gain`); it takes the profile's experts once the
+/// engine serves.  Its conversation layout has the whole model's regions, so that a paused conversation is one
+/// conversation in it wherever the layer cut is (PagedQwen::get_ram_span).
 bool open_ram(Model& m, const PagedCards& cards, const ModelCards& model_cards, const PagedSettings& s,
-              strata::core::RamExperts& ram, bool& copy_back, std::string& err) {
+              strata::core::RamExperts& ram, double& copy_back_gain, std::string& err) {
     std::vector<strata::core::ExpertKey> profile;
     for (const auto& [l, e] : m.profile_all.empty() ? m.profile : m.profile_all)
         profile.push_back({l, e});
@@ -1542,7 +1542,7 @@ bool open_ram(Model& m, const PagedCards& cards, const ModelCards& model_cards, 
     return get_card_layout(m, cards.back(), model_cards.back(), 0, m.g.n_layers, layout, err) &&
            strata::serve::open_ram_pool(kProgram, s, m.src, m.o.resident_headroom, ring, layout, cards[0],
                                         get_blob_bytes(m), m.g.n_expert, profile, m.xcache.device_slot(0), prompt,
-                                        ram, copy_back, err);
+                                        ram, copy_back_gain, err);
 }
 
 /// Gets why strata-q38 cannot run the loaded model `m` (empty: it can).

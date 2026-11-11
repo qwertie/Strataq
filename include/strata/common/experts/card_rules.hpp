@@ -15,8 +15,12 @@
 namespace strata::core {
 
 /// How many times faster than reading it from the SSD again copying an evicted expert back from a card must be for
-/// the copy to be made: when the two are close, dropping wins, as the expert may not be needed for a while.
-constexpr double kCopyBackFactor = 2.0;
+/// the copy to be made, when the decode-time adaptive tier (or anything but a prompt's buffers) evicts it: when the
+/// two cost about the same, dropping wins, as the expert may not be needed for a while.
+constexpr double kCopyBackFactor = 1.2;
+/// The same for an expert a prompt's buffers evict (PagePool::lend): the refill after the prompt wants it back soon,
+/// so a copy no slower than the SSD's read is worth making.
+constexpr double kLendCopyBackFactor = 1.0;
 
 /// Gets the milliseconds `bytes` take over a link that carries `gbps` (a huge time when it carries nothing).
 double get_copy_ms(uint64_t bytes, double gbps);
@@ -30,9 +34,13 @@ bool is_hop_cheaper(double hop_ms, int experts, double cpu_ms);
 /// least 1, at most `most`): a slow link's refill is paced by its bandwidth (a 2 MB expert takes about 0.6 ms over
 /// PCIe 3.0 x4).  `most` when the link was not measured.
 int get_refill_batch(const LinkSpeed& link, uint64_t bytes, double budget_ms, int most);
-/// Tells whether an expert a card evicts is copied back to RAM: when that measures at least kCopyBackFactor times as
-/// fast as reading it from the SSD (`back_gbps`: the card to RAM; `ssd_gbps`: an SSD read).
-bool is_copy_back_worth(double back_gbps, double ssd_gbps);
+/// Tells whether an expert a card evicts is copied back to RAM, when copying it back measures `gain` times as fast as
+/// reading it from the SSD (get_copy_back_gain): at least kLendCopyBackFactor times for an eviction a prompt's buffers
+/// made (`lent`), else kCopyBackFactor times.
+bool is_copy_back_worth(double gain, bool lent);
+/// Gets how many times faster copying an expert from a card to RAM (`back_gbps`) is than reading it from the SSD
+/// (`ssd_gbps`): huge when the SSD's speed is unknown (0), 0 when the copy's is.
+double get_copy_back_gain(double back_gbps, double ssd_gbps);
 
 /// Gets why a layer split whose cards run on `devices` (each card's GPU, in the cards' order) may not compute experts
 /// in hops between its cards (--remote-experts on), or an empty string when it may.  Two cards on one GPU may not: a

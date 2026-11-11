@@ -28,8 +28,9 @@ namespace strata::qwen38 {
 /// `--tokens-max N`, the tokens the conversations paused in RAM may hold (as many pages as one conversation of N
 /// takes; default --max-context); `--ssd-pause-mib N`, the SSD space paused conversations may take (default 8192);
 /// `--pause-dir DIR`, where their files go (default the temporary folder's strata-q38); `--copy-back auto|on|off`,
-/// whether an expert the GPU evicts is copied back to RAM (auto: when that measures at least twice as fast as
-/// reading the SSD); `--remote-experts auto|on|off`, whether a card's spare pages hold other cards' experts.
+/// whether an expert the GPU evicts is copied back to RAM (auto: when that measures at least 1.2 times as fast as
+/// reading the SSD, or as fast for an expert a prompt's buffers evict); `--remote-experts auto|on|off`, whether a
+/// card's spare pages hold other cards' experts.
 /// `--mmap-experts`, `--resident-experts` and `--resident-cpu-experts` are taken and do nothing: the RAM's pool
 /// replaces them.  Returns the exit status.
 int run_paged_engine(int argc, char** argv);
