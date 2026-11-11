@@ -47,8 +47,8 @@ struct Conv {
                 m.used = ++clock;
                 return;
             }
-        if ((int) mk.size() >= cap) mk.erase(mk.begin() + mark_victim(mk));
         mk.push_back({pos(), shared, ++clock});
+        if ((int) mk.size() > cap) mk.erase(mk.begin() + mark_victim(mk));
     }
     bool restore(int64_t limit) {
         const std::vector<int64_t> at = points();
@@ -175,6 +175,13 @@ int main() {
     assert(mark_victim({{10, false, 5}, {20, false, 3}, {30, false, 9}}) == 1);
     assert(mark_victim({{10, true, 1}, {20, false, 3}, {30, false, 2}}) == 2);
     assert(mark_victim({{10, true, 4}, {20, true, 3}}) == 1);
+    // ... with the new point last: an ordinary one is refused where every point held is a shared start
+    assert(mark_victim({{10, true, 1}, {20, false, 2}}) == 1);
+    assert(mark_victim({{10, true, 1}, {20, true, 2}}) == 0);
+    assert(mark_victim({{10, false, 1}, {20, false, 2}}) == 0);
+    assert(mark_victim({{10, true, 1}, {20, true, 2}, {30, false, 3}}) == 2);
+    assert(mark_victim({{10, true, 1}, {20, false, 2}, {30, false, 3}}) == 1);
+    assert(mark_victim({{10, true, 1}, {20, true, 2}, {30, true, 3}}) == 0);
 
     // get_restore_point_cap: Qwen3.8's points (its recurrent state) fit 3 in the budget; DeepSeek's keep their own cap
     assert(get_restore_point_cap(117683200, 16) == 3);
@@ -258,6 +265,16 @@ int main() {
         cv.prompt(cat(sys, run(7000, 50)));   // (differs right after the shared start)
         for (const MarkUse& m : cv.mk) assert(m.pos <= 3000);
         for (int64_t c : cv.ck) assert(c < 0 || c <= cv.pos());
+    }
+    {   // a cap of one: a continuation's ordinary point does not take the shared start's place
+        Conv cv;
+        cv.cap = 1;
+        const std::vector<int> p1 = cat(sys, run(5000, 600));
+        cv.prompt(p1, {}, 3000);
+        cv.answer(run(30000, 100));
+        const std::vector<int> p2 = cat(cat(p1, run(30000, 100)), run(40000, 600));
+        assert(cv.prompt(p2, {(int64_t) p2.size() - 300}, 3000) == (int64_t) p1.size() + 100);
+        assert(cv.mk.size() == 1 && cv.mk[0].pos == 3000 && cv.mk[0].shared);
     }
     {   // the tail point's cost (#668): kept until measured; left out where its run's wall time a token is more than
         // twice the long read's (most experts on the CPU lane, or streamed again through a split's stages); probed again

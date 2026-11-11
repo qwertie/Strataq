@@ -8,12 +8,14 @@
 // prompt and its tools).  The read stops at each to keep it, so a prompt that differs from the conversation after one
 // of them - its last message edited, a new question after the same document, a history rendered again - goes back
 // there instead of further.  From Project Maya's ds4_marks.hpp (upstream src/dsv41/ds4_marks.hpp); strata-dsv41's
-// serve loop and the paged engine (src/common/serve/paged_engine.cpp) plan with it.  Pure logic, no GPU
+// serve loop and the paged engine (src/common/serve/paged_engine.cpp) plan with it.  No GPU dependencies
 // (restore_points_test.cpp).
 #pragma once
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <utility>
 #include <vector>
 
@@ -104,7 +106,7 @@ inline std::vector<MarkAt> mark_plan(const std::vector<int64_t>& asked, int64_t 
 // split's stages: a run's fixed cost - the experts streamed again, the stages one after another - hid behind both, and
 // a 4-GPU split kept a point that cost 4-9x, #668.)  Until two reads have measured it the point is kept, and one tail
 // point in `probe` is kept while it is left out, to measure again (the cost moves with the experts the PC holds in
-// VRAM).  Pure logic (restore_points_test.cpp).
+// VRAM).  The serve helpers also report policy decisions (restore_points_test.cpp).
 struct TailCost {
     int n = 0;              // the reads measured
     double ratio = 0.0;     // their tail run's time a token over the rest of the read's, a running mean (the last two
@@ -137,6 +139,47 @@ struct TailCost {
         }
         return false;
     }
+
+    /// Decides whether a serve loop stops at the requested tail and reports suppression after `who` on stderr.
+    /// STRATA_DS4_RESTORE_TAIL_AUTO=0 keeps it always.
+    bool keep_tail(const char* who) {
+        if (!is_weighed())
+            return true;
+        const bool was = costly(), kept = keep();
+        if (was && !said_off) {
+            std::fprintf(stderr, "%s: the tail restore point is left out on this PC: its read stop cost %.1fx a long "
+                                 "read's time a token (more than reading its tokens again: the last tail run %zu "
+                                 "tokens in %.0f ms, the long read %.2f ms a token); one in 32 still keeps it, to "
+                                 "measure again (STRATA_DS4_RESTORE_TAIL_AUTO=0 keeps it always)\n",
+                         who, ratio, last_tail_tokens, last_tail_ms, last_main_ms_token);
+            said_off = true;
+        }
+        return kept;
+    }
+    /// Records a completed read's runs before and after its tail, reporting when the point becomes cheap enough.
+    void measure_tail(const char* who, double ms_main, size_t main_tokens, double ms_tail, size_t tail_tokens) {
+        if (!is_weighed())
+            return;
+        const bool was = costly(), known = measured();
+        if (add(ms_main, main_tokens, ms_tail, tail_tokens) &&
+            ((was && !costly()) || (!known && measured() && !costly())))
+            std::fprintf(stderr, "%s: the tail restore point is kept%s: its read stop costs %.1fx a long read's time a "
+                                 "token (2x or less: no more than reading its tokens again; the last tail run %zu "
+                                 "tokens in %.0f ms, the long read %.2f ms a token)\n",
+                         who, was ? " again" : "", ratio, last_tail_tokens, last_tail_ms, last_main_ms_token);
+    }
+
+private:
+    bool said_off = false;   // (keep_tail) the point's leaving out was said
+    // STRATA_DS4_RESTORE_TAIL_AUTO (1): the tail point is left out where its cost is measured higher than reading its
+    // tokens again; 0: kept on every read that reaches it
+    static bool is_weighed() {
+        static const bool on = [] {
+            const char* v = std::getenv("STRATA_DS4_RESTORE_TAIL_AUTO");
+            return v == nullptr || std::atoi(v) != 0;
+        }();
+        return on;
+    }
 };
 
 // a kept restore point as the choice of the one to give up sees it
@@ -147,7 +190,9 @@ struct MarkUse {
 };
 
 // the restore point that gives way to a new one when a conversation holds its cap: the least recently used of those
-// that are not a shared start, else the least recently used; -1: none held
+// that are not a shared start, else the least recently used; -1: none held.  With the new one in `v` too (last, the
+// most recently used), an ordinary one is refused (its index picked) where every point held is a shared start, so the
+// shared start is kept longest even under a cap of one
 inline int mark_victim(const std::vector<MarkUse>& v) {
     for (int pass = 0; pass < 2; ++pass) {
         int b = -1;

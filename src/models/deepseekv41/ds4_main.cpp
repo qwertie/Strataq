@@ -300,12 +300,6 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
     auto dump_rows = [&]() {
         if (dump_f != nullptr && m.logits(dump_lg)) std::fwrite(dump_lg.data(), 4, dump_lg.size(), dump_f);
     };
-    // STRATA_DS4_RESTORE_TAIL_AUTO (1): the tail point is left out where its cost is measured higher than reading its
-    // tokens again; 0: kept on every read that reaches it
-    static const bool tail_auto = [] {
-        const char* v = std::getenv("STRATA_DS4_RESTORE_TAIL_AUTO");
-        return v == nullptr || std::atoi(v) != 0;
-    }();
     strata::core::TailCost tail_cost;
     SpanCache spans;
     const int img_tok = m.image_token();
@@ -932,22 +926,9 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
         if (m.marks_cap() > 0) {
             std::vector<int64_t> asked = r.restore.marks;
             const int64_t tail = r.restore.tail;
-            if (tail > (int64_t) from && tail < (int64_t) total - 1) {
-                const bool was = tail_cost.costly();
-                if (!tail_auto || tail_cost.keep()) {
-                    asked.push_back(tail);
-                    tail_at = tail;
-                }
-                static bool said_off = false;
-                if (tail_auto && was && !said_off) {
-                    std::fprintf(stderr, "ds4 serve: the tail restore point is left out on this PC: its read stop cost "
-                                         "%.1fx a long read's time a token (more than reading its tokens again: the last "
-                                         "tail run %zu tokens in %.0f ms, the long read %.2f ms a token); one in 32 still "
-                                         "keeps it, to measure again (STRATA_DS4_RESTORE_TAIL_AUTO=0 keeps it always)\n",
-                                 tail_cost.ratio, tail_cost.last_tail_tokens, tail_cost.last_tail_ms,
-                                 tail_cost.last_main_ms_token);
-                    said_off = true;
-                }
+            if (tail > (int64_t) from && tail < (int64_t) total - 1 && tail_cost.keep_tail("ds4 serve")) {
+                asked.push_back(tail);
+                tail_at = tail;
             }
             const int64_t shared = r.restore.get_shared();
             if (!asked.empty() || shared >= 0) {
@@ -1057,16 +1038,9 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
             if (ok && tail_at >= 0 && took == n) {
                 const bool after = done >= (size_t) tail_at;
                 (after ? ms_tail : ms_main) += now_ms() - f0;
-                if (after && done + took == total && tail_auto) {   // (the read's end: its cost measured)
-                    const bool was = tail_cost.costly(), known = tail_cost.measured();
-                    if (tail_cost.add(ms_main, (size_t) tail_at - from, ms_tail, total - (size_t) tail_at) &&
-                        ((was && !tail_cost.costly()) || (!known && tail_cost.measured() && !tail_cost.costly())))
-                        std::fprintf(stderr, "ds4 serve: the tail restore point is kept%s: its read stop costs %.1fx a "
-                                             "long read's time a token (2x or less: no more than reading its tokens "
-                                             "again; the last tail run %zu tokens in %.0f ms, the long read %.2f ms a "
-                                             "token)\n", was ? " again" : "", tail_cost.ratio, tail_cost.last_tail_tokens,
-                                     tail_cost.last_tail_ms, tail_cost.last_main_ms_token);
-                }
+                if (after && done + took == total)   // (the read's end: its cost measured)
+                    tail_cost.measure_tail("ds4 serve", ms_main, (size_t) tail_at - from, ms_tail,
+                                           total - (size_t) tail_at);
             }
             done += took;
             if (ok && next_cut < cuts.size() && done == (size_t) cuts[next_cut].pos) {

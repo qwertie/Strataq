@@ -379,7 +379,7 @@ public:
     strata::serve::PromptBuffers get_prompt_buffers(const PagedCard& card, int64_t chunk,
                                                     int64_t tokens) const override {
         strata::serve::PromptBuffers b;
-        if (m_.is_chunked_read((int) tokens + 1))   // (the prompt's last token rides along: read_prompt)
+        if (m_.can_read_chunked((int) tokens + 1))   // (the prompt's last token rides along: read_prompt)
             b.device = m_.get_prompt_bytes((int) card.index, get_lent_rows(chunk), b.host);
         return b;
     }

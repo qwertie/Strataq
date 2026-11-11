@@ -266,17 +266,19 @@ private:
     bool find_identity(std::string& err);
     /// Gets where the read of `ids` from `from` stops to keep the restore points its request asked for (`asked`),
     /// by the shared policy (strata/common/state/restore_points.hpp); none in a prompt with pictures (`pictures`),
-    /// whose spans the model reads whole.
+    /// whose spans the model reads whole.  `tail` gets the asked tail point when the read stops there (tail_cost_
+    /// decides whether it may), else -1.
     std::vector<strata::core::MarkAt> plan_restore_points(const strata::serve::RestorePointRequest& asked,
                                                           const std::vector<int64_t>& ids, int64_t from,
-                                                          bool pictures) const;
+                                                          bool pictures, int64_t& tail);
     /// Reads `ids[from, to)` into `h` (the request began at `t0`), keeping a restore point at each of `cuts`
-    /// (plan_restore_points); `read_to` gets how far it got.  Conversations that decode meanwhile take steps between
-    /// the prompt's turns (PagedSettings::decode_share_percent and prompt_turn_ms).  False with `err` "cancelled"
-    /// after a STOP, else on a failure that ends the engine (`fatal`: a decode step failed, its ERR printed).
+    /// (plan_restore_points, whose `tail` the read's times measure for tail_cost_); `read_to` gets how far it got.
+    /// Conversations that decode meanwhile take steps between the prompt's turns (PagedSettings::decode_share_percent
+    /// and prompt_turn_ms).  False with `err` "cancelled" after a STOP, else on a failure that ends the engine
+    /// (`fatal`: a decode step failed, its ERR printed).
     bool read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t from, int64_t to,
-                     const std::vector<strata::core::MarkAt>& cuts, Clock::time_point t0, int64_t& read_to,
-                     bool& fatal, std::string& err);
+                     const std::vector<strata::core::MarkAt>& cuts, int64_t tail, Clock::time_point t0,
+                     int64_t& read_to, bool& fatal, std::string& err);
     /// Runs one step of the selected conversations and prints what it emitted; false (ERR printed) ends the engine.
     bool decode_step();
     /// Gets the unfinished requests selected by priority and request order for the next decode step.
@@ -459,6 +461,9 @@ private:
     std::optional<strata::core::SessionFileIdentity> identity_;
     uint64_t requests_ = 0;            ///< the requests served so far (Held::used)
     const Held* reading_ = nullptr;    ///< the conversation whose prompt read_prompt reads, which make_room keeps
+    /// What stopping a prompt's read at its tail restore point costs on this PC, over every conversation's reads
+    strata::core::TailCost tail_cost_;
+    bool has_read_prompt_ = false; ///< Excludes startup work from the paged loop's tail-cost samples.
     strata::serve::Loop* command_loop_ = nullptr; ///< The active serve loop, used at prompt-chunk boundaries.
     std::string fatal_error_; ///< Stops serving when the model cannot recover its layer ownership.
     bool residency_changed_ = false;   ///< the model's residency table changed since the devices' were uploaded
@@ -1188,8 +1193,10 @@ bool PagedEngine::serve_request(const std::string& line, bool admit) {
     }
     if (n - 1 > resume) {
         bool fatal = false;
-        const bool ok = read_prompt(h, ids, resume, n - 1, plan_restore_points(restore, ids, resume, !h.images.empty()),
-                                    t0, read_to, fatal, err);
+        int64_t tail = -1;
+        const std::vector<strata::core::MarkAt> cuts =
+            plan_restore_points(restore, ids, resume, !h.images.empty(), tail);
+        const bool ok = read_prompt(h, ids, resume, n - 1, cuts, tail, t0, read_to, fatal, err);
         if (fatal)
             return false;
         if (!ok && err != "cancelled" && err != "settings pending") {
@@ -1292,21 +1299,26 @@ void PagedEngine::finish_request(Held& h, const char* finish) {
 
 std::vector<strata::core::MarkAt> PagedEngine::plan_restore_points(const strata::serve::RestorePointRequest& asked,
                                                                    const std::vector<int64_t>& ids, int64_t from,
-                                                                   bool pictures) const {
+                                                                   bool pictures, int64_t& tail) {
+    tail = -1;
     if (pictures)
         return {};
     std::vector<int64_t> at = asked.marks;
-    if (asked.tail > 0)
-        at.push_back(asked.tail);
+    // (a tail the read goes past: kept while stopping there costs no more than reading its tokens again)
+    const bool past = asked.tail > from && asked.tail < (int64_t) ids.size() - 1;
+    if (asked.tail > 0 && (!past || tail_cost_.keep_tail(facts_.name.c_str())))
+        at.push_back(tail = asked.tail);
     std::vector<strata::core::MarkAt> cuts = strata::core::mark_plan(
         at, asked.get_shared(), from, (int64_t) ids.size(), facts_.restore_points, strata::core::kMarkGap);
     std::erase_if(cuts, [](const strata::core::MarkAt& m) { return m.pos <= 0; });   // (no state before a token)
+    if (std::none_of(cuts.begin(), cuts.end(), [&](const strata::core::MarkAt& m) { return m.pos == tail; }))
+        tail = -1;
     return cuts;
 }
 
 bool PagedEngine::read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t from, int64_t to,
-                              const std::vector<strata::core::MarkAt>& cuts, Clock::time_point t0, int64_t& read_to,
-                              bool& fatal, std::string& err) {
+                              const std::vector<strata::core::MarkAt>& cuts, int64_t tail, Clock::time_point t0,
+                              int64_t& read_to, bool& fatal, std::string& err) {
     reading_ = &h;
     h.live.assign(ids.begin(), ids.begin() + from);
     const PagedModel::ChunkDone on_chunk = [&](int64_t pos0, int64_t T, std::string& e) -> bool {
@@ -1334,11 +1346,18 @@ bool PagedEngine::read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t 
     if (!cuts.empty() && cuts[0].pos == from)   // (the state as it is)
         ok = model_.keep_restore_point(h.parts, ids, from, cuts[next_cut++].shared, err);
     Clock::time_point turn = Clock::now();
+    double read_ms[2] = {0, 0};   // the model's reads before `tail` and from it
+    bool measure_tail = has_read_prompt_ && tail > from && tail < to;
     for (int64_t q = from, n = 0; ok && q < to; q += n) {
         n = std::min(piece, to - q);
         if (next_cut < cuts.size() && cuts[next_cut].pos < q + n)
             n = cuts[next_cut].pos - q;
-        ok = model_.wait_state(err) && model_.read_prompt(h.parts, ids, q, n, is_model_drafting(), on_chunk, err);
+        ok = model_.wait_state(err);
+        const Clock::time_point r0 = Clock::now();
+        ok = ok && model_.read_prompt(h.parts, ids, q, n, is_model_drafting(), on_chunk, err);
+        if (ok && measure_tail)
+            ok = model_.wait_state(err);
+        read_ms[q >= tail] += get_ms_since(r0);
         if (ok && next_cut < cuts.size() && cuts[next_cut].pos == q + n)
             ok = model_.keep_restore_point(h.parts, ids, q + n, cuts[next_cut++].shared, err);
         const double turn_ms = get_ms_since(turn);
@@ -1347,12 +1366,18 @@ bool PagedEngine::read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t 
         const double budget_ms = (double) settings_.decode_share_percent / 100.0 * turn_ms;
         const Clock::time_point td = Clock::now();
         while (ok && is_decoding() && can_decode_while_reading() && get_ms_since(td) < budget_ms) {
+            // Decode and its expert refills can change the prompt's cache between the two measured runs.
+            measure_tail = false;
             poll_cancellations();
             fatal = !decode_step();
             ok = !fatal;
         }
         turn = Clock::now();
     }
+    if (ok && measure_tail)
+        tail_cost_.measure_tail(facts_.name.c_str(), read_ms[0], (size_t) (tail - from), read_ms[1],
+                                (size_t) (to - tail));
+    has_read_prompt_ = has_read_prompt_ || ok;
     reading_ = nullptr;
     return ok;
 }

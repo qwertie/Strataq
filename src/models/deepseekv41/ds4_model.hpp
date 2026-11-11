@@ -358,8 +358,8 @@ public:
     int pipeline_stages() const;
     /// (Options::expert_pages) The paged engine lends each GPU's chunked prompt path its buffers for each prompt
     /// (strata/common/serve/paged_model.hpp: get_prompt_ceiling, get_prompt_buffers, lay_out_prompt).  Gets whether a
-    /// read of `rows` tokens takes the chunked path (else windows of 16, which borrow nothing).
-    bool is_chunked_read(int rows) const;
+    /// read of `rows` tokens may take the chunked path (else windows of 16, which borrow nothing).
+    bool can_read_chunked(int rows) const;
     /// Gets the bytes GPU `dev`'s chunked prompt path borrows on the GPU for chunks of `chunk` tokens; `host` gets
     /// those it borrows in page-locked host memory.
     uint64_t get_prompt_bytes(int dev, int chunk, uint64_t& host) const;

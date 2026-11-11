@@ -3939,22 +3939,42 @@ struct Model::Impl {
     // kernels loaded on first use): ~1 s of hipModuleLoad plus ~2.5 s of library time on the R9700 (rocprofv3), 1-2 s on CUDA, once a
     // process - 3.6 s on the first prompt that went through the flow, measured as 4.9 s for a 25-token pass against 1.0 s for the
     // next one.  Paid here instead, at load, on a thread beside the store's read: the chunk GEMMs on tiny inputs into the chunk's own
-    // scratch buffers (the mHC mix GEMM in F32, the FP16 GEMM the projections and the indexer weights use) - no engine state is
-    // touched (heat, profile, stats, positions, KV), so the answers are what they were.  DS4_WARM=0 turns it off.
+    // scratch buffers, or (lends_prompt) small ones of the warm-up's own (the mHC mix GEMM in F32, the FP16 GEMM the
+    // projections and the indexer weights use) - no engine state is touched (heat, profile, stats, positions, KV), so the
+    // answers are what they were.  DS4_WARM=0 turns it off.
     void warm_flow() {
         const int T = 16, D = g.dim, hcd = g.hc * g.dim, n_mix = (2 + g.hc) * g.hc;
         const float one = 1.0f, zero = 0.0f;
         for (size_t di = 0; di < chunks.size(); ++di) {
             if (!chunks[di] || chunks[di]->blas == nullptr) continue;
-            Chunk& c = *chunks[di];
-            if (c.C < T) continue;
-            cudaSetDevice(devs[di].id);
-            (void) cublasSgemm(c.blas, CUBLAS_OP_T, CUBLAS_OP_N, n_mix, T, hcd, &one, c.h, hcd, c.h, hcd, &zero, c.mix, 32);
+            const Chunk& c = *chunks[di];
+            const Dev& d = devs[di];
+            float *h = c.h, *mix = c.mix, *y = c.y;
+            uint16_t *w16 = c.w16, *x16 = c.x16;
+            float* own = nullptr;   // (lends_prompt: the chunk has no buffers until a prompt's lend)
+            cudaSetDevice(d.id);
+            if (c.C < T) {
+                const size_t n_h = (size_t) hcd * std::max(n_mix, T), n_f = n_h + 32 * T + 256 * T;
+                if (lends_prompt())
+                    own = (float*) strata::core::gpu_alloc(n_f * sizeof(float) + (size_t) (256 + T) * D * 2);
+                if (own == nullptr) {
+                    (void) cudaGetLastError();
+                    continue;
+                }
+                h = own;
+                mix = h + n_h;
+                y = mix + 32 * T;
+                w16 = (uint16_t*) (own + n_f);
+                x16 = w16 + (size_t) 256 * D;
+            }
+            (void) cublasSgemm(c.blas, CUBLAS_OP_T, CUBLAS_OP_N, n_mix, T, hcd, &one, h, hcd, h, hcd, &zero, mix, 32);
             const int ns[2] = {256, 32};
             for (int n : ns)
-                (void) cublasGemmEx(c.blas, CUBLAS_OP_T, CUBLAS_OP_N, n, T, D, &one, c.w16, CUDA_R_16F, D, c.x16, CUDA_R_16F, D, &zero,
-                                    c.y, CUDA_R_32F, n, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
-            (void) cudaStreamSynchronize(devs[di].st);
+                (void) cublasGemmEx(c.blas, CUBLAS_OP_T, CUBLAS_OP_N, n, T, D, &one, w16, CUDA_R_16F, D, x16, CUDA_R_16F, D, &zero,
+                                    y, CUDA_R_32F, n, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+            (void) cudaStreamSynchronize(d.st);
+            if (own != nullptr)
+                strata::core::gpu_free(own);
             (void) cudaGetLastError();
         }
     }
@@ -7474,7 +7494,8 @@ struct Model::Impl {
         return n;
     }
     // the state at pos as a restore point a request asked for (shared: the end of a shared start, given up last); one
-    // at this position already is kept (it holds the same state), else the one mark_victim() picks makes room
+    // at this position already is kept (it holds the same state), else the one mark_victim() picks makes room - or this
+    // one is not kept, when mark_victim() picks it
     void mark(bool shared) {
         if (Check* c = mark_room(pos, shared)) snap_into(*c);
     }
@@ -7491,7 +7512,10 @@ struct Model::Impl {
         if ((int) k >= marks_cap()) {
             std::vector<MarkUse> u;
             for (const Check& x : mk) u.push_back({x.pos, x.shared, x.used});
+            u.push_back({at, shared, mark_clock + 1});
             k = (size_t) mark_victim(u);
+            if (k == mk.size())
+                return nullptr;
         } else
             mk.emplace_back();
         Check& c = mk[k];   // (one given up: its buffers taken over)
@@ -13224,13 +13248,25 @@ struct Model::Impl {
         return pick_min_;
     }
     int pick_min_ = 0;
-    bool pick_path(int n) {
+    // Gets whether DS4_PICK=adaptive asks pick_path to weigh the two paths' predicted times
+    static bool is_pick_adaptive() {
         static const bool adaptive = [] {
             const char* e = std::getenv("DS4_PICK");
             return e != nullptr && std::strcmp(e, "adaptive") == 0;
         }();
+        return adaptive;
+    }
+    // Gets whether a read of n tokens may go through the chunked path: pick_path chooses among these
+    // (DS4_PICK=adaptive: any the flow could take; else those of pick_flow_min()'s length and up), and the paged
+    // engine lends the path its buffers for them (Model::can_read_chunked). Keeping more than a window's logits
+    // requires the chunked path even below the usual length threshold.
+    bool can_chunk(int n, int logits_rows = 0) const {
+        return chunk > 0 && n >= chunk_min && (logits_rows > kWin || is_pick_adaptive() || n >= pick_min_);
+    }
+    // (n: one that can_chunk allows)
+    bool pick_path(int n) {
         pm.last = -1;
-        if (!adaptive) return n >= pick_flow_min();
+        if (!is_pick_adaptive()) return true;
         if (!pm.on || n >= kPickMax || !o.expert_cache) return true;
         double f_res = 0, f_cold = 0, w = 0;
         const int nw = n / kWin, rem = n % kWin;
@@ -16278,14 +16314,13 @@ bool Model::feed(const int* tokens, int n, int logits_rows, std::string& err, in
     p.halted = false;
     p.fed_n = n;
     if (ds4_dbg("DS4_DBG_CHUNK")) std::fprintf(stderr, "feed n %d chunk %d chunk_min %d\n", n, p.chunk, p.chunk_min);
-    if (p.chunk > 0 && n >= p.chunk_min) {   // a long run - or one the flow could take, if it is the faster path here
-        const double t0 = now_ms();   // (every row's logits (tests): the chunked path, which keeps them all)
-        const bool ok = logits_rows > kWin || p.pick_path(n) ? p.forward_chunks(tokens, n, logits_rows, err, -1, after)
-                                                             : p.feed_windows(tokens, n, logits_rows, err);
-        if (ok) p.path_done(now_ms() - t0);
-        return ok;
-    }
-    return p.feed_windows(tokens, n, logits_rows, err);
+    const double t0 = now_ms();
+    // (every row's logits (tests): the chunked path, which keeps them all)
+    const bool ok = p.can_chunk(n, logits_rows) && (logits_rows > kWin || p.pick_path(n))
+                        ? p.forward_chunks(tokens, n, logits_rows, err, -1, after)
+                        : p.feed_windows(tokens, n, logits_rows, err);
+    if (ok) p.path_done(now_ms() - t0);
+    return ok;
 }
 bool Model::feed_mark(const int* tokens, int n, int logits_rows, int slot, std::string& err) {
     Impl& p = *p_;
@@ -16293,7 +16328,7 @@ bool Model::feed_mark(const int* tokens, int n, int logits_rows, int slot, std::
     p.halted = false;
     p.fed_n = n;
     const double t0 = now_ms();
-    if (n >= 2 && p.chunk > 0 && n >= p.chunk_min && p.pick_path(n)) {   // (the last token rides along; its layers
+    if (n >= 2 && p.can_chunk(n) && p.pick_path(n)) {   // (the last token rides along; its layers
         const bool ok = p.forward_chunks(tokens, n, logits_rows, err, slot);   // keep the state before it)
         if (ok) p.path_done(now_ms() - t0);
         return ok;
@@ -16318,7 +16353,7 @@ bool Model::feed_marks(const int* tokens, int n, int logits_rows, int slot,
     p.halted = false;
     p.fed_n = n;
     const double t0 = now_ms();
-    if (n >= 2 && p.chunk > 0 && n >= p.chunk_min && inner.size() + 1 <= (size_t) kSnapN && p.pick_path(n)) {
+    if (n >= 2 && p.can_chunk(n) && inner.size() + 1 <= (size_t) kSnapN && p.pick_path(n)) {
         const bool ok = p.forward_chunks(tokens, n, logits_rows, err, slot, 0, &inner);
         if (ok) p.path_done(now_ms() - t0);
         return ok;
@@ -16355,10 +16390,7 @@ void Model::set_yield(std::function<bool()> f) { p_->yield_to = std::move(f); }
 int Model::fed() const { return p_->fed_n; }
 int Model::prompt_chunk() const { return p_->chunk; }
 int Model::pipeline_stages() const { return std::max(1, (int) p_->groups.size()); }
-bool Model::is_chunked_read(int rows) const {
-    // (pick_path's choice, DS4_PICK=adaptive's aside)
-    return p_->chunk > 0 && rows >= std::max({2, p_->chunk_min, p_->pick_min_});
-}
+bool Model::can_read_chunked(int rows) const { return p_->can_chunk(rows); }
 uint64_t Model::get_prompt_bytes(int dev, int chunk, uint64_t& host) const {
     size_t host_bytes = 0;
     const uint64_t device = p_->lay_prompt(*p_->chunks[(size_t) dev], chunk, nullptr, nullptr, host_bytes);
