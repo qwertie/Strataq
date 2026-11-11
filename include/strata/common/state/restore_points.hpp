@@ -1,12 +1,15 @@
-// src/models/deepseekv41/ds4_marks.hpp - maya-ds4's restore points: which one a new prompt goes back to, which of the ones a request
-// asks for its read keeps, and which one gives way to a new one.  A restore point is the state at a position (the
-// window rings and the compressors' partial groups; the rest of the state is indexed by position).  Besides the three a
-// conversation always has (the end of its last prompt, the position before it, the anchor), the server may ask for more
-// on a GEN line (marks=<pos>,... and shared=<pos>): the start of the last user message, a point near the prompt's tail,
-// the end of a start that other conversations share (a system prompt and its tools).  The read stops at each to keep
-// it, so a prompt that differs from the conversation after one of them - its last message edited, a new question
-// after the same document, a history rendered again - goes back there instead of further.  Pure logic, no GPU
-// (tests/ds4_marks_test.cpp).
+// include/strata/common/state/restore_points.hpp - restore points: which one a new prompt goes back to, which of the
+// ones a request asks for its read keeps, and which one gives way to a new one.  A restore point is the state at a
+// position that cutting the rest of the state back cannot give (DeepSeek V4.1's window rings and compressor partial
+// groups, Qwen3.8's recurrent state; the rest of the state is indexed by position).  Besides the points a model keeps
+// on its own (DeepSeek: the end of its last prompt, the position before it, the anchor; Qwen3.8: its checkpoint
+// chain), the server may ask for more on a request line (marks=<pos>,..., tail=<pos> and shared=<pos>): the start of
+// the last user message, a point near the prompt's tail, the end of a start that other conversations share (a system
+// prompt and its tools).  The read stops at each to keep it, so a prompt that differs from the conversation after one
+// of them - its last message edited, a new question after the same document, a history rendered again - goes back
+// there instead of further.  From Project Maya's ds4_marks.hpp (upstream src/dsv41/ds4_marks.hpp); strata-dsv41's
+// serve loop and the paged engine (src/common/serve/paged_engine.cpp) plan with it.  Pure logic, no GPU
+// (restore_points_test.cpp).
 #pragma once
 
 #include <algorithm>
@@ -14,10 +17,28 @@
 #include <utility>
 #include <vector>
 
-namespace strata::ds4 {
+namespace strata::core {
 
-// the restore points a conversation keeps besides its three, at most (MAYA_DS4_RESTORE_POINTS is clamped to it)
+// the restore points a conversation keeps besides its own, at most (MAYA_DS4_RESTORE_POINTS is clamped to it)
 constexpr int kMarksMax = 16;
+
+/// mark_plan's `gap`: a restore point closer than this to where the read starts, or to the one before it, is kept there
+/// (a read of a few tokens alone costs more than reading them again)
+constexpr int64_t kMarkGap = 16;
+
+/// The host memory one prompt's read may give to the restore points its request asked for: room for the three a chat's
+/// prompt asks for (the shared start, the last user message's start, the tail) at Qwen3.8's 117,683,200 bytes each
+/// (its recurrent state, as GET_MEMORY_USE reports it), half the six checkpoints strata-q38 keeps a conversation
+/// (--prompt-cache); a DeepSeek V4.1 point (~3 MB) is far below it, so DeepSeek keeps its own cap
+/// (STRATA_DS4_RESTORE_POINTS).
+constexpr uint64_t kRestorePointBytes = 384ull << 20;
+
+/// Gets mark_plan's `cap` for points of `point_bytes` each: as many as kRestorePointBytes holds, at most `most` (the
+/// model's own cap).
+inline int get_restore_point_cap(uint64_t point_bytes, int most) {
+    const uint64_t fit = point_bytes ? kRestorePointBytes / point_bytes : UINT64_MAX;
+    return (int) std::min<uint64_t>(fit, (uint64_t) std::max(most, 0));
+}
 
 // the latest of the points `at` (positions; -1: none) at or before `limit` - where the state's tokens still agree with
 // the new prompt - and at or before the state's own position `pos`; the first of equal ones; -1: none
@@ -70,7 +91,8 @@ inline std::vector<MarkAt> mark_plan(const std::vector<int64_t>& asked, int64_t 
     return out;
 }
 
-// The tail point's cost on this PC (the server's tail=<pos>, MAYA_DS4_RESTORE_TAIL; #668).  The read stops there, so
+// The tail point's cost on this PC, as strata-dsv41's serve loop weighs it (the server's tail=<pos>,
+// MAYA_DS4_RESTORE_TAIL; #668).  The read stops there, so
 // the tokens after it are a run of their own: where most experts are not in VRAM, that short run costs nearly a whole
 // pass over them (each expert's weights read for a few rows - on the CPU lane, or lent to the GPU's prompt path one
 // run at a time; on a layer split whose experts stream, one more pass of them through every stage, one stage after
@@ -82,7 +104,7 @@ inline std::vector<MarkAt> mark_plan(const std::vector<int64_t>& asked, int64_t 
 // split's stages: a run's fixed cost - the experts streamed again, the stages one after another - hid behind both, and
 // a 4-GPU split kept a point that cost 4-9x, #668.)  Until two reads have measured it the point is kept, and one tail
 // point in `probe` is kept while it is left out, to measure again (the cost moves with the experts the PC holds in
-// VRAM).  Pure logic (tests/ds4_marks_test.cpp).
+// VRAM).  Pure logic (restore_points_test.cpp).
 struct TailCost {
     int n = 0;              // the reads measured
     double ratio = 0.0;     // their tail run's time a token over the rest of the read's, a running mean (the last two
@@ -136,4 +158,4 @@ inline int mark_victim(const std::vector<MarkUse>& v) {
     return -1;
 }
 
-}  // namespace strata::ds4
+}  // namespace strata::core

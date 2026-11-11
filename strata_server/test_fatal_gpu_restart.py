@@ -2,6 +2,7 @@
 server starts it again on the next request; three such deaths within ten minutes stop the restarts with a plain 503 text.
 CPU only, no engine: the server's bookkeeping is called on a stand-in."""
 import sys
+import threading
 import time
 import types
 import unittest
@@ -14,6 +15,21 @@ from strata_common import engine_client  # noqa: E402
 
 def stand_in(pid, last_err):
     return types.SimpleNamespace(engine=types.SimpleNamespace(last_err=last_err, proc=types.SimpleNamespace(pid=pid)))
+
+
+def request_engine(*lines):
+    """Gets an engine of the request-ID protocol (strata-q38, strata-ds41) that answers its RUN line with `lines`."""
+    e = engine_client.StrataEngine.__new__(engine_client.StrataEngine)
+    e.proc, e.gen, e.info, e.silence_s = types.SimpleNamespace(poll=lambda: None), 1, {"request_queue": 1}, 0
+    e.request_queues, e.request_lock, e.slot_live, e.request_sequence = {}, threading.Lock(), [], 0
+    e.last_err, e.ended = None, False
+
+    def send(text, process=None):
+        if text.startswith("RUN "):
+            for line in lines:
+                e.request_queues[text.split()[1]].put(line)
+    e._send = send
+    return e
 
 
 class FatalGpuRestart(unittest.TestCase):
@@ -72,6 +88,17 @@ class FatalGpuRestart(unittest.TestCase):
         self.assertIn("illegal memory access", str(cm.exception))
         self.assertTrue(eng.ended)                                  # the next request starts the engine at once
         self.assertTrue(eng.last_err.startswith("fatal GPU error"))
+
+    def test_a_paged_engines_fatal_line_ends_its_request_as_an_engine_death(self):
+        eng = request_engine("STARTED", "PP 3 3 10 300.0", "ERR fatal GPU error: unspecified launch failure")
+        with self.assertRaises(engine_client.EngineDied) as cm:
+            list(eng.generate_request([1, 2, 3], 8, {}, threading.Event()))
+        self.assertIn("unspecified launch failure", str(cm.exception))
+        self.assertTrue(eng.ended)
+        eng = request_engine("STARTED", "ERR the conversation's memory is full")
+        with self.assertRaises(ValueError):
+            list(eng.generate_request([1, 2, 3], 8, {}, threading.Event()))
+        self.assertFalse(eng.ended)
 
     def test_an_ordinary_engine_error_stays_a_bad_request(self):
         eng = types.SimpleNamespace(last_err=None, ended=False)

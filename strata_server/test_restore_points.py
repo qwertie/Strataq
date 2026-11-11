@@ -1,24 +1,27 @@
-"""STRATA_DS4_RESTORE_POINTS: where the server asks the DeepSeek engine to keep restore points (its GEN line's marks=,
-tail= and shared=), computed from the chat as the template renders it - no GPU, no engine (a fake one).  From Project
-Maya's restore points (#639, mw00 / needmorevram), on Strata's shared-start pin.
+"""STRATA_DS4_RESTORE_POINTS: where the server asks the engine to keep restore points (its request line's marks=,
+tail= and shared=), computed from the chat as the template renders it - for DeepSeek's engines and for the paged
+engines of both families (RUN) - no GPU, no engine (a fake one).  From Project Maya's restore points (#639, mw00 /
+needmorevram), on Strata's shared-start pin.
 
-    python -m unittest serve.test_ds4_restore_points -v
+    python -m unittest strata_server.test_restore_points -v
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import unittest
+import urllib.request
 import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
-from strata_common.engine_client import StrataEngine, deepseek_restore_points, restore_point_settings  # noqa: E402
+from strata_common.engine_client import MockEngine, StrataEngine, get_restore_points, restore_point_settings  # noqa: E402
 from strata_server import frontend  # noqa: E402
 from strata_server.frontend import ChatTemplate  # noqa: E402
-from strata_server.server import Service, default_model_name, serve  # noqa: E402
+from strata_server.server import ByteTokenizer, Service, default_model_name, serve  # noqa: E402
 from strata_server.test_dsv41 import TEMPLATE, ApiBase, DsEngine  # noqa: E402
 
 ON, TAIL = "STRATA_DS4_RESTORE_POINTS", "STRATA_DS4_RESTORE_TAIL"
@@ -37,40 +40,49 @@ def lcp(a, b) -> int:
 
 
 class Pure(unittest.TestCase):
-    """deepseek_restore_points() and the settings on ids built by hand."""
+    """get_restore_points() and the settings on ids built by hand."""
 
-    USER, SYS = 900, 901
+    USER, SYS = (900,), (901,)
 
     def ids(self, *parts):
         out = []
         for p in parts:
-            out += [p] if p in (self.USER, self.SYS) else [7] * p
+            out += list(p) if isinstance(p, tuple) else [7] * p
         return out
 
     def test_last_user_turn_the_shared_start_and_the_tail(self):
         ids = self.ids(2000, self.USER, 1500, 5, self.USER, 3000)
-        pts = deepseek_restore_points(ids, self.USER, self.SYS, 512)
+        pts = get_restore_points(ids, self.USER, self.SYS, 512)
         self.assertEqual(pts["shared"], 2000)
         self.assertEqual(pts["marks"], [2000 + 1 + 1500 + 5])
         self.assertEqual(pts["tail"], len(ids) - 512)
 
     def test_short_starts_are_left_out(self):
         ids = self.ids(300, self.USER, 100, self.USER, 100)
-        self.assertEqual(deepseek_restore_points(ids, self.USER, self.SYS, 512), {})
-        self.assertEqual(deepseek_restore_points(self.ids(5000), None), {})   # (no user token: no DeepSeek prompt)
+        self.assertEqual(get_restore_points(ids, self.USER, self.SYS, 512), {})
+        self.assertEqual(get_restore_points(self.ids(5000), ()), {})   # (no user turn's opener: none)
 
     def test_a_system_message_after_the_first_user_turn_is_a_boundary_too(self):
         ids = self.ids(1500, self.USER, 1500, self.SYS, 40)
-        pts = deepseek_restore_points(ids, self.USER, self.SYS, 0)
+        pts = get_restore_points(ids, self.USER, self.SYS, 0)
         self.assertEqual(pts, {"shared": 1500, "marks": [1500 + 1 + 1500]})
-        self.assertEqual(ids[pts["marks"][0]], self.SYS)
+        self.assertEqual(ids[pts["marks"][0]], self.SYS[0])
 
     def test_tail_zero_and_a_tail_inside_the_last_turn_only(self):
         ids = self.ids(1200, self.USER, 4000)
-        self.assertNotIn("tail", deepseek_restore_points(ids, self.USER, self.SYS, 0))
-        self.assertEqual(deepseek_restore_points(ids, self.USER, self.SYS, 300)["tail"], len(ids) - 300)
+        self.assertNotIn("tail", get_restore_points(ids, self.USER, self.SYS, 0))
+        self.assertEqual(get_restore_points(ids, self.USER, self.SYS, 300)["tail"], len(ids) - 300)
         short = self.ids(1200, self.USER, 100)   # (the last turn shorter than the tail: the boundary alone)
-        self.assertNotIn("tail", deepseek_restore_points(short, self.USER, self.SYS, 512))
+        self.assertNotIn("tail", get_restore_points(short, self.USER, self.SYS, 512))
+
+    def test_openers_of_several_ids(self):
+        # (Qwen's form: <|im_start|> and the role's name; another role after <|im_start|> opens no user turn)
+        user, system, assistant = (500, 1), (500, 2), (500, 3)
+        ids = self.ids(1500, user, 1500, assistant, 300, user, 200, system, 40, assistant)
+        pts = get_restore_points(ids, user, system, 0)
+        self.assertEqual(pts["shared"], 1500)
+        self.assertEqual(pts["marks"], [len(ids) - 2 - 40 - 2])
+        self.assertEqual(tuple(ids[pts["marks"][0]:pts["marks"][0] + 2]), system)
 
     def test_settings(self):
         self.assertEqual(restore_point_settings({}), (True, 512))   # (on by default: 4)
@@ -122,7 +134,7 @@ class Api(ApiBase):
         return self.engine.last_prompt, self.engine.last_sampling
 
     def user_id(self):
-        return self.svc.deepseek_turn_ids()[0]
+        return self.svc.get_turn_ids()[0][0]
 
     def test_marks_at_the_last_user_turn_and_the_pin_is_the_shared_start(self):
         self.start("ok")
@@ -177,6 +189,64 @@ class Api(ApiBase):
         self.start("ok")
         _, s = self.run_request({"messages": [{"role": "user", "content": "hi"}], "max_tokens": 40})
         self.assertNotIn("_restore", s)
+
+
+class QwenApi(unittest.TestCase):
+    """The Qwen form through the server: the paged engine (RUN) gets the keys, the other Qwen engines do not."""
+
+    def start(self, request_protocol):
+        tok = ByteTokenizer()
+        engine = RunEngine(tok, "</think>\n\nok", max_context=1 << 20)
+        engine.request_protocol = request_protocol
+        svc = Service(engine, tok, ChatTemplate(ROOT / "strata_server/chat_template.jinja"))
+        httpd = serve(svc, port=0)
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(httpd.shutdown)
+        self.engine, self.svc = engine, svc
+        self.base = f"http://127.0.0.1:{httpd.server_address[1]}"
+
+    def run_request(self, last):
+        body = {"messages": [{"role": "system", "content": SYSTEM},
+                             {"role": "user", "content": "Here are the figures.\n" + DOC},
+                             {"role": "assistant", "content": "I have read them."},
+                             {"role": "user", "content": last}], "max_tokens": 8}
+        req = urllib.request.Request(self.base + "/v1/chat/completions", data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with unittest.mock.patch.dict(os.environ, {}):
+            for k in (ON, TAIL):
+                os.environ.pop(k, None)
+            with urllib.request.urlopen(req, timeout=30) as r:
+                self.assertEqual(r.status, 200)
+        return self.engine.last_prompt, self.engine.last_sampling
+
+    def test_the_run_line_carries_the_points(self):
+        self.start(True)
+        ids, s = self.run_request("And how did region 3 do in the last quarter?")
+        user = list(self.svc.get_turn_ids()[0])
+        self.assertEqual(user, self.svc.tok.encode("<|im_start|>user", parse_special=True))
+        starts = [i for i in range(len(ids)) if ids[i:i + len(user)] == user]
+        self.assertEqual(s["_restore"], {"shared": starts[0], "marks": [starts[-1]]})   # (a short last message)
+        keys = StrataEngine.sampling_keys(s).split()
+        for k in (f"shared={starts[0]}", f"marks={starts[-1]}"):
+            self.assertIn(k, keys)
+        # the last message edited: the prompt agrees with this one up to its start, and leaves it before the end
+        ids2, s2 = self.run_request("And region 5, over the whole year?")
+        self.assertGreaterEqual(lcp(ids, ids2), starts[-1])
+        self.assertLess(lcp(ids, ids2), len(ids) - 1)
+        self.assertEqual(s2["_restore"]["marks"], [starts[-1]])
+
+    def test_not_for_an_engine_without_run(self):
+        self.start(False)
+        _, s = self.run_request("And how did region 3 do in the last quarter?")
+        self.assertNotIn("_restore", s)
+
+
+class RunEngine(MockEngine):
+    """A fake engine that keeps the sampling it was asked with."""
+
+    def generate(self, ids, max_new, sampling, cancel, embeddings=None):
+        self.last_sampling = dict(sampling or {})
+        yield from super().generate(ids, max_new, sampling, cancel, embeddings)
 
 
 if __name__ == "__main__":

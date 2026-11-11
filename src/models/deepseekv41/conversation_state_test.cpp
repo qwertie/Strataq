@@ -40,6 +40,13 @@ bool is_same(const ConversationState& a, const ConversationState& b) {
         if (a.checks[k].pos != b.checks[k].pos || a.checks[k].win != b.checks[k].win ||
             a.checks[k].comp != b.checks[k].comp)
             return false;
+    if (a.marks.size() != b.marks.size())
+        return false;
+    for (size_t k = 0; k < a.marks.size(); ++k)
+        if (a.marks[k].pos != b.marks[k].pos || a.marks[k].win != b.marks[k].win ||
+            a.marks[k].comp != b.marks[k].comp || a.marks[k].shared != b.marks[k].shared ||
+            a.marks[k].used != b.marks[k].used)
+            return false;
     return true;
 }
 
@@ -50,16 +57,31 @@ int main() {
     for (int32_t i = 0; i < 300; ++i)
         s.tokens.push_back(7000 + i);
     // a prompt's end at 300 and the position before it; the anchor, a copy of an earlier prompt's position before
-    // its end; no shared start
+    // its end; restore points at a shared start and at the last user message, least recently used first
     s.checks[0] = make_check(300, 5, 1);
     s.checks[1] = make_check(299, 5, 2);
     s.checks[2] = make_check(120, 5, 3);
+    s.marks = {make_check(100, 5, 4), make_check(250, 5, 5)};
+    s.marks[0].shared = true;
+    s.marks[0].used = 1;
+    s.marks[1].used = 2;
     std::vector<uint8_t> bytes;
     encode_state(s, bytes);
     ConversationState back;
     std::string err;
     check(decode_state(bytes, back, err) && is_same(s, back), "the round trip gives the same state");
-    check(back.checks[3].pos == -1 && back.checks[3].win.empty(), "a checkpoint not kept stays none");
+    ConversationState swapped = s;   // (a mark clock elsewhere: the order is what comes back)
+    std::swap(swapped.marks[0], swapped.marks[1]);
+    swapped.marks[0].used = 70;
+    swapped.marks[1].used = 40;
+    encode_state(swapped, bytes);
+    check(decode_state(bytes, back, err) && is_same(s, back), "restore points come back least recently used first");
+    ConversationState no_anchor = s;
+    no_anchor.checks[2] = Checkpoint{};
+    encode_state(no_anchor, bytes);
+    check(decode_state(bytes, back, err) && back.checks[2].pos == -1 && back.checks[2].win.empty(),
+          "a checkpoint not kept stays none");
+    encode_state(s, bytes);
 
     // the layout: magic, tokens, the checkpoint count, the first checkpoint's role, position and layer count
     uint64_t u = 0;
@@ -70,7 +92,7 @@ int main() {
     check(t == 7299, "then the tokens");
     const size_t checks_at = 16 + 4 * 300;
     std::memcpy(&u, bytes.data() + checks_at, 8);
-    check(u == 3, "then the count of kept checkpoints");
+    check(u == 5, "then the count of kept checkpoints and restore points");
     int64_t pos = 0;
     std::memcpy(&u, bytes.data() + checks_at + 8, 8);
     std::memcpy(&pos, bytes.data() + checks_at + 16, 8);
@@ -113,15 +135,15 @@ int main() {
     check(!decode_state({}, back, err) && !err.empty(), "no bytes are refused, and say why");
 
     // the positions it can go back to: latest first, each once, none at 0 or past its tokens, none without rings
-    check(get_check_positions(s) == std::vector<int64_t>({300, 299, 120}), "latest first");
+    check(get_check_positions(s) == std::vector<int64_t>({300, 299, 250, 120, 100}), "latest first");
     ConversationState d = s;
     d.checks[2] = d.checks[1];   // (Model::pin: the anchor at the position before the prompt's end)
-    d.checks[3].pos = 0;
-    d.checks[3].win.resize(1);
+    d.marks = {d.checks[1], make_check(0, 1, 6)};
     check(get_check_positions(d) == std::vector<int64_t>({300, 299}), "each once, none at 0");
     d.tokens.resize(299);
     d.checks[1].win.clear();
     d.checks[2].win.clear();
+    d.marks.clear();
     check(get_check_positions(d).empty(), "none past the tokens or without rings");
     ConversationState empty;
     encode_state(empty, bytes);

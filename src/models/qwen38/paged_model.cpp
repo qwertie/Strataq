@@ -19,6 +19,7 @@
 #include "strata/common/serve/paged_model.hpp"
 #include "strata/common/serve/penalty_history.hpp"
 #include "strata/common/state/checkpoint_retention.hpp"
+#include "strata/common/state/restore_points.hpp"
 #include "strata/common/state/state_bytes.hpp"
 #include "strata/models/qwen38/rewind_checkpoint.hpp"
 #include "strata/common/state/prompt_checkpoint.hpp"
@@ -198,6 +199,8 @@ public:
     bool restore_state(const std::vector<uint8_t>& state, const PagedParts& parts, const std::vector<int32_t>& live,
                        int64_t kept, std::string& err) const override;
     bool keeps_rewind_branch(const PagedParts& parts, int64_t tokens) const override;
+    bool keep_restore_point(const PagedParts& parts, const std::vector<int64_t>& ids, int64_t tokens, bool shared,
+                            std::string& err) override;
     std::vector<int64_t> get_rewind_points(const PagedParts& parts) const override;
     uint64_t get_host_state_bytes(const PagedParts& parts) const override {
         const auto& checks = get_part(*parts.front()).checks;
@@ -257,9 +260,10 @@ private:
     /// Copies whole-model recurrent rows between a RAM checkpoint and the current GPU layer ranges.
     bool copy_recurrent_state(std::vector<uint8_t>& state, const PagedParts& parts, bool to_gpu,
                               std::string& err) const;
-    /// Retains a prompt boundary using the old engine's root-pinned checkpoint policy.
+    /// Retains a prompt boundary using the old engine's root-pinned checkpoint policy; `pinned`: a shared start's,
+    /// never the one to give way.  One there already is used again, and pinned too when `pinned`.
     bool save_checkpoint(const PagedParts& parts, const std::vector<int64_t>& ids, int64_t tokens,
-                         bool turn, std::string& err);
+                         bool turn, bool pinned, std::string& err);
     /// Reads a segment between checkpoint boundaries through the prompt path or short verify windows.
     bool read_prompt_segment(const PagedParts& parts, const std::vector<int64_t>& ids, int64_t from, int64_t n,
                              bool drafting, const ChunkDone& on_chunk, std::string& err);
@@ -496,6 +500,11 @@ PagedQwen::PagedQwen(Model& m, Conversation& conv, const PagedCards& cards, Mode
     facts.max_rows = strata::kernels::kVerifyMaxT;
     facts.end_tokens = o.eos_ids;
     facts.has_drafter = drafter != nullptr;
+    // (a shared start is pinned, which needs room for the chain's root and leaf beside it, as for the old engine's pin)
+    strata::core::ConversationStateSizes sizes;
+    std::string err;
+    if (o.prompt_cache >= 3 && strata::core::conversation_state_sizes(m.g, sizes, err))
+        facts.restore_points = strata::core::get_restore_point_cap(sizes.gdn, o.prompt_cache);
     facts.drafter_label = "MTP";
     facts.kv_quantization = core::qsa_kv_q4() ? "Q4_0" : core::qsa_kv_int8() ? "INT8" : "FP16";
     facts.draft_limits.confidence = (float) o.spec_min_p;
@@ -834,13 +843,10 @@ void PagedQwen::start_request(int session, const strata::serve::RequestStart& r)
     conv_.ver.set_slot_sampling(session, sp);
     Part& lead = *leads_[(size_t) session];
     lead.checkpoint_enabled = true;
-    lead.pin = 0;
-    for (const auto& [key, value] : r.keys) {
+    lead.pin = facts.restore_points > 0 ? std::max<int64_t>(0, r.shared_start) : 0;
+    for (const auto& [key, value] : r.keys)
         if (key == "ckpt")
             lead.checkpoint_enabled = std::atoi(value.c_str()) != 0;
-        else if (key == "pin" && m_.o.prompt_cache >= 3)
-            lead.pin = std::max<int64_t>(0, std::atoll(value.c_str()));
-    }
     if (lead.pin > 0)
         for (Checkpoint& c : lead.checks)
             c.pinned = c.tokens == lead.pin;
@@ -977,6 +983,11 @@ bool PagedQwen::keeps_rewind_branch(const PagedParts& parts, int64_t tokens) con
     });
 }
 
+bool PagedQwen::keep_restore_point(const PagedParts& parts, const std::vector<int64_t>& ids, int64_t tokens,
+                                   bool shared, std::string& err) {
+    return !get_part(*parts.front()).checkpoint_enabled || save_checkpoint(parts, ids, tokens, false, shared, err);
+}
+
 std::vector<int64_t> PagedQwen::get_rewind_points(const PagedParts& parts) const {
     std::vector<int64_t> points;
     for (const Checkpoint& c : get_part(*parts.front()).checks)
@@ -1040,18 +1051,25 @@ bool PagedQwen::copy_recurrent_state(std::vector<uint8_t>& state, const PagedPar
 }
 
 bool PagedQwen::save_checkpoint(const PagedParts& parts, const std::vector<int64_t>& ids, int64_t tokens,
-                                 bool turn, std::string& err) {
+                                 bool turn, bool pinned, std::string& err) {
     auto& checks = get_part(*parts.front()).checks;
-    if (std::any_of(checks.begin(), checks.end(), [tokens](const Checkpoint& c) { return c.tokens == tokens; }))
+    pinned = pinned || tokens == get_part(*parts.front()).pin;
+    for (const Checkpoint& c : checks)
+        checkpoint_clock_ = std::max(checkpoint_clock_, c.used);
+    const auto there = std::find_if(checks.begin(), checks.end(), [tokens](const Checkpoint& c) {
+        return c.tokens == tokens;
+    });
+    if (there != checks.end()) {
+        there->pinned = there->pinned || pinned;
+        there->used = ++checkpoint_clock_;
         return true;
+    }
     if (!wait_state(err))
         return false;
     Checkpoint saved;
     saved.tokens = tokens;
     saved.turn = turn;
-    saved.pinned = tokens == get_part(*parts.front()).pin;
-    for (const Checkpoint& c : checks)
-        checkpoint_clock_ = std::max(checkpoint_clock_, c.used);
+    saved.pinned = pinned;
     saved.used = ++checkpoint_clock_;
     append_size(saved.state, tokens > 1 ? (uint64_t) ids[(size_t) tokens - 2] : UINT64_MAX);
     append_size(saved.state, (uint64_t) ids[(size_t) tokens - 1]);
@@ -1096,7 +1114,7 @@ bool PagedQwen::read_prompt(const PagedParts& parts, const std::vector<int64_t>&
     const int64_t root = enabled ? strata::core::find_prompt_root_boundary(
         ids, turn, m_.o.turn_token, m_.o.prompt_cache_root) : -1;
     std::vector<int64_t> cuts;
-    for (const int64_t point : {root, turn, enabled ? lead.pin : 0})
+    for (const int64_t point : {root, turn})
         if (point > from && point <= end && point + 1 < (int64_t) ids.size())
             cuts.push_back(point);
     if (enabled && m_.o.prompt_cache_every > 0)
@@ -1108,7 +1126,7 @@ bool PagedQwen::read_prompt(const PagedParts& parts, const std::vector<int64_t>&
     int64_t at = from;
     for (int64_t point : cuts) {
         if (!read_prompt_segment(parts, ids, at, point - at, drafting, on_chunk, err) ||
-            !save_checkpoint(parts, ids, point, point == turn, err))
+            !save_checkpoint(parts, ids, point, point == turn, false, err))
             return false;
         at = point;
     }

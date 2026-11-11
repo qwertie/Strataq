@@ -1,7 +1,8 @@
 // include/strata/models/deepseekv41/conversation_state.hpp - the part of a DeepSeek V4.1 conversation's state that
-// the model keeps on the host, beside its window rings, partial groups and compressed rows: its tokens and its
-// checkpoints (host copies of the rings and partial groups at a few positions, which it can go back to), and the
-// bytes strata-ds41 keeps them in while the conversation is paused (docs/MEMORY_MANAGER_PLAN.md, step D6).  No GPU.
+// the model keeps on the host, beside its window rings, partial groups and compressed rows: its tokens, its
+// checkpoints and restore points (host copies of the rings and partial groups at a few positions, which it can go
+// back to), and the bytes strata-ds41 keeps them in while the conversation is paused (docs/MEMORY_MANAGER_PLAN.md,
+// step D6).  No GPU.
 #pragma once
 
 #include <array>
@@ -12,9 +13,8 @@
 namespace strata::ds4 {
 
 /// The checkpoints a conversation keeps, by role (Model::checkpoint's `slot`): 0 its last prompt's end, 1 the position
-/// before it, 2 the anchor (Model::pin), 3 the shared start of a prompt (strata-ds41's pin=N; the old engine keeps a
-/// shared start as a restore point instead, Model::mark).
-constexpr int kCheckpoints = 4;
+/// before it, 2 the anchor (Model::pin).  A shared start is a restore point (Model::mark).
+constexpr int kCheckpoints = 3;
 
 /// The state at one position: what the rest of the state (compressed rows, by position) does not give back.
 struct Checkpoint {
@@ -24,7 +24,7 @@ struct Checkpoint {
     /// without a compressor)
     std::vector<std::vector<float>> comp;
     bool shared = false;   ///< (a restore point Model::mark keeps) the end of a shared start, given up last
-    uint64_t used = 0;     ///< (a restore point) its last use, by the model's mark clock
+    uint64_t used = 0;     ///< (a restore point) its last use, by the model's mark clock, which only grows
 };
 
 /// A conversation's host side: what the model holds of the conversation it computes, and what each other
@@ -32,14 +32,17 @@ struct Checkpoint {
 struct ConversationState {
     std::vector<int32_t> tokens;                      ///< the tokens its state holds, in order
     std::array<Checkpoint, kCheckpoints> checks;      ///< by role
+    std::vector<Checkpoint> marks;                    ///< the restore points requests asked for (Model::mark)
 };
 
-/// Gets the positions `s` can go back to (its checkpoints between its first and last token), latest first, each once:
-/// what Model::check_positions gets for the conversation in the model.
+/// Gets the positions `s` can go back to (its checkpoints and restore points between its first and last token), latest
+/// first, each once: what Model::check_positions gets for the conversation in the model.
 std::vector<int64_t> get_check_positions(const ConversationState& s);
 /// Writes `s` to `out` (replacing what it held).  The layout, little endian: u64 magic, u64 token count, i32 tokens,
 /// u64 checkpoint count, then per kept checkpoint u64 role, i64 position, u64 layer count and per layer its ring
-/// (u64 bytes, bytes), its partial group's KV and scores (u64 floats, floats each); u64 magic.
+/// (u64 bytes, bytes), its partial group's KV and scores (u64 floats, floats each); u64 magic.  A restore point's
+/// role is kCheckpoints, a shared start's kCheckpoints + 1 (as the old engine's slots write them), least recently used
+/// first.
 void encode_state(const ConversationState& s, std::vector<uint8_t>& out);
 /// Reads encode_state's bytes `in` into `s`; false (and `err`, `s` unchanged) when they are cut short, damaged or not
 /// such bytes.

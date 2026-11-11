@@ -512,11 +512,12 @@ def experts_loading_words(args: list, size: str) -> str:
 OPENS_BROWSER = False        # set in main() when the server was started with --open: only then may a message say a browser opens
 
 
-# STRATA_DS4_RESTORE_POINTS (4): the DeepSeek engine keeps restore points where a later prompt is likely to leave this
-# one - its GEN line carries marks=<pos>,..., tail=<pos> and shared=<pos> - besides the end of the last prompt, the
-# position before it and the anchor it keeps anyway.  N (1-16) turns them on, and is also the engine's cap a
-# conversation (it reads the same setting); 0: no keys, every GEN line as before.  STRATA_DS4_RESTORE_TAIL (512): how
-# far before the prompt's end the tail point sits (0: none).  (Project Maya #639, restore points.)
+# STRATA_DS4_RESTORE_POINTS (4): the DeepSeek engines and the paged engines of both families (strata-ds41, strata-q38)
+# keep restore points where a later prompt is likely to leave this one - the request line carries marks=<pos>,...,
+# tail=<pos> and shared=<pos> - besides the points they keep on their own.  N (1-16) turns them on, and is also the
+# DeepSeek engines' cap a conversation (they read the same setting); 0: no keys, every request line as before.
+# STRATA_DS4_RESTORE_TAIL (512): how far before the prompt's end the tail point sits (0: none).  (Project Maya #639,
+# restore points; include/strata/common/state/restore_points.hpp.)
 RESTORE_LEAST = 1024        # no point before this many tokens: such a start is read again in about the time a point costs
 
 
@@ -532,11 +533,12 @@ def restore_point_settings(env=None) -> tuple[bool, int]:
     return whole("STRATA_DS4_RESTORE_POINTS", 4) > 0, whole("STRATA_DS4_RESTORE_TAIL", 512)
 
 
-def deepseek_restore_points(ids, user_id, system_id=None, tail=512, least=RESTORE_LEAST) -> dict:
-    """Where the DeepSeek engine keeps restore points for this prompt -> {"marks": [pos, ...], "tail": pos, "shared":
-    pos} (any may be missing; {}: none).  From the prompt's ids as the template wrote them: a turn opens with its role's
-    special token (<｜User｜>, a tool result's turn too; <｜System｜> for a system message after the first user turn), and
-    text inside a message never encodes to one, so the positions are the template's own.
+def get_restore_points(ids, user, system=(), tail=512, least=RESTORE_LEAST) -> dict:
+    """Where the engine keeps restore points for this prompt -> {"marks": [pos, ...], "tail": pos, "shared": pos} (any
+    may be missing; {}: none).  From the prompt's ids as the chat template wrote them: `user` and `system` are the ids
+    that open a user turn (a tool result's turn too) and a system turn (a system message after the first user turn):
+    DeepSeek's <｜User｜> and <｜System｜>, Qwen's <|im_start|> and the role's name ((): none).  They start with a
+    special token, which text inside a message never encodes to, so the positions are the template's own.
 
     - the start of the last user turn: its last message edited, or sent again after another answer, goes back there;
     - "tail": `tail` tokens before the end, when the last turn is longer than that: a new question after the same long
@@ -544,14 +546,18 @@ def deepseek_restore_points(ids, user_id, system_id=None, tail=512, least=RESTOR
     - "shared": the end of the system prompt and its tools (the first user turn): another conversation behind the same
       start goes back there, and the engine gives that point up last.
     Positions under `least` are left out: a start that short is read again in about the time a point costs."""
-    if user_id is None or len(ids) < 2:
+    user, system = tuple(user), tuple(system)
+    if not user or len(ids) < 2:
         return {}
+
+    def opens(i, head):
+        return head and ids[i] == head[0] and tuple(ids[i:i + len(head)]) == head
     first = last = None
-    for i, t in enumerate(ids):
-        if t == user_id:
+    for i in range(len(ids)):
+        if opens(i, user):
             first = i if first is None else first
             last = i
-        elif t == system_id and first is not None:
+        elif first is not None and opens(i, system):
             last = i
     marks, out = [], {}
     if first is not None and first >= least:
@@ -1659,7 +1665,7 @@ class StrataEngine:
             pn = prefix.get("tokens")
             if isinstance(pn, int) and not isinstance(pn, bool) and pn > 0:
                 keys += f" pin={pn}"
-        # restore points (Service.prepare puts them in `_restore`; only the DeepSeek engine gets them)
+        # restore points (Service.prepare puts them in `_restore`; only the engines that read them get them)
         keys += StrataEngine.restore_keys(sampling)
         # logprobs: the engine writes an `LP` line after each `T` line (an engine without them ignores
         # the key, so an older engine answers exactly as it did).  Absent = no LP lines at all.
@@ -1674,9 +1680,9 @@ class StrataEngine:
 
     @staticmethod
     def restore_keys(sampling: dict) -> str:
-        """`marks=<pos>,...`, `tail=<pos>` and `shared=<pos>`: the DeepSeek engine's restore points for this prompt
-        (Service.prepare puts them in `_restore` with STRATA_DS4_RESTORE_POINTS; no other engine gets them).  "" without:
-        the line as before."""
+        """`marks=<pos>,...`, `tail=<pos>` and `shared=<pos>`: the engine's restore points for this prompt
+        (Service.prepare puts them in `_restore` with STRATA_DS4_RESTORE_POINTS, only for the engines that read them).
+        "" without: the line as before."""
         pts = sampling.get("_restore")
         if not isinstance(pts, dict):
             return ""

@@ -99,6 +99,19 @@ bool read_logprob_key(const std::string& key, const std::string& value, LogprobR
     return true;
 }
 
+bool read_restore_point_key(const std::string& key, const std::string& value, RestorePointRequest& r) {
+    if (key == "tail" || key == "shared" || key == "pin")
+        (key == "tail" ? r.tail : key == "shared" ? r.shared : r.pin) = std::atoll(value.c_str());
+    else if (key == "marks") {
+        std::istringstream list(value);
+        for (std::string one; std::getline(list, one, ',');)
+            if (const long long p = std::atoll(one.c_str()); p > 0)
+                r.marks.push_back(p);
+    } else
+        return false;
+    return true;
+}
+
 std::string format_logprob_line(const float* logits, int64_t vocab, int32_t token, const LogprobRequest& r) {
     if (logits == nullptr || token < 0 || token >= vocab)
         return "LP nan\n";

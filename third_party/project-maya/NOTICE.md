@@ -28,11 +28,13 @@ MAYA-B port (2026-10-31), staged merges onto the v1.1.17 base:
 
 Port of Project Maya's DeepSeek restore points into `src/dsv41` (0.2.9.x, branch f-041-maya-a), staged against Maya v1.1.42
 (MIT, same copyright and permission notice as above):
-- A0, restore points (`ds4_marks.hpp`, `Model::mark`, marks in `restore()` and in the conversation slots, the `marks=` /
+- A0, restore points (`ds4_marks.hpp`, now `include/strata/common/state/restore_points.hpp`, `Model::mark`, marks in
+  `restore()` and in the conversation slots, the `marks=` /
   `shared=` / `tail=` GEN keys): Project Maya #639 (needmorevram, 50a3313; `ds4_marks.hpp` also holds #668's tail-cost
-  logic by mw00, 8721412 and 66fb17b). Test: `tests/dsv41/marks_test.cpp`, from
+  logic by mw00, 8721412 and 66fb17b). Test: `src/common/state/restore_points_test.cpp`, from
   Maya's `tests/ds4_marks_test.cpp`.
-- A1, the server side (`deepseek_restore_points`, `restore_point_settings`, `StrataEngine.restore_keys`,
+- A1, the server side (`deepseek_restore_points`, now `get_restore_points`,
+  `restore_point_settings`, `StrataEngine.restore_keys`,
   `serve/test_ds4_restore_points.py`): Project Maya #639 (needmorevram) and v1.1.37 / v1.1.39 (mw00).
 - A3, shared start across conversations (`prefix_keep` / `prefix_find` / `prefix_take` in `ds4_main.cpp`): Project Maya #607
   (mw00, b2d4c30, v1.1.37).

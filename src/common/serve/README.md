@@ -15,6 +15,9 @@ engine).
 - `request.hpp`: a request line (`RUN`, `RUNI`, plus legacy handler forms) split into its parts, its token ids, and the
   sampling keys every engine reads; the logprobs keys and their `LP` lines (`format_logprob_line`, and `RowLogprobs`,
   which the paged engine's models fill as they pick tokens).
+- `gpu_fatal.hpp`: how an engine ends after a fatal GPU error (#4350): `ERR fatal GPU error: <reason>` and exit code
+  3, by which the server fails the request with a 503 and starts the engine again. Header only; the old engines and
+  the paged engine call it where a step or a prompt read fails.
 - `paged_engine.hpp`: the paged engine (docs/MEMORY_MANAGER_PLAN.md, "One shared paged engine"): conversations in
   page pools, several decoding at once, pausing to RAM and the SSD, priorities, `CHANGE_SETTINGS`, the pools' resizes
   and start-up fill, the adaptive tier, the layer cut's planning and moves. It runs a model through `paged_model.hpp`

@@ -14,6 +14,7 @@
 #pragma once
 
 #include "strata/common/serve/memory_report.hpp"
+#include "strata/common/serve/request.hpp"
 #include "strata/models/deepseekv41/conversation_layout.hpp"
 #include "strata/models/deepseekv41/conversation_state.hpp"
 #include "strata/models/deepseekv41/kv_rows.hpp"
@@ -298,6 +299,9 @@ public:
     /// verify() alike: over the last `last_n` tokens the state has consumed (at most 4096; a verify window's row counts
     /// the drafts before it).  last_n 0 (or every penalty neutral): none, the picks exactly as without.
     void set_penalties(int last_n, float repeat, float freq, float present);
+    /// set_penalties() from a request's sampling keys (penalty_last_n -1: the whole context; a repeat penalty of 0 or
+    /// below, or a value that is not a number: neutral).
+    void set_penalties(const strata::serve::Sampling& s);
     /// The last feed's logit rows on the host (rows x vocab floats).
     bool logits(std::vector<float>& out);
     /// Copies row `row` of the head's logits (the one sample_row reads; -1: the one sample() reads) to `out`, vocab
@@ -352,6 +356,16 @@ public:
     /// another): a read of that many chunks keeps them all busy - --parallel's prompt pieces are that many chunks.
     int prompt_chunk() const;
     int pipeline_stages() const;
+    /// (Options::expert_pages) The paged engine lends each GPU's chunked prompt path its buffers for each prompt
+    /// (strata/common/serve/paged_model.hpp: get_prompt_ceiling, get_prompt_buffers, lay_out_prompt).  Gets whether a
+    /// read of `rows` tokens takes the chunked path (else windows of 16, which borrow nothing).
+    bool is_chunked_read(int rows) const;
+    /// Gets the bytes GPU `dev`'s chunked prompt path borrows on the GPU for chunks of `chunk` tokens; `host` gets
+    /// those it borrows in page-locked host memory.
+    uint64_t get_prompt_bytes(int dev, int chunk, uint64_t& host) const;
+    /// Lays GPU `dev`'s chunked prompt path out for chunks of `chunk` tokens (at most prompt_chunk()'s at load) in
+    /// the lent `device` and `host` memory (get_prompt_bytes'); `chunk` 0: waits until it no longer reads them.
+    bool lay_out_prompt(int dev, int chunk, uint8_t* device, uint8_t* host, std::string& err);
     /// A request starts (before its prompt): DISK_SKIP_AUTO may switch back on here, never mid-answer.
     void begin_request();
     int64_t pos() const;

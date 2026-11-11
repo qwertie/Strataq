@@ -12,10 +12,12 @@
 #include "strata/common/kernels/window_limits.hpp"
 #include "strata/common/serve/decode_selection.hpp"
 #include "strata/common/serve/conversation_residency.hpp"
+#include "strata/common/serve/gpu_fatal.hpp"
 #include "strata/common/serve/loop.hpp"
 #include "strata/common/serve/token_budget.hpp"
 #include "strata/common/state/pause_file.hpp"
 #include "strata/common/state/progress.hpp"
+#include "strata/common/state/restore_points.hpp"
 #include "strata/common/state/state_bytes.hpp"
 #include "strata/common/state/resume_point.hpp"
 
@@ -260,12 +262,19 @@ private:
     /// Gets the identity files are bound to into identity_ unless it is there: the model's (PagedModel::
     /// get_session_identity) and the layout of the pages.  False (and `err`) when the model files cannot be read.
     bool find_identity(std::string& err);
-    /// Reads `ids[from, to)` into `h` (the request began at `t0`); `read_to` gets how far it got.  Conversations that
-    /// decode meanwhile take steps between the prompt's turns (PagedSettings::decode_share_percent and
-    /// prompt_turn_ms).  False with `err` "cancelled" after a STOP, else on a failure that ends the engine (`fatal`:
-    /// a decode step failed, its ERR printed).
-    bool read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t from, int64_t to, Clock::time_point t0,
-                     int64_t& read_to, bool& fatal, std::string& err);
+    /// Gets where the read of `ids` from `from` stops to keep the restore points its request asked for (`asked`),
+    /// by the shared policy (strata/common/state/restore_points.hpp); none in a prompt with pictures (`pictures`),
+    /// whose spans the model reads whole.
+    std::vector<strata::core::MarkAt> plan_restore_points(const strata::serve::RestorePointRequest& asked,
+                                                          const std::vector<int64_t>& ids, int64_t from,
+                                                          bool pictures) const;
+    /// Reads `ids[from, to)` into `h` (the request began at `t0`), keeping a restore point at each of `cuts`
+    /// (plan_restore_points); `read_to` gets how far it got.  Conversations that decode meanwhile take steps between
+    /// the prompt's turns (PagedSettings::decode_share_percent and prompt_turn_ms).  False with `err` "cancelled"
+    /// after a STOP, else on a failure that ends the engine (`fatal`: a decode step failed, its ERR printed).
+    bool read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t from, int64_t to,
+                     const std::vector<strata::core::MarkAt>& cuts, Clock::time_point t0, int64_t& read_to,
+                     bool& fatal, std::string& err);
     /// Runs one step of the selected conversations and prints what it emitted; false (ERR printed) ends the engine.
     bool decode_step();
     /// Gets the unfinished requests selected by priority and request order for the next decode step.
@@ -1018,10 +1027,12 @@ bool PagedEngine::serve_request(const std::string& line, bool admit) {
     }
     int64_t priority = 0;
     strata::serve::LogprobRequest logprobs;
+    strata::serve::RestorePointRequest restore;
     for (const auto& [key, value] : req.keys)
         if (key == "priority")
             priority = std::atoll(value.c_str());
-        else if (!strata::serve::read_logprob_key(key, value, logprobs))
+        else if (!strata::serve::read_logprob_key(key, value, logprobs) &&
+                 !strata::serve::read_restore_point_key(key, value, restore))
             (void) strata::serve::read_sampling_key(key, value, smp);   // the other engines' keys are not this one's
     const int64_t n = (int64_t) ids.size();
     if (input_.is_cancel_requested(req.request_id)) {
@@ -1057,13 +1068,13 @@ bool PagedEngine::serve_request(const std::string& line, bool admit) {
         end_preempted(target);
     }
     if (target == at_.size() && !create_conversation(err)) {
-        print_response("ERR %s\n", err.c_str());
+        print_error_or_exit(err);
         return false;
     }
     print_response("STARTED\n");
     ImageKeys images;
     if (!model_.prepare_images(req, ids, images, err)) {
-        print_response("ERR %s\n", err.c_str());
+        print_error_or_exit(err);
         return true;
     }
     input_.clear_stop();   // a STOP between requests is stale
@@ -1089,7 +1100,7 @@ bool PagedEngine::serve_request(const std::string& line, bool admit) {
     if (facts_.has_drafter)
         model_.forget_drafts(session);
     if (!h.has_pages() && !init_pages(h, err, priority)) {
-        print_response("ERR %s\n", err.c_str());
+        print_error_or_exit(err);
         return true;
     }
     if (resume == 0) {
@@ -1101,26 +1112,27 @@ bool PagedEngine::serve_request(const std::string& line, bool admit) {
     print_response("RESUME %lld\n", (long long) resume);
     h.images = std::move(images);
     model_.attach_images(h.parts);
-    model_.start_request(session, {smp, req.keys});
+    model_.start_request(session, {smp, req.keys, restore.get_shared()});
     model_.logprobs[(size_t) session].start(std::move(logprobs), n - 1);
     const char* finish = "length";
     int64_t read_to = resume;   // the prompt tokens the session holds
     if (!make_room(h, n - 1, err, priority)) {   // refused: the engine stays up
-        print_response("ERR %s\n", err.c_str());
+        print_error_or_exit(err);
         return true;
     }
     const PromptLoan loan{*this};
     if (n - 1 > resume && !lend_prompt_buffers(n - 1 - resume, err)) {   // refused: the engine stays up
-        print_response("ERR %s\n", err.c_str());
+        print_error_or_exit(err);
         return true;
     }
     if (n - 1 > resume) {
         bool fatal = false;
-        const bool ok = read_prompt(h, ids, resume, n - 1, t0, read_to, fatal, err);
+        const bool ok = read_prompt(h, ids, resume, n - 1, plan_restore_points(restore, ids, resume, !h.images.empty()),
+                                    t0, read_to, fatal, err);
         if (fatal)
             return false;
         if (!ok && err != "cancelled" && err != "settings pending") {
-            print_response("ERR %s\n", err.c_str());
+            print_error_or_exit(err);
             return false;
         }
         if (!ok)
@@ -1217,8 +1229,23 @@ void PagedEngine::finish_request(Held& h, const char* finish) {
     model_.end_request();
 }
 
+std::vector<strata::core::MarkAt> PagedEngine::plan_restore_points(const strata::serve::RestorePointRequest& asked,
+                                                                   const std::vector<int64_t>& ids, int64_t from,
+                                                                   bool pictures) const {
+    if (pictures)
+        return {};
+    std::vector<int64_t> at = asked.marks;
+    if (asked.tail > 0)
+        at.push_back(asked.tail);
+    std::vector<strata::core::MarkAt> cuts = strata::core::mark_plan(
+        at, asked.get_shared(), from, (int64_t) ids.size(), facts_.restore_points, strata::core::kMarkGap);
+    std::erase_if(cuts, [](const strata::core::MarkAt& m) { return m.pos <= 0; });   // (no state before a token)
+    return cuts;
+}
+
 bool PagedEngine::read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t from, int64_t to,
-                              Clock::time_point t0, int64_t& read_to, bool& fatal, std::string& err) {
+                              const std::vector<strata::core::MarkAt>& cuts, Clock::time_point t0, int64_t& read_to,
+                              bool& fatal, std::string& err) {
     reading_ = &h;
     h.live.assign(ids.begin(), ids.begin() + from);
     const PagedModel::ChunkDone on_chunk = [&](int64_t pos0, int64_t T, std::string& e) -> bool {
@@ -1241,13 +1268,20 @@ bool PagedEngine::read_prompt(Held& h, const std::vector<int64_t>& ids, int64_t 
     };
     // beside conversations that decode, a chunk at a time, and they decode between two turns of whole chunks
     const int64_t piece = std::max<int64_t>(model_.get_prompt_chunk(), 1);
+    size_t next_cut = 0;
     bool ok = true;
+    if (!cuts.empty() && cuts[0].pos == from)   // (the state as it is)
+        ok = model_.keep_restore_point(h.parts, ids, from, cuts[next_cut++].shared, err);
     Clock::time_point turn = Clock::now();
-    for (int64_t q = from; ok && q < to; q += piece) {
-        ok = model_.wait_state(err) &&
-             model_.read_prompt(h.parts, ids, q, std::min(piece, to - q), is_model_drafting(), on_chunk, err);
+    for (int64_t q = from, n = 0; ok && q < to; q += n) {
+        n = std::min(piece, to - q);
+        if (next_cut < cuts.size() && cuts[next_cut].pos < q + n)
+            n = cuts[next_cut].pos - q;
+        ok = model_.wait_state(err) && model_.read_prompt(h.parts, ids, q, n, is_model_drafting(), on_chunk, err);
+        if (ok && next_cut < cuts.size() && cuts[next_cut].pos == q + n)
+            ok = model_.keep_restore_point(h.parts, ids, q + n, cuts[next_cut++].shared, err);
         const double turn_ms = get_ms_since(turn);
-        if (q + piece >= to || turn_ms < (double) settings_.prompt_turn_ms)
+        if (q + n >= to || turn_ms < (double) settings_.prompt_turn_ms)
             continue;
         const double budget_ms = (double) settings_.decode_share_percent / 100.0 * turn_ms;
         const Clock::time_point td = Clock::now();
@@ -1288,8 +1322,9 @@ bool PagedEngine::decode_step() {
     const std::vector<float>& usage = model_.get_usage();
     routed_before_.assign(usage.begin(), usage.end());
     std::string err;
+    exit_if_gpu_fatal("");   // (the test hook counts steps here)
     if (!step_.run(active, err)) {
-        print_response("ERR %s\n", err.c_str());
+        print_error_or_exit(err);
         return false;
     }
     if (const int64_t routed = std::inner_product(usage.begin(), usage.end(), routed_before_.begin(), (int64_t) 0,
@@ -1989,7 +2024,7 @@ bool PagedEngine::adapt_experts() {
         const strata::core::ExpertSwap& s = swaps[i];
         const int got = get_card_of(s.layer).experts.replace(s.layer, s.out, s.in, err);
         if (got < 0) {
-            print_response("ERR moving an expert into the GPU's pool: %s\n", err.c_str());
+            print_error_or_exit("moving an expert into the GPU's pool: " + err);
             return false;
         }
         moved += got;
@@ -2000,7 +2035,7 @@ bool PagedEngine::adapt_experts() {
         u *= decay;
     seen_ = usage;
     if (!publish_residency(err)) {
-        print_response("ERR %s\n", err.c_str());
+        print_error_or_exit(err);
         return false;
     }
     swapped_ += moved;
@@ -2916,7 +2951,7 @@ bool PagedEngine::wait_model_state() {
         return true;
     if (!fatal_error_.empty())
         err = fatal_error_;
-    print_response("ERR %s\n", err.c_str());
+    print_error_or_exit(err);
     return false;
 }
 

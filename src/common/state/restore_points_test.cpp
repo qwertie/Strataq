@@ -1,23 +1,25 @@
-// maya-ds4's restore points (src/models/deepseekv41/ds4_marks.hpp): the one a new prompt goes back to, the ones a request's read
-// keeps, the one that gives way to a new one - and, put together as the serve loop puts them (prompt_in: the restore,
-// then the read in pieces), the cases they are for: the last user message edited, a new question after the same
-// document, a history rendered again.  No GPU, no model: a conversation here is its tokens and its points' positions.
+// Restore points (strata/common/state/restore_points.hpp, from Maya's tests/ds4_marks_test.cpp): the one a new prompt
+// goes back to, the ones a request's read keeps, the one that gives way to a new one - and, put together as the serve
+// loop puts them (prompt_in: the restore, then the read in pieces), the cases they are for: the last user message
+// edited, a new question after the same document, a history rendered again.  No GPU, no model: a conversation here is
+// its tokens and its points' positions.
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
-#include "ds4_marks.hpp"
+#include "strata/common/state/restore_points.hpp"
 
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
 
-using strata::ds4::latest_point;
-using strata::ds4::mark_plan;
-using strata::ds4::mark_victim;
-using strata::ds4::MarkAt;
-using strata::ds4::MarkUse;
-using strata::ds4::TailCost;
+using strata::core::get_restore_point_cap;
+using strata::core::latest_point;
+using strata::core::mark_plan;
+using strata::core::mark_victim;
+using strata::core::MarkAt;
+using strata::core::MarkUse;
+using strata::core::TailCost;
 
 namespace {
 
@@ -174,6 +176,11 @@ int main() {
     assert(mark_victim({{10, true, 1}, {20, false, 3}, {30, false, 2}}) == 2);
     assert(mark_victim({{10, true, 4}, {20, true, 3}}) == 1);
 
+    // get_restore_point_cap: Qwen3.8's points (its recurrent state) fit 3 in the budget; DeepSeek's keep their own cap
+    assert(get_restore_point_cap(117683200, 16) == 3);
+    assert(get_restore_point_cap(3u << 20, 4) == 4);
+    assert(get_restore_point_cap(117683200, 0) == 0);
+
     // ---- the cases, as the serve loop runs them
     const std::vector<int> sys = run(1000, 3000);   // a system prompt and its tools: 3,000 tokens
     {   // the last user message edited: back to its start (the boundary), not to token 0
@@ -287,6 +294,6 @@ int main() {
         assert(cheap.add(10000.0, 20000, 450.0, 512) && cheap.add(10000.0, 20000, 460.0, 512));
         assert(cheap.measured() && !cheap.costly());
     }
-    std::printf("ds4_marks_test: ok\n");
+    std::printf("restore_points_test: ok\n");
     return 0;
 }

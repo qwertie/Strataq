@@ -2855,31 +2855,36 @@ class Service:
             self.set_restore_points(req, ids, bool(images) or ds_pics)
         return ids, kwargs.get("enable_thinking", True) is not False, max_new
 
-    def deepseek_turn_ids(self):
-        """(<｜User｜>'s id, <｜System｜>'s id) of the DeepSeek template, each None where the vocabulary has no such single token."""
-        got = getattr(self, "_ds_turn_ids", None)
+    def get_turn_ids(self):
+        """(the ids that open a user turn, those that open a system turn) in this family's chat template: DeepSeek's
+        <｜User｜> and <｜System｜>, Qwen's <|im_start|> and the role's name; () where the vocabulary has no such special
+        token."""
+        got = getattr(self, "_turn_ids", None)
         if got is None:
-            def one(text):
+            def opener(special, role=""):
                 try:
-                    t = self.tok.encode(text, parse_special=True)
+                    if len(self.tok.encode(special, parse_special=True)) != 1:
+                        return ()
+                    return tuple(int(t) for t in self.tok.encode(special + role, parse_special=True))
                 except Exception:
-                    return None
-                return int(t[0]) if len(t) == 1 else None
-            got = self._ds_turn_ids = (one("<｜User｜>"), one("<｜System｜>"))
+                    return ()
+            got = self._turn_ids = ((opener("<｜User｜>"), opener("<｜System｜>")) if self.family == "deepseek41" else
+                                    (opener("<|im_start|>", "user"), opener("<|im_start|>", "system")))
         return got
 
     def set_restore_points(self, req: dict, ids, has_images: bool) -> None:
-        """STRATA_DS4_RESTORE_POINTS: where the DeepSeek engine keeps restore points for this prompt, in req["_restore"]
-        (never a client's own; not with pictures, whose spans the engine reads whole).  The shared start is left to
-        strata_prefix (pin=N) where the request has one."""
+        """STRATA_DS4_RESTORE_POINTS: where the engine keeps restore points for this prompt, in req["_restore"] (never
+        a client's own): the DeepSeek engines' and the paged engines' (RUN), not the other Qwen engines'; not with
+        pictures, whose spans the engine reads whole, nor for a one-shot call ("strata_checkpoint": false).  The shared
+        start is left to strata_prefix (pin=N) where the request has one."""
         req.pop("_restore", None)
-        if self.family != "deepseek41" or has_images:
+        reads_them = self.family == "deepseek41" or getattr(self.engine, "request_protocol", False)
+        if not reads_them or has_images or req.get("strata_checkpoint") is False:
             return
         on, tail = engine_client.restore_point_settings()
         if not on:
             return
-        user_id, system_id = self.deepseek_turn_ids()
-        pts = engine_client.deepseek_restore_points(ids, user_id, system_id, tail)
+        pts = engine_client.get_restore_points(ids, *self.get_turn_ids(), tail)
         pref = req.get("strata_prefix")
         if (isinstance(pref, dict) and pref.get("tokens")) or os.environ.get("STRATA_DS4_RESTORE_SHARED") == "0":
             pts.pop("shared", None)   # (the system prompt is already the pin's, or STRATA_DS4_RESTORE_SHARED=0: no shared mark)

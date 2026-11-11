@@ -20,9 +20,9 @@
 // `shared=N` (or `pin=N`) on a GEN marks the first N prompt tokens as a start other requests share (a system prompt and
 // its tools): the read stops there for a restore point, so a request behind the same start - another agent - goes back
 // to it instead of reading it again (also without slots).  `marks=a,b,..` and `tail=P` ask for more restore points (the
-// start of the last user message, a point near the prompt's tail; ds4_marks.hpp, STRATA_DS4_RESTORE_POINTS of them at
-// most a conversation, 4; 0: none kept), where a prompt that leaves the conversation after one goes back to it instead
-// of further.  STRATA_DS4_REUSE=0 turns every reuse off (each request reads its whole prompt).
+// start of the last user message, a point near the prompt's tail; restore_points.hpp, STRATA_DS4_RESTORE_POINTS of them
+// at most a conversation, 4; 0: none kept), where a prompt that leaves the conversation after one goes back to it
+// instead of further.  STRATA_DS4_REUSE=0 turns every reuse off (each request reads its whole prompt).
 #if defined(__APPLE__)
 #include <execinfo.h>
 #include <csignal>
@@ -31,12 +31,13 @@
 #endif
 #include "ds4_launch.h"   // ds4_dbg
 #include "ds4_evt.hpp"
-#include "ds4_marks.hpp"
+#include "strata/common/state/restore_points.hpp"
 #include "ds4_model.hpp"
 #include "strata/base/platform/io_priority.hpp"
 #include "strata/base/platform/os.hpp"
 #include "ds4_packinfo.hpp"
 #include "ds4_slotmeta.hpp"
+#include "strata/common/serve/gpu_fatal.hpp"
 #include "strata/common/serve/loop.hpp"
 #include "strata/common/serve/request.hpp"
 #include "strata/common/state/token_listing.hpp"
@@ -61,6 +62,8 @@
 #include <thread>
 #include <vector>
 
+using strata::serve::exit_gpu_fatal;
+using strata::serve::exit_if_gpu_fatal;
 using strata::serve::print_response;
 
 namespace {
@@ -222,14 +225,9 @@ struct Req {
     strata::serve::Sampling smp;   // the sampling keys and penalties (top_k 64 when absent: parse_gen)
     int spec = -1;          // spec=0|1: this request drafts or not (-1: as the engine was started)
     float conf = -1.0f;     // dspark_conf=F: the drafts' confidence floor for this request (-1: the engine's)
-    long long pin = 0;      // pin=N: the first N prompt tokens are a start other requests share (a system prompt and its
-                            // tools): the state at N is kept as a checkpoint, so another agent behind the same start
-                            // goes back to it instead of reading it again
-    // marks=<pos>,... and shared=<pos>: restore points the read keeps (the server's: the start of the last user message;
-    // the end of a start other conversations share, given up last) - a later prompt that leaves this one past one of them
-    // goes back there (ds4_marks.hpp); pin=N is shared=N.  tail=<pos>: the point near the prompt's tail, kept like a mark
-    std::vector<int64_t> marks;
-    long long shared = -1, tail = -1;
+    // marks=<pos>,..., tail=<pos> and shared=<pos> (or pin=N): restore points the read keeps - a later prompt that
+    // leaves this one past one of them goes back there (restore_points.hpp)
+    strata::serve::RestorePointRequest restore;
     long long rid = -1;     // rid=<id> (--parallel: every request's, its lines tagged with it)
     float cum = -1.0f;      // dspark_cum=F: the cut on the product of the confidences (-1: the engine's, Model::get_default_cum)
     std::string file;   // GENI: the pictures
@@ -241,26 +239,6 @@ using strata::ds4::read_pics;
 using strata::ds4::SpanCache;
 
 namespace {
-// After a fatal GPU error (an illegal memory access, a launch failure, a hardware exception) the device context is gone: every later
-// CUDA / HIP call of this process fails, so an engine that keeps serving only turns each request into an error until someone restarts
-// it (#4350, an unattended agent loop is dead).  The engine says so on stdout and exits; the server starts it again on the next
-// request, like any engine death, and fails only the request in flight with a 503 (retryable).
-bool gpu_fatal_text(const std::string& e) {
-    static const char* const k[] = {"illegal memory access", "unspecified launch failure", "hardware exception", "illegal instruction",
-                                    "misaligned address", "device-side assert", "uncorrectable ECC", "launch timed out",
-                                    "launch failure", "device lost", "ERROR_DEVICE_LOST"};
-    for (const char* w : k)
-        if (e.find(w) != std::string::npos) return true;
-    return false;
-}
-[[noreturn]] void die_gpu_fatal(const std::string& e) {
-    std::fprintf(stderr, "ds4: fatal GPU error (%s): the GPU context cannot be used again, so the engine ends and the server starts it again\n",
-                 e.c_str());
-    std::fflush(stderr);
-    print_response("ERR fatal GPU error: %s\n", e.c_str());
-    std::fflush(stdout);
-    std::_Exit(3);   // (not a clean unwind: freeing device memory on a dead context can hang, as the Qwen engine's #224 exit knows)
-}
 // DS4_INJECT_FATAL=N (a test hook, off when unset): the Nth GEN request fails with the text of a real fatal error, taking the same path
 bool inject_fatal_now() {
     static const long n = [] { const char* v = std::getenv("DS4_INJECT_FATAL"); return v != nullptr ? std::atol(v) : 0L; }();
@@ -286,17 +264,7 @@ bool parse_gen(const std::string& line, Req& r) {
         if (strata::serve::read_sampling_key(k, v, r.smp)) continue;
         if (k == "spec") r.spec = std::atoi(v.c_str()) != 0;
         else if (k == "dspark_conf") r.conf = std::strtof(v.c_str(), nullptr);
-        else if (k == "pin") r.pin = std::atoll(v.c_str());
-        else if (k == "shared") r.shared = std::atoll(v.c_str());
-        else if (k == "tail") r.tail = std::atoll(v.c_str());
-        else if (k == "marks") {
-            std::stringstream ss(v);
-            std::string x;
-            while (std::getline(ss, x, ',')) {
-                const long long n = std::atoll(x.c_str());
-                if (n > 0) r.marks.push_back(n);
-            }
-        }
+        else if (strata::serve::read_restore_point_key(k, v, r.restore)) continue;
         else if (k == "dspark_cum" || k == "spec_cum") r.cum = std::strtof(v.c_str(), nullptr);
         else if (k == "spec_min_p") r.conf = std::strtof(v.c_str(), nullptr);   // (the server's strata_tune names)
         else if (k == "rid") r.rid = std::atoll(v.c_str());
@@ -304,16 +272,6 @@ bool parse_gen(const std::string& line, Req& r) {
     r.file = rl.file;
     r.ids = parse_ids(rl.ids);
     return !r.ids.empty() && (!rl.pictures || !r.file.empty());
-}
-
-// Sets the penalties of every pick of request `r`'s answer, the drafts' verify included (penalty_last_n -1: the whole
-// context; a repeat penalty of 0 or below, or a value that is not a number: neutral).
-void set_penalties(strata::ds4::Model& m, const Req& r) {
-    const strata::serve::Sampling& s = r.smp;
-    m.set_penalties(s.penalty_last_n < 0 ? INT_MAX : s.penalty_last_n,
-                    std::isfinite(s.penalty_repeat) && s.penalty_repeat > 0.0f ? s.penalty_repeat : 1.0f,
-                    std::isfinite(s.penalty_freq) ? s.penalty_freq : 0.0f,
-                    std::isfinite(s.penalty_present) ? s.penalty_present : 0.0f);
 }
 
 int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float conf_min, const std::string& pack) {
@@ -348,7 +306,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
         const char* v = std::getenv("STRATA_DS4_RESTORE_TAIL_AUTO");
         return v == nullptr || std::atoi(v) != 0;
     }();
-    strata::ds4::TailCost tail_cost;
+    strata::core::TailCost tail_cost;
     SpanCache spans;
     const int img_tok = m.image_token();
     // CONVERSATION SLOTS: a request that does not continue the conversation in the model first sets that one aside
@@ -825,7 +783,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
         size_t next_pp = 0;      // (the next PP line's)
         bool continued = false;  // (the conversation goes on - its anchor stays)
         std::vector<Pic> pics;
-        std::vector<strata::ds4::MarkAt> cuts;   // the restore points the read stops at (ds4_marks.hpp)
+        std::vector<strata::core::MarkAt> cuts;  // the restore points the read stops at (restore_points.hpp)
         size_t next_cut = 0;                     // (the next of them)
         int64_t tail_at = -1;                    // (the tail point the read keeps, TailCost)
         double ms_main = 0.0, ms_tail = 0.0;
@@ -957,26 +915,28 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
             held.clear();
             return false;
         }
-        // the restore points the request asks for (marks= / tail= / shared= / pin=N; ds4_marks.hpp picks the ones this
-        // read reaches, and leaves the prompt's last token to the usual end): the read stops at each and keeps the state
+        // the restore points the request asks for (marks= / tail= / shared= / pin=N; restore_points.hpp picks the ones
+        // this read reaches, and leaves the prompt's last token to the usual end): the read stops at each and keeps the
+        // state
         const size_t total = r.ids.size();
-        std::vector<strata::ds4::MarkAt>& cuts = P.cuts;
+        std::vector<strata::core::MarkAt>& cuts = P.cuts;
         cuts.clear();
         size_t& next_cut = P.next_cut;
         next_cut = 0;
         // the tail point (tail=): only where the read reaches it, and - once two reads measured it - where its run costs
-        // no more than reading its tokens again (TailCost, ds4_marks.hpp; Maya #668: a 4-GPU split or experts outside
-        // VRAM make the stop cost 4-9x); one in 32 is still kept to measure again
+        // no more than reading its tokens again (TailCost, restore_points.hpp; Maya #668: a 4-GPU split or experts
+        // outside VRAM make the stop cost 4-9x); one in 32 is still kept to measure again
         int64_t& tail_at = P.tail_at;
         tail_at = -1;
         P.ms_main = P.ms_tail = 0.0;
         if (m.marks_cap() > 0) {
-            std::vector<int64_t> asked = r.marks;
-            if (r.tail > (long long) from && r.tail < (long long) total - 1) {
+            std::vector<int64_t> asked = r.restore.marks;
+            const int64_t tail = r.restore.tail;
+            if (tail > (int64_t) from && tail < (int64_t) total - 1) {
                 const bool was = tail_cost.costly();
                 if (!tail_auto || tail_cost.keep()) {
-                    asked.push_back(r.tail);
-                    tail_at = r.tail;
+                    asked.push_back(tail);
+                    tail_at = tail;
                 }
                 static bool said_off = false;
                 if (tail_auto && was && !said_off) {
@@ -989,11 +949,12 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
                     said_off = true;
                 }
             }
-            const long long shared = r.shared >= 0 ? r.shared : (r.pin >= 256 ? r.pin : -1);
+            const int64_t shared = r.restore.get_shared();
             if (!asked.empty() || shared >= 0) {
                 std::vector<std::pair<int64_t, int64_t>> spans;
                 for (const Pic& q : pics) spans.push_back({q.start, (int64_t) q.len});
-                cuts = strata::ds4::mark_plan(asked, shared, (int64_t) from, (int64_t) total, m.marks_cap(), 16, spans);
+                cuts = strata::core::mark_plan(asked, shared, (int64_t) from, (int64_t) total, m.marks_cap(),
+                                               strata::core::kMarkGap, spans);
             }
         }
         // a STOP while the prompt is read ends it there (the engine's run of chunks at a layer or chunk, windows between
@@ -1019,7 +980,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
         const double t0 = P.t0;
         const size_t start = P.done;
         std::vector<Pic>& pics = P.pics;
-        std::vector<strata::ds4::MarkAt>& cuts = P.cuts;
+        std::vector<strata::core::MarkAt>& cuts = P.cuts;
         size_t& next_cut = P.next_cut;
         size_t& done = P.done;
         size_t& next_pp = P.next_pp;
@@ -1129,8 +1090,8 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
         m.set_progress(nullptr);   // (its lambda reads this call's locals)
         if (ok && !stopped && done < total) return true;   // (a piece: more to read)
         m.set_images({});
-        if (inject_fatal_now()) die_gpu_fatal("injected (DS4_INJECT_FATAL): an illegal memory access was encountered");
-        if (!ok && gpu_fatal_text(err)) die_gpu_fatal(err);
+        if (inject_fatal_now()) exit_gpu_fatal("injected (DS4_INJECT_FATAL): an illegal memory access was encountered");
+        if (!ok) exit_if_gpu_fatal(err);
         if (stopped || (!ok && m.cancelled())) {
             const bool back = from > 0 && m.restore((int64_t) from) && (size_t) m.pos() == from;
             if (!back) {
@@ -1234,7 +1195,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
             dump_f = std::fopen((std::string(dump_prefix) + "." + std::to_string(++n_req) + ".f32").c_str(), "wb");
             dump_rows();
         }
-        set_penalties(m, r);
+        m.set_penalties(r.smp);
         int tok = m.sample(r.smp.temperature, r.smp.top_p, r.smp.top_k, r.smp.min_p, r.smp.seed, counter++);
         std::vector<int> got;
         // STAT for the Monitor every 8 tokens and at the end, over this answer so far: the GLM engine's keys (speed, the
@@ -1291,7 +1252,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
                 if (!round(m, tok, room, try_spec, r.conf >= 0 ? r.conf : conf_min, r.smp.temperature, r.smp.top_p, r.smp.top_k,
                            r.smp.min_p, r.smp.seed, counter, got,
                            off, acc, err, r.cum)) {
-                    if (gpu_fatal_text(err)) die_gpu_fatal(err);
+                    exit_if_gpu_fatal(err);
                     std::fprintf(stderr, "ds4: %s\n", err.c_str());
                     finish = "cancel";
                     break;
@@ -1473,7 +1434,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
             Act& a = *need[0];
             bind(a.seq);
             const int room = (int) std::min<long long>(a.limit - a.produced, m.max_context() - m.pos());
-            set_penalties(m, a.r);
+            m.set_penalties(a.r.smp);
             int off = 0, acc = 0;
             const bool try_spec = (a.r.spec < 0 ? spec : a.r.spec != 0) && !a.cool;
             if (!round(m, a.tok, room, try_spec, a.r.conf >= 0 ? a.r.conf : conf_min, a.r.smp.temperature, a.r.smp.top_p,
@@ -1557,7 +1518,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
                 else
                     for (int i = 0; i < nn; ++i) {
                         Act& a = *need[(size_t) i];
-                        set_penalties(m, a.r);
+                        m.set_penalties(a.r.smp);
                         a.tok = m.sample_multi(i, a.r.smp.temperature, a.r.smp.top_p, a.r.smp.top_k, a.r.smp.min_p, a.r.smp.seed,
                                                a.counter++);
                         a.cool = tried[(size_t) i] != 0;   // (its drafter tried and kept none: rests a round)
@@ -1578,7 +1539,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
                     for (int i = 0; i < nn; ++i) {
                         Act& a = *need[(size_t) i];
                         const std::vector<int>& d = drafts[(size_t) i];
-                        set_penalties(m, a.r);
+                        m.set_penalties(a.r.smp);
                         int acc = 0, next = -1;
                         if (!m.verify_multi(i, d, a.r.smp.temperature, a.r.smp.top_p, a.r.smp.top_k, a.r.smp.min_p, a.r.smp.seed, a.counter,
                                             acc, next, err)) {
@@ -1604,7 +1565,7 @@ int serve(strata::ds4::Model& m, const std::string& eos_list, bool spec, float c
             a.reading = false;
             a.t1 = now_ms();
             a.limit = a.r.max_new > 0 ? a.r.max_new : m.max_context() - (long long) a.r.ids.size();
-            set_penalties(m, a.r);
+            m.set_penalties(a.r.smp);
             a.tok = m.sample(a.r.smp.temperature, a.r.smp.top_p, a.r.smp.top_k, a.r.smp.min_p, a.r.smp.seed, a.counter++);
         };
         // the next `piece` tokens of its prompt into its conversation (a STOP ends it here, its DONE written); `yield`:

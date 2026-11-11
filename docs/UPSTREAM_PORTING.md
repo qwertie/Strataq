@@ -149,6 +149,13 @@ code updates its rows here. Rows are grouped by step; `{a,b}` lists several file
 | `include/strata/program/split_walk.hpp` | `include/strata/common/experts/split_walk.hpp` (memory-manager) | M | done |
 | upstream's `src/core/dflash2_{q4_parity,ring_test}.cpp` | `src/models/qwen38/` | A3 | done |
 | the expert arena's RAM rules in upstream's `include/strata/core/ple_residency.hpp` (`arena_ram_verdict`, `--ram-keep-gib`, from #4846 on) | `include/strata/common/experts/arena_ram.hpp`, which `models/qwen38/ple_residency.hpp` includes | M | done |
+| the chunked prompt path's room in `src/dsv41/ds4_model.cu`: what `Impl::alloc_chunks` allocates per GPU (`lay_chunk`'s buffers, `Chunk::ring`, `Chunk::emb_host`, `Chunk::eg_host`) and `finish_load` (`Chunk::stage`) | the same file: `Impl::lay_prompt` lays all of them out (the GPU's and the page-locked host's) from two addresses or counts their bytes; `alloc_chunks` allocates that room once for strata-dsv41 (the staging still in `finish_load`), and `Impl::lay_out_prompt` lays it out in what the paged engine lends strata-ds41 for each prompt (`PagedEngine::lend_prompt_buffers` in `src/common/serve/paged_engine.cpp`, shared with strata-q38) | M | done |
+| the fatal GPU error end (e1b27d54, #4350): `exit_gpu_fatal`, `exit_if_gpu_fatal` in `src/program/generate.cpp`; `gpu_fatal_text`, `die_gpu_fatal` in `src/dsv41/ds4_main.cpp` | `include/strata/common/serve/gpu_fatal.hpp`: `exit_gpu_fatal`, `exit_if_gpu_fatal` (with `STRATA_INJECT_FATAL`), `print_error_or_exit` for the paged engine; the error texts and the sticky-error check are `is_context_lost_error`, `get_lost_context_error` in `include/strata/base/gpu/runtime.hpp`. `DS4_INJECT_FATAL` stays in `ds4_main.cpp` | M | done |
+| `src/dsv41/ds4_marks.hpp` (restore points: `latest_point`, `mark_plan`, `mark_victim`, `TailCost`, `kMarksMax`; 6e53c7f8d, 3ec28f5cc, c17b458c4, 0be5d73f0, e9d9ed8bb) and `tests/dsv41/marks_test.cpp` | `include/strata/common/state/restore_points.hpp`, namespace `strata::core` (adds `kMarkGap` and `get_restore_point_cap`), and `src/common/state/restore_points_test.cpp`. strata-dsv41 and the paged engine plan with it (`PagedEngine::plan_restore_points`; the models keep each point with `PagedModel::keep_restore_point`). strata-q38's points join its checkpoint chain (`--prompt-cache`, with `--prompt-cache-every` beside them), whose retention stays `checkpoint_retention.hpp`'s; strata-ds41's are `Model::mark` as strata-dsv41's | M | done |
+| `src/dsv41/ds4_main.cpp`'s GEN keys `marks=`, `tail=`, `shared=`, `pin=` (`parse_gen`) | `read_restore_point_key` and `RestorePointRequest` in `include/strata/common/serve/request.hpp`, read by `parse_gen` and the paged engine's RUN | M | done |
+| `serve/server.py`'s `restore_point_settings`, `deepseek_restore_points`, `StrataEngine.restore_keys`, `Service.set_restore_points`, `Service.deepseek_turn_ids` | the first three in `strata_common/engine_client.py` (`deepseek_restore_points` is `get_restore_points`: turn openers of several ids, so Qwen's too), the others in `strata_server/server.py` (`deepseek_turn_ids` is `get_turn_ids`, for both families); the keys also go to the paged engines' RUN. `serve/test_ds4_restore_points.py` is `strata_server/test_restore_points.py` | M | done |
+| `src/dsv41/ds4_model.cu`'s three checkpoints (`ck[3]`) | the same three: strata-ds41's fourth (the shared start of `pin=N`) became a restore point, so the slot roles of a mark and a shared mark are 3 and 4 again, as upstream's | M | done |
+| `set_penalties(Model&, const Req&)` in `src/dsv41/ds4_main.cpp` | `strata::ds4::Model::set_penalties(const serve::Sampling&)`, which strata-ds41 also calls when a conversation takes the model's seat | M | done |
 
 ## Log
 
@@ -240,8 +247,7 @@ geometry and DFlash2 loading are shared, DFlash2 and `--lookup-max-t` off in str
 paged)` skips the engine-owned Linux defaults for it). Two-pass QSA refuses `units` and the prompt path falls back.
 One conversation's window in `paged_engine.cpp` stays at `kVerifyNarrowT` (8), since `DraftPolicy::kMaxT` is now 16.
 The old DeepSeek engine's `--parallel` runs on `KvRows` (`swap_seq_state`); restore points sit beside
-memory-manager's four checkpoints (slot roles 4 and 5). strata-ds41 keeps `--batch`; PCIe lane, one-GPU decode,
-recent slots and prompt-path slot borrowing stay off for it. Still open for the new engines: upstream's
-`ERR fatal GPU error` line with exit code 3 (they end on a failed step with a plain `ERR`), the penalty window
-over the answer alone (strata-q38 counts the prompt too) and `pen_from`, the stop bound, DFlash2, `--lookup-max-t`,
-and for strata-ds41 penalties in its joint verify and restore points.
+the three checkpoints (slot roles 3 and 4, as upstream's). strata-ds41 keeps `--batch`; PCIe lane, one-GPU decode,
+recent slots and prompt-path slot borrowing stay off for it. Still open for the new engines: the
+penalty window over the answer alone (strata-q38 counts the prompt too), `pen_from`, the stop bound, DFlash2,
+`--lookup-max-t`, and the tail point's cost check (`TailCost`: the paged engine keeps every tail point).

@@ -60,6 +60,14 @@ int main() {
     check(format_logprob_line(logits, 4, 2, lp) == "LP -1.493812 3:-2.493812\n",
           "allowed: the picked token and an id past the vocabulary are left out");
 
+    RestorePointRequest rp;
+    check(rp.get_shared() == -1 && !read_restore_point_key("top_k", "4", rp), "no restore points");
+    check(read_restore_point_key("marks", "3000,,0,4000", rp) && rp.marks == std::vector<int64_t>{3000, 4000} &&
+          read_restore_point_key("tail", "5000", rp) && rp.tail == 5000, "marks and tail");
+    check(read_restore_point_key("pin", "255", rp) && rp.get_shared() == -1 &&
+          read_restore_point_key("pin", "256", rp) && rp.get_shared() == 256, "a pin of 256 tokens or more");
+    check(read_restore_point_key("shared", "200", rp) && rp.get_shared() == 200, "shared before pin");
+
     RowLogprobs rows;
     rows.start({}, 5);
     rows.note(5, 1, 4, [&](float*) -> bool { return check(false, "not asked: no copy"), false; });

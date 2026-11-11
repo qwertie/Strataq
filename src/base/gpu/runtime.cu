@@ -59,4 +59,12 @@ void* gpu_host_alloc_mapped(size_t bytes, void** device_view) {
 
 void gpu_host_free(void* p) { (void) strata::core::release_host(p); }
 
+std::string get_lost_context_error() {
+    const cudaError_t sticky = cudaPeekAtLastError();
+    if (sticky == cudaSuccess)
+        return {};
+    std::string text = cudaGetErrorString(sticky);
+    return is_context_lost_error(text) ? text : std::string();
+}
+
 }  // namespace strata::core

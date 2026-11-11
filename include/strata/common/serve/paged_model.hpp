@@ -109,6 +109,8 @@ struct PagedModelFacts {
     uint64_t drafter_expert_bytes = 0;
     /// the most conversations one step may run; 0: as many as the step has rows
     int max_concurrent = 0;
+    /// the most restore points a request's prompt read keeps (marks=, tail=, shared=; keep_restore_point); 0: none
+    int restore_points = 0;
     bool serial_conversations = false;     ///< the model switches shared inputs between conversations
     uint64_t extra_resident_vram = UINT64_MAX; ///< Smallest card VRAM allowing an extra cached conversation by default.
     std::vector<uint64_t> expert_bytes;     ///< per layer: one expert's bytes
@@ -136,6 +138,7 @@ struct RequestStart {
     Sampling sampling;
     /// the request line's keys, in its order: the sampling keys and the engine's own (priority) among them
     std::vector<std::pair<std::string, std::string>> keys;
+    int64_t shared_start = -1;   ///< where the start that other conversations share ends (shared= or pin=); -1: none
 };
 
 
@@ -254,6 +257,12 @@ public:
     virtual bool get_session_identity(strata::core::SessionFileIdentity& id, std::string& err) const = 0;
     /// Tells whether a rewind preserves the later branch as a paused conversation.
     virtual bool keeps_rewind_branch(const PagedParts&, int64_t) const { return true; }
+    /// Keeps the state of the conversation of `parts` at its end, `tokens` of `ids`, as a restore point its request
+    /// asked for (strata/common/state/restore_points.hpp; `shared`: the end of a start other conversations share,
+    /// given up last), making room by the model's own cap; false (and `err`) when it cannot.  The engine calls it where
+    /// its prompt read stops for one, only when PagedModelFacts::restore_points is above 0.
+    virtual bool keep_restore_point(const PagedParts& parts, const std::vector<int64_t>& ids, int64_t tokens,
+                                    bool shared, std::string& err) = 0;
     /// Gets the positions short of its end that the conversation of `parts` can go back to (rewind), so that a prompt
     /// that leaves it there continues it (strata/common/state/resume_point.hpp); none by default.
     virtual std::vector<int64_t> get_rewind_points(const PagedParts&) const { return {}; }

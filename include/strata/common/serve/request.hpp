@@ -65,6 +65,21 @@ struct LogprobRequest {
 /// Stores `value` in `r` if `key` is logprobs or allowed; false for any other key.
 bool read_logprob_key(const std::string& key, const std::string& value, LogprobRequest& r);
 
+/// The restore points a request asks the engine to keep (strata/common/state/restore_points.hpp): marks=a,b,... (the
+/// start of the last user message), tail=P (a point near the prompt's tail) and shared=P or pin=N (the end of a start
+/// that other conversations share, given up last).
+struct RestorePointRequest {
+    std::vector<int64_t> marks;   ///< positions
+    int64_t tail = -1, shared = -1;   ///< -1: none
+    int64_t pin = 0;              ///< pin=N: the first N prompt tokens are a shared start (strata_prefix)
+    /// Gets where the shared start ends: shared=, else a pin=N of at least 256 tokens (a shorter start is read again
+    /// in about the time its point takes, as strata-dsv41 judged it); -1: none.
+    int64_t get_shared() const { return shared >= 0 ? shared : pin >= 256 ? pin : -1; }
+};
+
+/// Stores `value` in `r` if `key` is marks, tail, shared or pin; false for any other key.
+bool read_restore_point_key(const std::string& key, const std::string& value, RestorePointRequest& r);
+
 /// Formats the LP line of `token` from the `vocab` logits of the row it was picked after (before penalties and
 /// temperature): "LP <logprob> [id:logprob ...]\n", listing r.allowed (but `token` and ids past the vocabulary) or
 /// else the r.top most likely tokens; "LP nan\n" when `logits` is null or `token` lies outside the vocabulary.

@@ -14,6 +14,7 @@
 #include "strata/common/experts/split_rules.hpp"
 #include "strata/common/serve/paged_engine.hpp"
 #include "strata/common/serve/paged_model.hpp"
+#include "strata/common/state/restore_points.hpp"
 #include "strata/common/state/state_bytes.hpp"
 
 #include <cuda_runtime.h>
@@ -45,10 +46,6 @@ constexpr int kDefaultTopK = 64;
 /// and before its last token (Model::feed_mark), which Model::pin makes the anchor.
 constexpr int kPromptEndCheck = 0;
 constexpr int kBeforeLastCheck = 1;
-/// The checkpoint of a prompt's start that other requests share (a GEN's pin=N), as the old engine keeps it.
-constexpr int kSharedStartCheck = 3;
-/// The shortest shared start pin=N keeps a checkpoint of (the old engine's).
-constexpr int64_t kShortestPin = 256;
 /// The shared step supports at most eight rows, including guesses.
 constexpr int kWindowRows = 8;
 
@@ -99,7 +96,6 @@ struct Part final : strata::serve::PagedPart {
     bool prompt_open = false;   ///< its request's prompt is not read to its end, where it keeps two checkpoints
     /// the end of its next prompt becomes its anchor (Model::pin): its conversation started over or went back
     bool pin_next = false;
-    int64_t pin = 0; ///< The prompt prefix kept as a shared checkpoint.
 
     Part(Model& model, const ConversationRegions& regions, int device, int index, bool drafter, Part*& seated_part)
         : m(model), at(regions), dev(device), stage(index), has_drafter(drafter), seated(seated_part) {}
@@ -172,12 +168,13 @@ struct Part final : strata::serve::PagedPart {
     int64_t get_pool_tokens(int64_t tokens) const override { return tokens; }
 
     /// Makes the model compute this conversation: the seated one's host side goes back to it, this one's into the
-    /// model, and the model reads this one's pages.
+    /// model, the model reads this one's pages, and its picks and drafts take this conversation's request's penalties.
     void take_seat() {
         if (lead != this) {
             lead->take_seat();
             return;
         }
+        m.set_penalties(smp);
         if (seated == this)
             return;
         if (seated != nullptr)
@@ -371,11 +368,25 @@ public:
         id.config = config.digest();
         return true;
     }
+    bool keep_restore_point(const PagedParts& parts, const std::vector<int64_t>& ids, int64_t tokens, bool shared,
+                            std::string& err) override;
     std::vector<int64_t> get_rewind_points(const PagedParts& parts) const override;
     uint64_t get_host_state_bytes(const PagedParts& parts) const override;
     bool rewind(const PagedParts& parts, int64_t tokens, std::string& err) override;
     void forget_drafts(int) override {}
     int64_t get_prompt_chunk() const override { return m_.feed_unit(); }
+    int64_t get_prompt_ceiling() const override { return prompt_ceiling_; }
+    strata::serve::PromptBuffers get_prompt_buffers(const PagedCard& card, int64_t chunk,
+                                                    int64_t tokens) const override {
+        strata::serve::PromptBuffers b;
+        if (m_.is_chunked_read((int) tokens + 1))   // (the prompt's last token rides along: read_prompt)
+            b.device = m_.get_prompt_bytes((int) card.index, get_lent_rows(chunk), b.host);
+        return b;
+    }
+    bool lay_out_prompt(const PagedCard& card, int64_t chunk, uint8_t* device, uint8_t* host,
+                        std::string& err) override {
+        return m_.lay_out_prompt((int) card.index, get_lent_rows(chunk), device, host, err);
+    }
     bool read_prompt(const PagedParts& parts, const std::vector<int64_t>& ids, int64_t from, int64_t n, bool drafting,
                      const ChunkDone& on_chunk, std::string& err) override;
     bool wait_state(std::string& err) override { return m_.wait_state(err); }
@@ -433,6 +444,11 @@ private:
     }
     bool copy_expert(const PagedCard& card, strata::core::ExpertKey key, int32_t first, bool from_ram,
                      std::string& err);
+    /// Gets the rows the prompt path's buffers hold when the engine lends them for chunks of `chunk` tokens: 16 more
+    /// (the chunk path's row unit), up to the ceiling, for the prompt's last token, which read_prompt takes along, so
+    /// that a read whose other tokens the chunk holds stays one chunk.  Never past the ceiling: the hand-offs between
+    /// pipeline stages keep the load's size.
+    int get_lent_rows(int64_t chunk) const { return (int) (chunk > 0 ? std::min(chunk + 16, prompt_ceiling_) : 0); }
 
     /// Retains row order and primed picks until the shared scheduler finishes sampling.
     struct GroupRows {
@@ -460,6 +476,8 @@ private:
     Part* seated_ = nullptr;           ///< the conversation the model computes (Part::take_seat), or null
     uint64_t counter_ = 0;             ///< the sampler's draw count, which the old engine keeps across requests
     uint64_t drafter_epoch_ = 0; ///< Increases when DSpark dense weights return.
+    /// The largest chunk a prompt is read in: the load's (--prefill-chunk, else the old engine's rule; 0: windows).
+    int64_t prompt_ceiling_ = 0;
     bool drafting_ = false;            ///< the drafter is switched on: its experts are wanted in the GPU's pool
     /// the drafter's experts (get_ranking's), which it needs all of on the GPU to draft
     std::vector<strata::core::ExpertKey> drafter_experts_;
@@ -653,9 +671,12 @@ int run_paged_engine(int argc, char** argv) {
     if (x.adapt_every > 0 && x.adapt_swaps > 0)   // the routings the engine's adaptive tier counts
         m.get_usage().assign((size_t) g.nl * (size_t) g.n_exp, 0.0f);
     const std::vector<uint64_t> trunk(blobs.begin(), blobs.begin() + g.nl);   // (the RAM's pool: the trunk's experts)
+    uint64_t prompt = 0;   // every card's prompt path's host buffers at the largest chunk
+    for (const PagedCard& c : cards)
+        prompt += model.get_prompt_buffers(c, model.get_prompt_ceiling(), model.get_prompt_ceiling()).host;
     if (!strata::serve::open_ram_pool(kProgram, settings, files, kRamHeadroom, kCpuLaneExperts, layout, card, trunk,
                                       g.n_exp, get_ranking(m, 0, g.nl, false), card.experts.pool().page_address(0),
-                                      0, ram, copy_back, err)) {
+                                      prompt, ram, copy_back, err)) {
         std::fprintf(stderr, "%s: %s\n", kProgram.c_str(), err.c_str());
         return 1;
     }
@@ -683,6 +704,8 @@ PagedDeepSeek::PagedDeepSeek(Model& m, const Options& o, const ProgramOptions& x
     facts.end_tokens.assign(eos.begin(), eos.end());
     facts.sampling.top_k = kDefaultTopK;
     facts.has_drafter = m.draft_block() > 0;
+    prompt_ceiling_ = m.prompt_chunk();
+    facts.restore_points = strata::core::get_restore_point_cap(m.check_bytes(), m.marks_cap());
     facts.drafter_label = "DSpark";
     facts.kv_quantization = "FP8 sliding window, FP4 compressed KV, FP4 index";
     facts.drafter_start = "--dspark on and a --lookahead above 0";
@@ -822,10 +845,6 @@ void PagedDeepSeek::start_request(int session, const strata::serve::RequestStart
     p.smp = r.sampling;
     p.prompt_open = true;
     p.primed_pos = -1;   // (its pick had the last request's sampling)
-    p.pin = 0;
-    for (const auto& [key, value] : r.keys)
-        if (key == "pin")
-            p.pin = std::atoll(value.c_str());
 }
 
 
@@ -859,6 +878,15 @@ bool PagedDeepSeek::restore_state(const std::vector<uint8_t>& state, const Paged
     return true;
 }
 
+bool PagedDeepSeek::keep_restore_point(const PagedParts& parts, const std::vector<int64_t>&, int64_t tokens,
+                                       bool shared, std::string& err) {
+    get_part(*parts[0]).take_seat();
+    if (!go_to(tokens, err))
+        return false;
+    m_.mark(shared);
+    return true;
+}
+
 std::vector<int64_t> PagedDeepSeek::get_rewind_points(const PagedParts& parts) const {
     const Part& p = get_part(*parts[0]);
     return !p.is_ready() ? std::vector<int64_t>{} : seated_ == &p ? m_.check_positions() : get_check_positions(p.state);
@@ -868,9 +896,12 @@ uint64_t PagedDeepSeek::get_host_state_bytes(const PagedParts& parts) const {
     Part& p = get_part(*parts.front());
     p.leave_seat();
     uint64_t bytes = strata::core::get_owned_vector_bytes(p.state.tokens);
-    for (const auto& checkpoint : p.state.checks)
+    const auto add = [&](const Checkpoint& checkpoint) {
         bytes += strata::core::get_owned_vector_bytes(checkpoint.win) +
                  strata::core::get_owned_vector_bytes(checkpoint.comp);
+    };
+    std::for_each(p.state.checks.begin(), p.state.checks.end(), add);
+    std::for_each(p.state.marks.begin(), p.state.marks.end(), add);
     return bytes;
 }
 
@@ -910,22 +941,10 @@ bool PagedDeepSeek::read_prompt(const PagedParts& parts, const std::vector<int64
         for (Part* part : p.peers)
             if (!part->reserve(end + 1, err))
                 return false;
-    // pin=N: a read that crosses N stops there for the shared start's checkpoint, as the old engine's does
-    const int64_t pin = p.pin >= kShortestPin && p.pin + 1 < (int64_t) ids.size() ? p.pin : 0;
-    int64_t at = from;
-    if (pin > from && pin < end) {
-        const std::vector<int> start(ids.begin() + from, ids.begin() + pin);
-        if (!m_.feed(start.data(), (int) start.size(), 0, err))
-            return false;
-        m_.checkpoint(kSharedStartCheck);
-        at = pin;
-    }
-    const std::vector<int> tokens(ids.begin() + at, ids.begin() + end + (last ? 1 : 0));
+    const std::vector<int> tokens(ids.begin() + from, ids.begin() + end + (last ? 1 : 0));
     if (!(last ? m_.feed_mark(tokens.data(), (int) tokens.size(), 1, kBeforeLastCheck, err)
                : m_.feed(tokens.data(), (int) tokens.size(), 0, err)))
         return false;
-    if (end == pin)
-        m_.checkpoint(kSharedStartCheck);
 
     if (last) {
         end_prompt(p);

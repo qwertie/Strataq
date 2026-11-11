@@ -13,7 +13,7 @@
 //   moe(x): 6 of 384 routed experts (sqrt-softplus scores, biased top-k) + the shared expert
 //   h = post * moe + comb^T h;  pre = f_pre
 // and after the last layer logits = head(rmsnorm(sum_s pre[s] h[s])).
-#include "ds4_marks.hpp"
+#include "strata/common/state/restore_points.hpp"
 #include "ds4_ring_link.hpp"
 #include "ds4_launch.h"   // strata_ds4_launch: <<<>>> on CUDA and HIP, a dispatch on Metal
 #include "ds4_model.hpp"
@@ -89,6 +89,10 @@ namespace x3 = strata::dsv41k::exl3;
 namespace kc = strata::dsv41k::cpu;
 namespace gf = strata::dsv41k::glmf;
 namespace gg = strata::ds4::gguf;
+using strata::core::kMarksMax;
+using strata::core::latest_point;
+using strata::core::mark_victim;
+using strata::core::MarkUse;
 
 #define CK(call)                                                                            \
     do {                                                                                    \
@@ -1088,6 +1092,7 @@ struct Model::Impl {
     unsigned win_seq = 0;             // the windows the threads ran (the hand-offs' seq)
     // the chunked prompt path (threads mode): chunk tokens a pass, runs shorter than chunk_min in windows
     int chunk = 0, chunk_min = 512;
+    int prompt_ceiling = 0;           // (lends_prompt) the load's chunk, which a prompt's lend may lower for its read
     double load_t0 = 0;   // when load() began (its messages' times)
     static constexpr bool kChunkedPromptDefault = true;   // the layer-major prompt is the default (gate: KL 0.1685 vs 0.1686, 8K prompt 6x, decode within 2% - ds4 notes-dsv41-r97)
     static constexpr int kFlowChunkMin = 2;   // chunk_min with every device's layers on the flow (see load)
@@ -1301,16 +1306,14 @@ struct Model::Impl {
     std::vector<int32_t> toks, ctoks;
     using Check = Checkpoint;         // the state at a position: every window ring, the compressors' partial groups
     static constexpr int kChecks = kCheckpoints;
-    Check ck[kChecks];                // the end of the last prompt, the position before it, the anchor (the position
-                                      // before the end of the first prompt of the run of prompts that each continued
-                                      // the last in place: a chat template that drops earlier turns' reasoning at a new
-                                      // user message re-renders the history from about there) and the prefix (where
-                                      // strata-ds41's server said the prompt's shared start - system prompt and tools -
-                                      // ends: another agent behind the same start goes back to it)
-    // the restore points a request asked for (GEN marks= / shared=, ds4_marks.hpp; pin=N is shared=N): the start of the
-    // last user message, a point near the prompt's tail, the end of a shared start - each a Check, taken where the read
-    // stopped for it; at most marks_cap() a conversation (DS4_RESTORE_POINTS), none unless a request asks.  Like ck,
-    // every one is at or before pos and holds the state of the conversation's own tokens up to it
+    Check ck[kChecks];                // the end of the last prompt, the position before it, and the anchor: the
+                                      // position before the end of the first prompt of the run of prompts that each
+                                      // continued the last in place (a chat template that drops earlier turns'
+                                      // reasoning at a new user message re-renders the history from about there)
+    // the restore points a request asked for (GEN marks= / shared=, restore_points.hpp; pin=N is shared=N): the start
+    // of the last user message, a point near the prompt's tail, the end of a shared start - each a Check, taken where
+    // the read stopped for it; at most marks_cap() a conversation (DS4_RESTORE_POINTS), none unless a request asks.
+    // Like ck, every one is at or before pos and holds the state of the conversation's own tokens up to it
     std::vector<Check> mk;
     uint64_t mark_clock = 0;
     bool slot_held = false;           // slot_save took this state and nothing has changed it since
@@ -2011,14 +2014,17 @@ struct Model::Impl {
     float* draft_taps = nullptr; ///< Pool-owned recent trunk inputs for rebuilding DSpark rings.
     bool host_pinned = false;   // host_maps page-locked (chunk > 0, when the OS let them all be: #521)
 
+    // the memory report's names of the buffers dalloc, hmap and halloc allocate: the chunked prompt path's, the others'
+    static constexpr const char* kPromptLabel = "Prompt processing";
+    static constexpr const char* kWorkLabel = "DeepSeek working buffers";
     template <class T>
-    bool dalloc(Dev& d, T*& p, size_t n, std::string& err, size_t* acct = nullptr) {
+    bool dalloc(Dev& d, T*& p, size_t n, std::string& err, size_t* acct = nullptr, const char* label = kWorkLabel) {
         void* v = nullptr;
         cudaSetDevice(d.id);
         const size_t b = align256(n * sizeof(T));
         if (strata::core::allocate_device(&v, b,
                 {acct == &d.weights && !d.loading_drafter ? "weights" : "other", "Device allocations",
-                 d.loading_drafter ? "Drafter" : "DeepSeek working buffers"}) != cudaSuccess) {
+                 d.loading_drafter ? "Drafter" : label}) != cudaSuccess) {
             err = "cudaMalloc " + std::to_string(b >> 20) + " MiB on CUDA" + std::to_string(d.id) + " failed";
             return false;
         }
@@ -2073,10 +2079,10 @@ struct Model::Impl {
     }
     // host-mapped memory (the same address on the host and every device), zeroed
     template <class T>
-    bool hmap(T*& p, size_t n, std::string& err) {
+    bool hmap(T*& p, size_t n, std::string& err, const char* label = kWorkLabel) {
         void* v = nullptr;
         if (strata::core::allocate_host(&v, n * sizeof(T) + 64, cudaHostAllocMapped | cudaHostAllocPortable,
-            {"other", "Device allocations", "DeepSeek working buffers"}) != cudaSuccess) {
+            {"other", "Device allocations", label}) != cudaSuccess) {
             err = "host-mapped memory (" + std::to_string((n * sizeof(T)) >> 20) + " MiB)";
             return false;
         }
@@ -2086,10 +2092,10 @@ struct Model::Impl {
         return true;
     }
     template <class T>
-    bool halloc(T*& p, size_t n, std::string& err) {
+    bool halloc(T*& p, size_t n, std::string& err, const char* label = kWorkLabel) {
         void* v = nullptr;
         if (strata::core::allocate_host(&v, n * sizeof(T) + 64, cudaHostAllocPortable,
-            {"other", "Device allocations", "DeepSeek working buffers"}) != cudaSuccess) {
+            {"other", "Device allocations", label}) != cudaSuccess) {
             err = "cudaHostAlloc " + std::to_string((n * sizeof(T)) >> 20) + " MiB failed";
             return false;
         }
@@ -3667,6 +3673,7 @@ struct Model::Impl {
             }
             if (chunk > 0 && aerr.empty()) err.clear();
         }
+        prompt_ceiling = chunk;
         // the CPU lane's experts read in place (decided above): how much of them the load reads ahead, from what VRAM
         // now leaves over
         if (file_experts && o.expert_pages == nullptr) {
@@ -3778,7 +3785,7 @@ struct Model::Impl {
                 const bool flow_tp = std::getenv("DS4_FLOW_TP") != nullptr && std::atoi(std::getenv("DS4_FLOW_TP")) != 0;
                 for (size_t di = 0; di < chunks.size(); ++di) {
                     auto& cp = chunks[di];
-                    if (cp == nullptr || cp->ring == nullptr) continue;
+                    if (cp == nullptr || cp->ring_n == 0) continue;
                     cp->stage_stride = (mr + 4095) & ~(size_t) 4095;
                     // the flow: every trunk layer of the device a GGUF's (alone or a tensor-parallel group's member)
                     bool fl = flow_on;
@@ -3796,7 +3803,8 @@ struct Model::Impl {
                     if (fl)   // (each part read unbuffered from its offset rounded down: a page more each)
                         cp->stage_stride = std::max(cp->stage_stride, flow_stride());
                     cp->S = cp->ring_n;
-                    if (!halloc(cp->stage, (size_t) cp->S * cp->stage_stride, err)) return false;
+                    if (!lends_prompt() && !halloc(cp->stage, (size_t) cp->S * cp->stage_stride, err, kPromptLabel))
+                        return false;
                     cp->readers = std::make_unique<Pool>(n_readers - 1, std::vector<int>{}, 50);
                     if (!fl) continue;
                     cudaSetDevice(devs[di].id);
@@ -3816,23 +3824,23 @@ struct Model::Impl {
                     // layer's bounds wait, which every copy from it precedes)
                     cp->bc_n = n_exp_max + 2;
                     cp->bc_w = cp->ring_n + 1;
-                    if (!halloc(cp->bc_pin, (size_t) cp->bc_n * cp->bc_w, err) ||
-                        !dalloc(devs[di], cp->bc_dev, (size_t) cp->bc_n * cp->bc_w, err))
+                    if (!halloc(cp->bc_pin, (size_t) cp->bc_n * cp->bc_w, err, kPromptLabel) ||
+                        !dalloc(devs[di], cp->bc_dev, (size_t) cp->bc_n * cp->bc_w, err, nullptr, kPromptLabel))
                         return false;
                 }
                 // every device with layers on the flow: a prompt reads only the experts it picks, once, so a short one
                 // takes the chunked path too (one pass, where windows of 16 read the CPU lane's picks again for each
                 // window, a page fault at a time) - DS4_CHUNK_MIN still overrides
                 bool all_flow = true;
-                for (const auto& cp : chunks) all_flow = all_flow && (cp == nullptr || cp->ring == nullptr || cp->flow);
+                for (const auto& cp : chunks) all_flow = all_flow && (cp == nullptr || cp->ring_n == 0 || cp->flow);
                 if (all_flow && std::getenv("DS4_CHUNK_MIN") == nullptr) chunk_min = kFlowChunkMin;
             }
             for (Layer& l : L) {
                 if (l.mtp) continue;
                 for (int m = 0; m < l.nm; ++m) {   // (each member its own: the flow's members decide them each)
                     Layer& x = member(l, m);
-                    if (!halloc(x.vs_pin, (size_t) l.n_exp, err)) return false;
-                    if (!dalloc(devs[(size_t) x.dev], x.vs_dev, (size_t) l.n_exp, err)) return false;
+                    if (!halloc(x.vs_pin, (size_t) l.n_exp, err, kPromptLabel)) return false;
+                    if (!dalloc(devs[(size_t) x.dev], x.vs_dev, (size_t) l.n_exp, err, nullptr, kPromptLabel)) return false;
                 }
             }
         }
@@ -4090,6 +4098,60 @@ struct Model::Impl {
         }
         return off;
     }
+    // the chunk path's buffers for chunks of C rows, laid out from `device` and `host` (nullptr: only their bytes
+    // counted): on the GPU lay_chunk's (a lending device's fixed ones only: Chunk::borrow) and the ring the streamed
+    // experts land in; in page-locked memory the ring's staging (once the load sized it: Chunk::S) at a 4 KiB bound for
+    // the unbuffered reads, and the embedding and Engram rows of the two chunks in flight.  Gets the GPU's bytes;
+    // `host_bytes` the host's
+    size_t lay_prompt(Chunk& c, int C, uint8_t* device, uint8_t* host, size_t& host_bytes) const {
+        const size_t off = lay_chunk(c, C, device, c.borrow ? 1 : 3);
+        if (device != nullptr) {
+            c.ring = c.ring_n > 0 ? device + off : nullptr;
+            c.C = C;
+        }
+        size_t at = 0;
+        auto put = [&](auto*& p, size_t n) {
+            using T = std::remove_reference_t<decltype(*p)>;
+            if (host != nullptr) p = (T*) (host + at);
+            at += align256(n * sizeof(T) + 64);   // (halloc's slack)
+        };
+        if (c.S > 0) {
+            at = (size_t) (0 - (uintptr_t) host) % 4096;
+            put(c.stage, (size_t) c.S * c.stage_stride);
+        }
+        const size_t cols = (size_t) (pk.eg_ngram - 1) * pk.eg_heads, ehd = (size_t) pk.eg_hd;
+        for (int sl = 0; sl < 2; ++sl) {
+            if (c.has_first) put(c.emb_host[sl], (size_t) C * g.dim);
+            if (c.has_eg) put(c.eg_host[sl], (size_t) C * pk.eg_layers * cols * (ehd + ehd / 32));
+        }
+        host_bytes = at + (c.S > 0 && host == nullptr ? 4095 : 0);
+        return off + (size_t) c.ring_n * c.ring_stride;
+    }
+    // strata-ds41 (Options::expert_pages): the engine lends each GPU's chunk path its buffers from its pools for each
+    // prompt (lay_out_prompt) instead of alloc_chunks' room of their own
+    bool lends_prompt() const { return o.expert_pages != nullptr; }
+    // (lends_prompt) lays device di's chunk path out for chunks of C rows (at most the load's chunk, prompt_ceiling) in
+    // the lent `device` and `host` memory, the device's zeroed as alloc_chunks' room is; C 0: waits until it no longer
+    // reads them
+    bool lay_out_prompt(int di, int C, uint8_t* device, uint8_t* host, std::string& err) {
+        std::lock_guard<std::mutex> lk(warm_mu);   // (the warm-up uses the chunk's buffers)
+        Chunk& c = *chunks[(size_t) di];
+        Dev& d = devs[(size_t) di];
+        cudaSetDevice(d.id);
+        cudaError_t e = cudaSuccess;
+        if (C > 0) {
+            size_t host_bytes = 0;
+            e = cudaMemsetAsync(device, 0, lay_prompt(c, C, device, host, host_bytes), d.st);
+        } else {
+            c.C = 0;
+            e = cudaStreamSynchronize(c.cs);
+        }
+        chunk = C > 0 ? C : prompt_ceiling;   // (forward_chunks reads a prompt in chunks of at most `chunk`)
+        if (e == cudaSuccess) e = cudaStreamSynchronize(d.st);
+        if (e == cudaSuccess) return true;
+        err = "the prompt path on CUDA" + std::to_string(d.id) + ": " + cudaGetErrorString(e);
+        return false;
+    }
 
     // the default chunk where every GPU will lend the prompt path its room (a GGUF's in-place experts on the flow, each
     // layer on one GPU: Chunk::borrow) - the borrowed room is expert slots between prompts, so a larger chunk costs the
@@ -4147,8 +4209,6 @@ struct Model::Impl {
     bool alloc_chunks(std::string& err) {
         slab_auto_grew_ = false;
         chunks.resize(devs.size());
-        const int D = g.dim;
-        const int cols = (pk.eg_ngram - 1) * pk.eg_heads, ehd = pk.eg_hd;
         // a device whose trunk layers will all be on the flow (as in load(): a GGUF's in-place experts, each layer on
         // it alone) lends its buffers' room to its experts between prompts - on one GPU (DS4_BORROW=1: on more too,
         // =0: its own room, as before); not strata-ds41's, whose experts are the pool's pages
@@ -4160,8 +4220,6 @@ struct Model::Impl {
             chunks[di] = std::make_unique<Chunk>();
             Chunk& c = *chunks[di];
             chunk_dims(c, (int) groups[(size_t) d.grp].mem.size());
-            const size_t C = (size_t) chunk;
-            c.C = chunk;
             // the base slab: STRATA_DS4_A_MB megabytes of q.  Every dense GEMM of a layer is issued once a slab, so the slab width divides
             // the prompt's dense weight traffic.  A unified-memory GPU (Strix Halo, main 3133160ed) takes 32 MB: measured 8 -> 32 MB took
             // its 32K prompt 325.89 -> 357.78 tok/s, 16K 315.01 -> 328.04, 8K +1.6%, 4K flat, decode unmoved.  A discrete card keeps 8 MB
@@ -4227,12 +4285,7 @@ struct Model::Impl {
                     }
             c.has_eg = has_eg, c.has_first = has_first;
             c.borrow = lend && stride > 0;
-            {   // (its own room, laid out once: all of it, or a lending device's buffers of a fixed size)
-                const int part = c.borrow ? 1 : 3;
-                if (!dalloc(d, c.own, lay_chunk(c, chunk, nullptr, part), err)) return false;
-                lay_chunk(c, chunk, c.own, part);
-            }
-            if (!halloc(c.bounds_pin, 2048, err)) return false;
+            if (!halloc(c.bounds_pin, 2048, err, kPromptLabel)) return false;
             if (stride > 0) {   // DS4_RING_MB (400) of slots in kParts batches
                 const char* rm = std::getenv("DS4_RING_MB");
                 c.ring_stride = stride;
@@ -4249,7 +4302,14 @@ struct Model::Impl {
                     const size_t mb = rm ? (size_t) std::atoi(rm) : ring_mb_auto();
                     c.ring_n = std::max(Chunk::kParts, (int) ((mb << 20) / stride) / Chunk::kParts * Chunk::kParts);
                 }
-                if (!dalloc(d, c.ring, (size_t) c.ring_n * stride, err)) return false;
+            }
+            if (!lends_prompt()) {   // (its own room, laid out once)
+                size_t host_bytes = 0;
+                uint8_t* host = nullptr;
+                if (!dalloc(d, c.own, lay_prompt(c, chunk, nullptr, nullptr, host_bytes), err, nullptr, kPromptLabel) ||
+                    !halloc(host, host_bytes, err, kPromptLabel))
+                    return false;
+                lay_prompt(c, chunk, c.own, host, host_bytes);
             }
             CK(cudaStreamCreateWithFlags(&c.cs, cudaStreamNonBlocking));
             for (int i = 0; i < Chunk::kParts; ++i) {
@@ -4263,13 +4323,13 @@ struct Model::Impl {
             // (the hand-offs between groups: none where one group holds every layer - a chunk's h alone is 80 KB a row)
             const bool hands = d.mi == 0 && groups.size() > 1;
             for (int sl = 0; sl < 2; ++sl) {
-                if (hands && (!hmap(c.hand[sl], chunk_hand_bytes(), err) || !hmap(c.hand_flag[sl], 32, err))) return false;
-                if (has_first && !halloc(c.emb_host[sl], C * D, err)) return false;
-                if (has_eg && !halloc(c.eg_host[sl], C * pk.eg_layers * (size_t) cols * (ehd + ehd / 32), err)) return false;
+                if (hands && (!hmap(c.hand[sl], chunk_hand_bytes(), err, kPromptLabel) ||
+                              !hmap(c.hand_flag[sl], 32, err, kPromptLabel)))
+                    return false;
                 CK(cudaEventCreateWithFlags(&c.emb_ev[sl], cudaEventDisableTiming));
                 CK(cudaEventCreateWithFlags(&c.eg_ev[sl], cudaEventDisableTiming));
             }
-            if (hands && !hmap(c.hand_ack, (size_t) 2 * 8 * 32, err)) return false;
+            if (hands && !hmap(c.hand_ack, (size_t) 2 * 8 * 32, err, kPromptLabel)) return false;
         }
         return true;
     }
@@ -5601,7 +5661,7 @@ struct Model::Impl {
             if (room_e >= 2.0 * (double) need) continue;   // (the chunk default's own bound: at most half the room)
             c.borrow = false;
             uint8_t* rows = nullptr;
-            if (!dalloc(d, rows, need, err)) return false;
+            if (!dalloc(d, rows, need, err, nullptr, kPromptLabel)) return false;
             lay_chunk(c, chunk, rows, 2);
             if (o.verbose)
                 std::fprintf(stderr, "ds4: CUDA%d keeps the prompt path's room for itself (%.2f GB): its experts' room "
@@ -7378,7 +7438,7 @@ struct Model::Impl {
 
     // the state at pos into checkpoint `slot` (the window rings and the compressors' partial groups: the rest of the
     // state is indexed by position, and what lies past a restored position is written again)
-    void checkpoint(int slot) { snap_into(ck[slot & (kChecks - 1)]); }
+    void checkpoint(int slot) { snap_into(ck[slot & 1]); }
     void snap_into(Check& c) {
         c.pos = pos;
         c.win.resize(L.size());
@@ -7466,8 +7526,7 @@ struct Model::Impl {
         std::sort(v.rbegin(), v.rend());
         return v;
     }
-    // the checkpoints a slot keeps, as best_check() numbers them (each with its role: 0, 1, the anchor, the prefix, a
-    // mark)
+    // the checkpoints a slot keeps, as best_check() numbers them (each with its role: 0, 1, the anchor, a mark)
     // (the marks least recently used first: a slot taken back keeps that order)
     std::vector<int> slot_checks(int64_t upto = -1) const {
         if (upto < 0) upto = pos;
@@ -7652,7 +7711,7 @@ struct Model::Impl {
             const std::vector<int> cs = slot_checks(ep);
             const uint64_t nc = cs.size();
             put(&nc, 8);
-            // (a role: 0, 1, the anchor 2, the prefix 3; a mark kChecks, a shared start's mark kChecks + 1)
+            // (a role: 0, 1, the anchor 2; a mark 3, a shared start's mark 4)
             for (int k : cs) {
                 const Check& c = check_at(k);
                 const uint64_t role = k < kChecks ? (uint64_t) k : (uint64_t) kChecks + c.shared;
@@ -7904,6 +7963,8 @@ struct Model::Impl {
         for (const Check& c : s.checks)
             if (c.pos >= 0)
                 if (std::string why = get_check_problem(c); !why.empty()) return why;
+        for (const Check& c : s.marks)
+            if (std::string why = get_check_problem(c); !why.empty()) return why;
         return {};
     }
     // why checkpoint `c` cannot go back to the GPU: a layer count, ring or partial group not this model's ("": it can)
@@ -7928,6 +7989,9 @@ struct Model::Impl {
         toks.swap(s.tokens);
         for (int k = 0; k < kChecks; ++k)
             std::swap(ck[k], s.checks[(size_t) k]);
+        mk.swap(s.marks);
+        for (const Check& c : mk)   // (the clock orders one conversation's marks: it goes on past all of theirs)
+            mark_clock = std::max(mark_clock, c.used);
         set_position();
     }
 
@@ -16291,6 +16355,19 @@ void Model::set_yield(std::function<bool()> f) { p_->yield_to = std::move(f); }
 int Model::fed() const { return p_->fed_n; }
 int Model::prompt_chunk() const { return p_->chunk; }
 int Model::pipeline_stages() const { return std::max(1, (int) p_->groups.size()); }
+bool Model::is_chunked_read(int rows) const {
+    // (pick_path's choice, DS4_PICK=adaptive's aside)
+    return p_->chunk > 0 && rows >= std::max({2, p_->chunk_min, p_->pick_min_});
+}
+uint64_t Model::get_prompt_bytes(int dev, int chunk, uint64_t& host) const {
+    size_t host_bytes = 0;
+    const uint64_t device = p_->lay_prompt(*p_->chunks[(size_t) dev], chunk, nullptr, nullptr, host_bytes);
+    host = host_bytes;
+    return device;
+}
+bool Model::lay_out_prompt(int dev, int chunk, uint8_t* device, uint8_t* host, std::string& err) {
+    return p_->lay_out_prompt(dev, chunk, device, host, err);
+}
 bool Model::cancelled() const { return p_->halted; }
 void Model::begin_request() { p_->begin_request(); }
 int Model::sample(float t, float tp, int tk, float mp, uint64_t seed, uint64_t counter) {
@@ -16302,6 +16379,12 @@ void Model::set_penalties(int last_n, float repeat, float freq, float present) {
     p_->pen_repeat = repeat;
     p_->pen_freq = freq;
     p_->pen_present = present;
+}
+void Model::set_penalties(const strata::serve::Sampling& s) {
+    set_penalties(s.penalty_last_n < 0 ? INT_MAX : s.penalty_last_n,
+                  std::isfinite(s.penalty_repeat) && s.penalty_repeat > 0.0f ? s.penalty_repeat : 1.0f,
+                  std::isfinite(s.penalty_freq) ? s.penalty_freq : 0.0f,
+                  std::isfinite(s.penalty_present) ? s.penalty_present : 0.0f);
 }
 bool Model::logits(std::vector<float>& out) { return p_->logits(out); }
 bool Model::copy_logits_row(int row, float* out) {

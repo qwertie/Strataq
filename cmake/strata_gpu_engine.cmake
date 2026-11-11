@@ -742,10 +742,6 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
       add_executable(ds4_slot_test tests/dsv41/slot_test.cpp)
       target_include_directories(ds4_slot_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/${_ds4} ${CMAKE_CURRENT_SOURCE_DIR}/include)
       target_compile_features(ds4_slot_test PRIVATE cxx_std_17)
-      # restore points (ds4_marks.hpp, from Project Maya #639): which point a prompt goes back to, which ones a read keeps
-      add_executable(ds4_marks_test tests/dsv41/marks_test.cpp)
-      target_include_directories(ds4_marks_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/models/deepseekv41)
-      target_compile_features(ds4_marks_test PRIVATE cxx_std_17)
       # the staging ring's slots by the measured host link (ds4_ring_link.hpp, from Project Maya #609)
       add_executable(ds4_ring_link_test tests/dsv41/ring_link_test.cpp)
       target_include_directories(ds4_ring_link_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/models/deepseekv41)
@@ -1464,6 +1460,11 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
   add_executable(pin_budget_test src/base/gpu/pin_budget_test.cpp)
   target_link_libraries(pin_budget_test PRIVATE strata_core ${_strata_gpu_runtime_target})
   add_test(NAME pin_budget_test COMMAND pin_budget_test)
+
+  # #4350: the runtime errors the engines end on (runtime.hpp's is_context_lost_error), by the runtime's texts; no GPU
+  add_executable(lost_context_test src/base/gpu/lost_context_test.cpp)
+  target_link_libraries(lost_context_test PRIVATE strata_core ${_strata_gpu_runtime_target})
+  add_test(NAME lost_context_test COMMAND lost_context_test)
 
   # #3431: the expert arena's registered ranges keep their GPU aliases clear of the process's own memory (Windows HIP; else skips)
   add_executable(pinned_alias_test src/core/pinned_alias_test.cpp)

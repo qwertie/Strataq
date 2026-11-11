@@ -1,9 +1,10 @@
-// include/strata/base/gpu/runtime.hpp - the device runtime as shared code sees it: memory and copies, without the
-// CUDA runtime's own names, so that code above this layer builds for every backend.  Streams are passed as `void*`
+// include/strata/base/gpu/runtime.hpp - the device runtime as shared code sees it: memory, copies and errors, without
+// the CUDA runtime's own names, so that code above this layer builds for every backend.  Streams are passed as `void*`
 // (a cudaStream_t; null: the legacy default stream).  Each call works on the calling thread's current device.
 #pragma once
 
 #include <cstddef>
+#include <string>
 
 namespace strata::core {
 
@@ -26,5 +27,21 @@ bool gpu_copy(void* dst, const void* src, size_t bytes);
 void* gpu_host_alloc_mapped(size_t bytes, void** device_view);
 /// Frees memory that gpu_host_alloc_mapped gave.
 void gpu_host_free(void* p);
+
+/// Tells whether a GPU runtime error's text (cudaGetErrorString's, or a message that quotes it) says the device context
+/// is gone: after an illegal memory access, a launch failure or a hardware exception every later call of the process
+/// fails too.  Read by the text, so that CUDA, HIP and the compat runtimes are read the same way.
+inline bool is_context_lost_error(const std::string& text) {
+    static const char* const kLost[] = {"illegal memory access", "illegal address", "launch failure",
+                                        "hardware exception", "hardware stack error", "illegal instruction",
+                                        "misaligned address", "invalid program counter", "uncorrectable",
+                                        "launch timed out", "device-side assert", "device lost", "ERROR_DEVICE_LOST"};
+    for (const char* lost : kLost)
+        if (text.find(lost) != std::string::npos)
+            return true;
+    return false;
+}
+/// Gets the runtime's sticky error text when is_context_lost_error holds for it, else "".
+std::string get_lost_context_error();
 
 }  // namespace strata::core
