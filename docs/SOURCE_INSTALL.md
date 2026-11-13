@@ -69,7 +69,9 @@ cd Strata
 ./setup.sh --build --no-start
 ```
 
-`--build` requests a source engine rather than a ready-made one. `--no-start` prevents serving;
+`--build` requests a source engine rather than a ready-made one. It also compiles the new engine of the chosen model
+(`strata-q38` for Qwen3.8, `strata-ds41` for DeepSeek V4.1), and the run config starts that one. `START-HERE.bat --build`
+does the same on Windows, also with an AMD card. `--no-start` prevents serving;
 this is still setup and can download and prepare a model. Inspect the printed paths and generated config before
 claiming to have tested a code change. A released engine cannot validate changes to your local C++ files.
 

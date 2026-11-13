@@ -42,14 +42,15 @@ HIPDEFS=(-DCMAKE_HIP_COMPILER=$HP/llvm/bin/clang++ -DCMAKE_HIP_COMPILER_ROCM_ROO
          "-DCMAKE_HIP_FLAGS=--rocm-path=$HP --rocm-device-lib-path=$HP/lib/llvm/amdgcn/bitcode")
 st "start dsv41 $V ($ARCHS) commit $COMMIT"
 cd "$SRC" || exit 1
-rm -f "$OUT/bd/CMakeCache.txt" "$OUT/bd/strata-dsv41"      # (the build id is baked in at configure time: always configure again)
+rm -f "$OUT/bd/CMakeCache.txt" "$OUT/bd/strata-dsv41" "$OUT/bd/strata-ds41"      # (the build id is baked in at configure time: always configure again)
 cmake -G Ninja -S . -B "$OUT/bd" -DCMAKE_BUILD_TYPE=Release -DSTRATA_ENABLE_HIP=ON -DSTRATA_ENABLE_CUDA=OFF -DSTRATA_BUILD_TESTS=OFF \
   -DSTRATA_BUILD_DSV41=ON -DSTRATA_NATIVE_EXPERTS=ON "-DCMAKE_HIP_ARCHITECTURES=$ARCHS" "${HIPDEFS[@]}" -DSTRATA_GGML_DIR="$LLAMA" -DSTRATA_PORTABLE=ON \
   "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath,'\$ORIGIN' -Wl,--enable-new-dtags" > "$OUT/cfg-dsv41.log" 2>&1
 chk $? "dsv41 configured"
-nice -n 10 cmake --build "$OUT/bd" --target strata-dsv41 -j "$JOBS" > "$OUT/build-dsv41.log" 2>&1
+nice -n 10 cmake --build "$OUT/bd" --target strata-dsv41 strata-ds41 -j "$JOBS" > "$OUT/build-dsv41.log" 2>&1
 chk $? "dsv41 built"
 [ -x "$OUT/bd/strata-dsv41" ] || { st "ABORT no strata-dsv41"; tail -20 "$OUT/build-dsv41.log" >> "$S"; exit 1; }
+[ -x "$OUT/bd/strata-ds41" ] || { st "ABORT no strata-ds41"; tail -20 "$OUT/build-dsv41.log" >> "$S"; exit 1; }
 if [ "$COMMIT" != unknown ]; then grep -aq "$ID9" "$OUT/bd/strata-dsv41" || { st "ABORT strata-dsv41 does not carry the build id $ID9"; exit 1; }; st "dsv41 build id $ID9 present"; fi
 # every arch asked for must be in the binary's offload bundles, and no other (BUILD.json says exactly these)
 for a in $ARCHLIST; do
@@ -63,13 +64,18 @@ ARCHJSON=$(for a in $ARCHLIST; do printf '"%s", ' "$a"; done | sed 's/, $//')
 cat > "$STAGE/BUILD.json" <<EOJ
 {"version": "$PKGVER", "source": "f-0291-ds-rx7000 $COMMIT", "variant": "$V", "archs": [$ARCHJSON], "portable": true, "dsv41": true}
 EOJ
-python3 packaging/collect_libs.py --binary "$OUT/bd/strata-dsv41" --search "$LIBW/lib" --search "$HP/lib" --search "$CORE/lib" --search "$CORE/lib/llvm/lib" ${SYSDEPS:+--search "$HP/lib/rocm_sysdeps/lib"} \
-  --also 'libamd_comgr.so*' --also 'libhiprtc*.so*' --out "$STAGE" \
-  --data "$LIBW/lib/rocblas/library=rocblas/library" --data "$LIBW/lib/hipblaslt/library=hipblaslt/library" --data-arch "$DATAARCH" >> "$OUT/collect.log" 2>&1
-chk $? "libraries collected"
-cp "$OUT/bd/strata-dsv41" "$STAGE/"
+DATA=(--data "$LIBW/lib/rocblas/library=rocblas/library" --data "$LIBW/lib/hipblaslt/library=hipblaslt/library" --data-arch "$DATAARCH")
+for b in strata-dsv41 strata-ds41; do
+  python3 packaging/collect_libs.py --binary "$OUT/bd/$b" --search "$LIBW/lib" --search "$HP/lib" --search "$CORE/lib" --search "$CORE/lib/llvm/lib" ${SYSDEPS:+--search "$HP/lib/rocm_sysdeps/lib"} \
+    --also 'libamd_comgr.so*' --also 'libhiprtc*.so*' --out "$STAGE" "${DATA[@]}" >> "$OUT/collect.log" 2>&1
+  chk $? "libraries collected for $b"
+  DATA=()                                              # the kernel data once
+done
+cp "$OUT/bd/strata-dsv41" "$OUT/bd/strata-ds41" "$STAGE/"
 for f in "$STAGE"/*.so "$STAGE"/*.so.*; do [ -f "$f" ] && [ ! -L "$f" ] && patchelf --set-rpath '$ORIGIN' "$f"; done
-st "RUNPATH strata-dsv41: $(readelf -d "$STAGE/strata-dsv41" | grep -E 'RPATH|RUNPATH' | cut -d'[' -f2 | tr -d ']' | paste -sd' ')"
+for f in strata-dsv41 strata-ds41; do
+  st "RUNPATH $f: $(readelf -d "$STAGE/$f" | grep -E 'RPATH|RUNPATH' | cut -d'[' -f2 | tr -d ']' | paste -sd' ')"
+done
 # BUILD.json gets hipblaslt_version (package_engine refuses an AMD package without it); the tuning tables of tools/hip for these archs go to tuning/ when there are any
 python3 packaging/stage_tuning.py --stage "$STAGE" --archs "$ARCHLIST" --rocm "$HP" >> "$OUT/stage_tuning.log" 2>&1
 trc=$?; st "tuning tables rc=$trc: $(tail -n 1 "$OUT/stage_tuning.log")"; [ "$trc" = 0 ] || { st "ABORT tuning tables"; exit 1; }

@@ -6,6 +6,7 @@ which TheRock index each family installs from.  No GPU, no ROCm, no downloads.
 """
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -123,11 +124,12 @@ class GpuLists(unittest.TestCase):
            {"index": 3, "name": "AMD Radeon RX 7900 XTX", "vram_gb": 24.0, "arch": "gfx1100"}]
 
     def setUp(self):
-        self.say = setup.say
+        self.say, self.win = setup.say, setup.WIN
         setup.say = lambda *a, **k: None
+        setup.WIN = False                                # the Linux ROCm and build (Windows: WindowsDetection)
 
     def tearDown(self):
-        setup.say = self.say
+        setup.say, setup.WIN = self.say, self.win
 
     def test_list_in_order(self):
         self.assertEqual([g["index"] for g in setup.amd_parse_gpus("1,0", self.AMD)], [1, 0])
@@ -284,6 +286,65 @@ class WindowsDetection(unittest.TestCase):
         """#881: PCI 73DF (RX 6700 XT / 6750 XT / 6800M) is gfx1031, not an unknown id."""
         self.assertEqual(setup.EC.get_amd_arch(0x73DF, "AMD Radeon RX 6800M"), "gfx1031")
         self.assertIsNone(setup.amd_problem({"arch": "gfx1031"}))
+
+    def test_rocm_path_names_a_therock_root(self):
+        """ROCM_PATH naming a TheRock root (`rocm-sdk path --root`) is used as it is: nothing is installed, and its bin,
+        which holds every ROCm DLL, is the library folder."""
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(setup, "WIN", True), \
+                mock.patch.dict(setup.os.environ, {"ROCM_PATH": d}), mock.patch.object(setup, "run") as run:
+            (Path(d) / "lib/llvm/bin").mkdir(parents=True)
+            (Path(d) / "lib/llvm/bin/clang++.exe").write_text("")
+            self.assertEqual(setup.rocm_root(["gfx1151"]), (Path(d), [str(Path(d) / "bin")]))
+        run.assert_not_called()
+
+    def test_release_packaging_gets_the_visual_studio_environment(self):
+        """The packager needs vcvars' redistributable folder even outside a developer prompt."""
+        from tools.hip import build_release
+
+        with mock.patch.object(setup, "get_llama_cpp", return_value=Path("llama")), \
+                mock.patch.object(setup, "use_rocm", return_value=(Path("rocm"), [])), \
+                mock.patch.object(setup, "compile_hip"), \
+                mock.patch.object(setup, "find_vcvars", return_value=Path("C:/vs/vcvars64.bat")), \
+                mock.patch.dict(setup.os.environ, {"STRATA_NO_VISION": "1"}), \
+                mock.patch.object(build_release.subprocess, "check_output", return_value=
+                                  "=C:=C:\\src\nPATH=C:\\vs\nVCToolsRedistDir=C:\\redist\n") as capture, \
+                mock.patch.object(build_release.subprocess, "run") as package:
+            build_release.main()
+        self.assertIn(f'call "{Path("C:/vs/vcvars64.bat")}"', capture.call_args.args[0])
+        self.assertEqual(package.call_args.kwargs["env"], {"PATH": "C:\\vs", "VCToolsRedistDir": "C:\\redist"})
+
+    def test_build_compiles_with_rocm_clang_and_strata_device(self):
+        """--build on Windows: ROCm's clang compiles the host code too, under MSVC's vcvars; strata-device.exe (which
+        hip_card asks) and the new engine are built beside strata.exe, and the HIP runtime goes beside them (#468)."""
+        calls = []
+
+        def fake_build(src, bdir, target, defs, vcvars, bat):
+            calls.append((target, defs, vcvars, bat))
+            bdir.mkdir(parents=True, exist_ok=True)
+            for name in target.split():
+                (bdir / (name + ".exe")).write_text("x")
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(setup, "WIN", True), \
+                mock.patch.object(setup, "ROOT", Path(d)), mock.patch.object(setup, "cmake_build", fake_build), \
+                mock.patch.object(setup, "rocm_root", return_value=(Path(d) / "rocm", [str(Path(d) / "rocm/bin")])), \
+                mock.patch.object(setup, "find_vcvars", return_value=Path("C:/vs/vcvars64.bat")), \
+                mock.patch.object(setup, "source_hash", return_value="h"), \
+                mock.patch.object(setup, "source_version", return_value="0.1.59"), \
+                mock.patch.object(setup, "stale_binary", return_value=False), \
+                mock.patch.object(setup, "hip_runtime_beside_exe") as beside, \
+                mock.patch.object(setup, "say"), mock.patch.object(setup, "ok"), mock.patch.dict(setup.os.environ):
+            eng = setup.build_engine_hip({"arch": "gfx1151"}, Path("llama"), programs=(setup.Q38EXE,))
+            target, defs, vcvars, bat = calls[0]
+            self.assertEqual(target.split(), ["strata", "strata-q38", "strata-device"])
+            self.assertIn(f"-DCMAKE_CXX_COMPILER={(Path(d) / 'rocm/llvm/bin/clang').as_posix()}++.exe", defs)
+            self.assertEqual((vcvars, bat), (Path("C:/vs/vcvars64.bat"), "build-strata-hip.bat"))
+            self.assertTrue((eng / "strata-device.exe").exists() and (eng / setup.Q38EXE).exists())
+            self.assertEqual(json.loads((eng / "BUILD.json").read_text())["programs"], [setup.Q38EXE])
+            beside.assert_called_once_with(eng)
+            setup.build_engine_hip({"arch": "gfx1151"}, Path("llama"), programs=(setup.Q38EXE,))
+            self.assertEqual(len(calls), 1)
+            (eng / "strata-device.exe").unlink()
+            setup.build_engine_hip({"arch": "gfx1151"}, Path("llama"), programs=(setup.Q38EXE,))
+            self.assertEqual(len(calls), 2)
 
     def test_cpu_vision_build_uses_the_visual_studio_environment(self):
         """#881: build_vision_cpu on Windows hands cmake_build the vcvars file and a real .bat name (it passed None and

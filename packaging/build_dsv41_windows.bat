@@ -4,7 +4,8 @@ rem beside strata.exe (setup.py dsv41_exe() looks for it in the engine folder). 
 rem which package_engine.py copies from CUDA_PATH like it does for strata.exe.
 rem   build_dsv41_windows.bat <build dir> [source dir]        env: STRATA_GGML_DIR (llama.cpp), CUDA_ROOT (default CUDA 13.0), BUILD_JOBS (default 4),
 rem                                                            DSV41_ARCH (default "86-real;89-real;120" = sm_86 + sm_89 + sm_120 SASS, PTX sm_120)
-rem Result: <build dir>\strata-dsv41.exe (about 66 MB).  Windows: only the cuda13 variant gets it (sm_120 needs CUDA 13).
+rem Result: <build dir>\strata-dsv41.exe (about 66 MB) and strata-ds41.exe, the new DeepSeek engine, staged beside it.
+rem Windows: only the cuda13 variant gets them (sm_120 needs CUDA 13).
 setlocal
 set "BD=%~1"
 set "SRCD=%~2"
@@ -21,10 +22,10 @@ if exist "%SRCD%\CMakeLists.txt" (
   if errorlevel 1 exit /b 1
 )
 rem a stale exe must not pass for this build, and the build id is baked in when cmake configures (a git checkout gives it; a tarball needs BUILD_ID)
-if exist "%BD%\strata-dsv41.exe" del /q "%BD%\strata-dsv41.exe"
-start "" /belownormal /wait /b cmake --build "%BD%" -j %BUILD_JOBS% --target strata-dsv41
+for %%F in (strata-dsv41 strata-ds41) do if exist "%BD%\%%F.exe" del /q "%BD%\%%F.exe"
+start "" /belownormal /wait /b cmake --build "%BD%" -j %BUILD_JOBS% --target strata-dsv41 strata-ds41
 if errorlevel 1 exit /b 1
-if not exist "%BD%\strata-dsv41.exe" ( echo no strata-dsv41.exe & exit /b 1 )
+for %%F in (strata-dsv41 strata-ds41) do if not exist "%BD%\%%F.exe" ( echo no %%F.exe & exit /b 1 )
 for /f "delims=" %%V in ('"%BD%\strata-dsv41.exe" --version') do set "DSV41_VERSION=%%V"
 echo %DSV41_VERSION%
 if not "%DSV41_VERSION:build unknown=%"=="%DSV41_VERSION%" if not "%ALLOW_UNKNOWN_BUILD_ID%"=="1" ( echo strata-dsv41.exe prints no commit: build from a git checkout or put the commit in BUILD_ID & exit /b 1 )

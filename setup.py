@@ -277,6 +277,12 @@ VISION = {"gpu": {"max_tokens": 1024, "reserve_mib": 700},
 EXE = "strata.exe" if WIN else "strata"
 VEXE = "strata-vision.exe" if WIN else "strata-vision"
 HVEXE = "strata-vision-hip.exe" if WIN else "strata-vision-hip"     # AMD: the picture reader on the GPU (tools/vision, STRATA_VISION_HIP)
+# The new engines (docs/MEMORY_MANAGER_PLAN.md: conversations in page-pool pages).  A Flash-Next model runs on
+# strata-q38 and DeepSeek on strata-ds41 whenever its engine folder has that program (new_engine_or); otherwise on the
+# older engine.
+Q38EXE = "strata-q38.exe" if WIN else "strata-q38"
+DS41EXE = "strata-ds41.exe" if WIN else "strata-ds41"
+DSV41EXE = "strata-dsv41.exe" if WIN else "strata-dsv41"   # the older DeepSeek engine: setup's pack check runs it
 # MODEL-UPDATE Phase 1: the K-quant prompt kernels (Unsloth's UD-Q4/Q5/Q6_K_XL experts) are a library next to the CUDA
 # engine, opened only for those models; an engine without it runs them on the FP16 prompt path
 KQ_LIB = "strata_kq.dll" if WIN else "libstrata_kq.so"
@@ -1664,8 +1670,8 @@ def find_vcvars(cuda_v=None):
     (2026 = version 18) is taken only with CUDA 13.3 or newer (`cuda_v`, the toolkit's (major, minor)).
 
     The version range is CUDA's requirement alone, so a caller with no CUDA (`cuda_v is None`) asks vswhere for no
-    range at all: the CPU image encoder is built by MSVC, which is happy with any version (tools/hip/build_windows.bat
-    already calls vswhere that way).  With the range applied to every caller, a machine whose only C++ tools are
+    range at all: the CPU image encoder and the AMD build are happy with any version.  With the range applied to
+    every caller, a machine whose only C++ tools are
     Visual Studio 2026 gets None back and nothing can be built there (#881).  STRATA_VCVARS=<vcvars64.bat> picks one
     by hand, for an install vswhere cannot use."""
     override = os.environ.get("STRATA_VCVARS")
@@ -3250,6 +3256,10 @@ ROCM_FAMILY_PINS = {"gfx103X-all": "7.13.0a20260515",    # #1103: 7.13.0a2026051
 ROCM_VERSION_OVERRIDE = os.environ.get("STRATA_ROCM_VERSION") or None
 ROCM_VERSION = ROCM_VERSION_OVERRIDE or ROCM_VERSION_DEFAULT   # kept for callers that read one version
 ROCM_SYSTEM_MIN = (7, 0)       # an older system ROCm is passed over for the wheels (gfx1201 needs ROCm 6.4 or newer)
+# Windows: one index and version for every card (the ROCm 10.2 nightly #325 ran on an RX 9070 XT; the Windows releases
+# are built with it); a device-<arch> extra adds each card's kernels.
+WIN_ROCM_INDEX = "https://nightly.repo.amd.com/rocm/whl-next/"
+WIN_ROCM_VERSION = "10.2.0a20260930"
 # STRATA_EXPERIMENTAL_GFX1103=1 (opt-in, unsupported): the Radeon 780M / 760M / 740M iGPU (Ryzen 7040 / 8040, gfx1103) is taken
 # as a unified-memory AMD card like Strix Halo, with the native dot4 and gfx11 WMMA kernels, the gfx1103 exact speed switches
 # and a hipBLASLt table when one matches (measured on one machine: Ryzen 7 8745HS).  Unset: unchanged.
@@ -3257,7 +3267,7 @@ GFX1103_OPT_IN = os.environ.get("STRATA_EXPERIMENTAL_GFX1103") == "1"
 # STRATA_EXPERIMENTAL_GFX1150=1 (opt-in, unvalidated): the Radeon 890M / 880M iGPU (Ryzen AI 300, Strix Point, gfx1150)
 # is taken as a unified-memory AMD card like Strix Halo.  The engine builds and runs for gfx1150 from 0.1.40.2 (#1217;
 # tools/hip/gfx1150-hipblaslt-100401.txt is calibrated on it), but no release ships a ready-made Windows engine for it:
-# build one with `STRATA_HIP_ARCHS=gfx1150 tools\hip\build_windows.bat` and start setup with `--prebuilt dist\`.
+# setup compiles one with --build.
 # Unset: unchanged.
 GFX1150_OPT_IN = os.environ.get("STRATA_EXPERIMENTAL_GFX1150") == "1"
 AMD_ARCHS = ("gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201", "gfx1030", "gfx1031", "gfx1151") \
@@ -3636,8 +3646,7 @@ def gfx1150_notes(gpu, ram) -> list[str]:
              f"seen by the OS + a {gpu.get('dedicated_gb', 0.0):.1f} GB BIOS carve-out), so the model's experts live in "
              "that pool and the expert cache is sized from the memory the OS can give back."]
     notes.append("  " + ("The engine is compiled here for gfx1150" if not WIN else
-                         "Windows has no ready-made engine for gfx1150: build one with STRATA_HIP_ARCHS=gfx1150 "
-                         "tools\\hip\\build_windows.bat and start setup with --prebuilt dist\\")
+                         "Windows has no ready-made engine for gfx1150: run setup with --build to compile one")
                  + " (experimental opt-in, STRATA_EXPERIMENTAL_GFX1150=1, unvalidated: docs/AMD_HIP.md).")
     if not WIN and gpu.get("shared_gb", 0) < 0.75 * ram - 1:
         notes.append(f"!the GPU can reach {gpu.get('shared_gb', 0):.0f} GB of shared memory (the GTT pool; the kernel's "
@@ -3841,7 +3850,7 @@ def amd_parse_gpus(text, amd) -> list:
 # Windows has no KFD topology: the cards are found from the display adapters (Win32_VideoController: the ones present,
 # with their PCI ids) and the display-class registry (each adapter's 64-bit VRAM size), before any AMD software is
 # needed.  The engine is the ready-made HIP one (WIN_HIP_ASSET: strata.exe, strata-device.exe and the ROCm libraries it
-# loads, built by tools/hip/build_windows.bat); it needs only the AMD driver.  Once it is installed, the cards are
+# loads, built by tools/hip/build_release.py); it needs only the AMD driver.  Once it is installed, the cards are
 # numbered as the HIP runtime numbers them (`strata-device --list-devices`): an integrated Radeon takes HIP's device 0
 # and pushes the discrete card to 1, which the display-adapter order does not show (#325).
 WIN_HIP_ASSET = "strata-windows-x64-hip.zip"   # releases up to 0.1.45; 0.2 releases publish per-card packages in the signed feed (engine_from_feed)
@@ -3952,7 +3961,8 @@ def hip_devices(probe: Path | None = None, text: str | None = None) -> list[dict
 
 
 def hip_lib_dirs(eng: Path) -> list[Path]:
-    """Where the ready-made Windows HIP engine's ROCm DLLs are (its BUILD.json "lib_dirs", relative to engine/)."""
+    """Where the Windows HIP engine's ROCm DLLs are (its BUILD.json "lib_dirs": relative to engine/ in a ready-made
+    engine, ROCm's own bin in one compiled here)."""
     try:
         rel = json.loads((eng / "BUILD.json").read_text(encoding="utf-8")).get("lib_dirs") or []
     except (OSError, ValueError):
@@ -4147,8 +4157,7 @@ def get_prebuilt_hip(url_base, gpu, updating=False) -> Path | None:
             why = (f"it is built for {', '.join(arch_names(meta.get('archs'))) or 'other GPUs'} and has no gfx1151 code: your "
                    f"{gpu['name']} (Strix Halo) needs a ready-made engine from Strata 0.1.40 or newer, whose zip is "
                    "built for gfx1151 too.  Until then: the Linux guide docs/STRIX_HALO.md, or compile the engine "
-                   "here with tools\\hip\\build_windows.bat (its default list has gfx1151) and start setup with "
-                   "--prebuilt <its dist folder>")
+                   "here: run setup again with --build")
     if why:
         warn(f"the ready-made AMD engine at {base} cannot be used: {why}")
         shutil.rmtree(tmp, ignore_errors=True)
@@ -4184,10 +4193,14 @@ def rocm_dev_missing(sysroot: Path) -> list:
 def rocm_root(archs):
     """ROCm for compiling and running the HIP engine for `archs` (one arch or a list: the cards of a layer split):
     (root, library folders).  A system ROCm 7 with hipcc, hipBLAS and the HIP development files (#446), else AMD's
-    TheRock wheels (rocm_wanted: a version per card family, from the family's index) installed into .venv."""
+    TheRock wheels (rocm_wanted: a version per card family, from the family's index) installed into .venv.  Windows:
+    ROCM_PATH when it names a TheRock root (`rocm-sdk path --root`), else the wheels of WIN_ROCM_VERSION with each
+    card's device package; the library folder there is the root's bin, which holds every ROCm DLL."""
     archs = [archs] if isinstance(archs, str) else list(archs)
-    sysroot = Path(os.environ.get("ROCM_PATH") or "/opt/rocm")
-    if (sysroot / "bin" / "hipcc").exists() and list((sysroot / "lib").glob("libhipblas.so*")):
+    sysroot = Path(os.environ.get("ROCM_PATH") or ("" if WIN else "/opt/rocm"))
+    if WIN and os.environ.get("ROCM_PATH") and (rocm_llvm_bin(sysroot) / "clang++.exe").exists():
+        return sysroot, [str(sysroot / "bin")]
+    if not WIN and (sysroot / "bin" / "hipcc").exists() and list((sysroot / "lib").glob("libhipblas.so*")):
         ver = rocm_version(sysroot)
         missing = rocm_dev_missing(sysroot)
         if (ver is None or ver >= ROCM_SYSTEM_MIN) and not missing:
@@ -4198,33 +4211,30 @@ def rocm_root(archs):
         else:                                          # #446: a runtime-only ROCm (no -dev packages): cmake would fail
             warn(f"the ROCm in {sysroot} has no HIP development files ({', '.join(missing)}): using AMD's wheels in "
                  ".venv instead (or install them, e.g. AMD's amdrocm-core-dev package for your ROCm and card)")
-    indexes = list(dict.fromkeys(rocm_index(a) for a in archs))
-    if len(indexes) > 1:                               # TheRock's wheels hold one GPU family's libraries
-        fail(f"cards of two GPU families ({', '.join(archs)}) need a system ROCm 7 (in /opt/rocm): AMD's Python "
-             "wheels come per family", "install ROCm 7 system-wide, or use cards of one family (--gpu N for one card)")
-    index = indexes[0]
     stamp = Path(sys.prefix) / ".strata-rocm.json"
     have = json.loads(stamp.read_text(encoding="utf-8")) if stamp.exists() else {}
-    wheel = None
-    if have.get("index") == index and have.get("version") and not ROCM_VERSION_OVERRIDE \
-            and (Path(sys.executable).parent / "rocm-sdk").exists() and have["version"] == ROCM_FAMILY_PINS.get(rocm_family(index), ROCM_VERSION_DEFAULT):
-        wheel = have["version"]                         # the family's pin is installed: no lookup
-    if wheel is None:
-        wheel, note = rocm_wanted(index)
-        if note:
-            warn(note)
-    if have.get("version") != wheel or have.get("index") != index:
+    sdk = Path(sys.executable).parent / ("rocm-sdk.exe" if WIN else "rocm-sdk")
+    if WIN:
+        index, wheel = WIN_ROCM_INDEX, ROCM_VERSION_OVERRIDE or WIN_ROCM_VERSION
+        extras = ",".join(["libraries", "devel", *(f"device-{a}" for a in sorted(set(archs)))])
+    else:
+        (index, wheel), extras = rocm_wheel(archs, have, sdk), "libraries,devel"
+    if have.get("version") != wheel or have.get("index") != index or have.get("extras", "libraries,devel") != extras:
         say(f"  Installing ROCm {wheel} for AMD GPUs into .venv (AMD's TheRock wheels, ~10 GB, no sudo) ...")
         pip = [sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--index-url", index]
-        if have.get("version") == wheel:               # the same version for another GPU family: its own libraries
+        if have.get("version") == wheel and not WIN:   # the same version for another GPU family: its own libraries
             run(pip + ["--force-reinstall", "--no-deps", f"rocm=={wheel}"])
-        run(pip + [f"rocm[libraries,devel]=={wheel}"])
-        stamp.write_text(json.dumps({"version": wheel, "index": index}))
-    sdk = Path(sys.executable).parent / "rocm-sdk"
+        run(pip + [f"rocm[{extras}]=={wheel}"])
+        if WIN:                                        # unpacks the devel wheel (the compiler and the headers)
+            run([str(sdk), "init"])
+        stamp.write_text(json.dumps({"version": wheel, "index": index, **({"extras": extras} if WIN else {})}))
     root = Path(out([str(sdk), "path", "--root"]).strip())
-    if not (root / "llvm" / "bin" / "clang++").exists():
+    if not (rocm_llvm_bin(root) / ("clang++.exe" if WIN else "clang++")).exists():
         fail(f"ROCm was installed but its compiler is missing ({root})",
              f"remove {stamp} and run this again; or install ROCm 7 system-wide")
+    if WIN:
+        ok(f"ROCm: {root}")
+        return root, [str(root / "bin")]
     # the card family's libraries only (gfx120X-all -> _rocm_sdk_libraries_gfx120X_all): another family's
     # libhipblaslt.so first on the path would have no kernels for this card
     family = "_rocm_sdk_libraries_" + index.rstrip("/").rsplit("/", 1)[-1].replace("-", "_")
@@ -4235,6 +4245,30 @@ def rocm_root(archs):
         dirs += [str(d / "lib") for d in libs if (d / "lib").is_dir()]
     ok(f"ROCm: {root}")
     return root, list(dict.fromkeys(dirs))
+
+
+def rocm_wheel(archs: list, have: dict, sdk: Path) -> tuple:
+    """Linux: picks TheRock's wheel for `archs` as (index, version): the family's index and its pinned version
+    (no lookup when `have`, the installed stamp, already holds it), else rocm_wanted's choice."""
+    indexes = list(dict.fromkeys(rocm_index(a) for a in archs))
+    if len(indexes) > 1:                               # TheRock's wheels hold one GPU family's libraries
+        fail(f"cards of two GPU families ({', '.join(archs)}) need a system ROCm 7 (in /opt/rocm): AMD's Python "
+             "wheels come per family", "install ROCm 7 system-wide, or use cards of one family (--gpu N for one card)")
+    index = indexes[0]
+    if have.get("index") == index and have.get("version") and not ROCM_VERSION_OVERRIDE \
+            and sdk.exists() and have["version"] == ROCM_FAMILY_PINS.get(rocm_family(index), ROCM_VERSION_DEFAULT):
+        return index, have["version"]                  # the family's pin is installed: no lookup
+    wheel, note = rocm_wanted(index)
+    if note:
+        warn(note)
+    return index, wheel
+
+
+def rocm_llvm_bin(root: Path) -> Path:
+    """Gets the folder of ROCm's clang under `root`: llvm/bin in a Linux install, lib/llvm/bin in TheRock's Windows
+    wheels."""
+    return next((d for d in (root / "llvm" / "bin", root / "lib" / "llvm" / "bin") if d.is_dir()),
+                root / "llvm" / "bin")
 
 
 def hipblaslt_version(lib_dirs):
@@ -4275,10 +4309,11 @@ def hipblaslt_table(arch, lib_dirs, ver=None, extra_dirs=()):
     return None
 
 
-def build_engine_hip(gpu, llama, vision="none") -> Path:
+def build_engine_hip(gpu, llama, vision="none", programs=()) -> Path:
     """Compile the HIP engine for this AMD GPU into engine/ (again only when its source changed: a `git pull`).
     gpu["archs"]: every architecture it needs code for (the cards of a layer split), else gpu["arch"].  vision "cpu"
-    (#304): the image encoder too, for the CPU (there is no HIP encoder build yet)."""
+    (#304): the image encoder too, for the CPU; "gpu": the HIP picture reader as well.  programs: the new engines to
+    compile beside strata (built_programs)."""
     acquisition.require("an engine build")
     eng = ROOT / "engine"
     eng.mkdir(exist_ok=True)
@@ -4288,8 +4323,10 @@ def build_engine_hip(gpu, llama, vision="none") -> Path:
     archs = sorted(set(gpu.get("archs") or [gpu["arch"]]))
     has_archs = set(archs) <= set(arch_names(meta.get("archs")))
     floor = cpu_floor(cpu_info()[1])                     # "" on an AVX2 CPU: the normal engine
+    programs = built_programs(meta, programs)
     engine_ok = meta.get("backend") == "hip" and (eng / EXE).exists() and meta.get("src") == src and has_archs and \
-        (meta.get("isa_floor") or "") == floor and not stale_binary(eng / EXE)
+        (meta.get("isa_floor") or "") == floor and not stale_binary(eng / EXE) and has_programs(eng, meta, programs) and \
+        (not WIN or (eng / "strata-device.exe").is_file())
     vision_ok = vision == "none" or ((eng / VEXE).exists() and meta.get("vision_src") == vsrc and
                                      (vision != "gpu" or ((eng / HVEXE).exists() and set(archs) <= set(arch_names(meta.get("vision_archs"))))))
     if engine_ok and vision_ok:
@@ -4297,40 +4334,76 @@ def build_engine_hip(gpu, llama, vision="none") -> Path:
         return eng
     if engine_ok:
         return build_vision_hip(eng, stamp, meta, llama, vsrc, archs, vision)
-    if not (shutil.which("c++") or shutil.which("g++")) or not shutil.which("git"):
+    if not WIN and (not (shutil.which("c++") or shutil.which("g++")) or not shutil.which("git")):
         fail("a C++ compiler and git are needed to compile the AMD engine",
              "Ubuntu/Debian: sudo apt install build-essential git   Fedora: sudo dnf install gcc-c++ git")
-    root, dirs = rocm_root(archs)
-    libs = [str(Path(d).parent) for d in dirs[1:]]
-    bitcode = next((p for p in (root / "lib" / "llvm" / "amdgcn" / "bitcode", root / "amdgcn" / "bitcode") if p.is_dir()),
-                   root / "amdgcn" / "bitcode")
-    os.environ.update({"HIP_PLATFORM": "amd", "HIP_COMPILER": "clang", "HIP_RUNTIME": "rocclr", "ROCM_PATH": str(root),
-                       "HIP_PATH": str(root)})
-    os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(dirs + [os.environ.get("LD_LIBRARY_PATH", "")]).rstrip(os.pathsep)
-    os.environ["PATH"] = os.pathsep.join([str(root / "bin"), str(root / "llvm" / "bin"), os.environ.get("PATH", "")])
-    say("  The engine's source changed: compiling it again (only what changed, a few minutes) ..."
+    root, dirs = use_rocm(archs)
+    say(("  Compiling the new engine beside it (a few minutes) ..." if meta.get("src") == src else
+         "  The engine's source changed: compiling it again (only what changed, a few minutes) ...")
         if meta.get("backend") == "hip" and (eng / EXE).exists() and has_archs
         else f"  Compiling the Strata engine for your AMD GPU{'s' if len(archs) > 1 else ''} ({', '.join(archs)}; "
              "10-20 minutes, once) ...")
-    cmake_build(ROOT, ROOT / "build-hip", "strata",
-                ["-DSTRATA_ENABLE_HIP=ON", "-DSTRATA_ENABLE_CUDA=OFF", "-DSTRATA_BUILD_TESTS=OFF",
-                 "-DSTRATA_PREFILL_MMQ=ON", "-DSTRATA_Q6K_EXPERTS=ON", "-DSTRATA_MMQ_KQUANTS=ON", "-DCMAKE_HIP_ARCHITECTURES=" + ";".join(archs),
-                 f"-DCMAKE_HIP_COMPILER={root / 'llvm' / 'bin' / 'clang++'}", f"-DCMAKE_HIP_COMPILER_ROCM_ROOT={root}",
-                 "-DCMAKE_PREFIX_PATH=" + ";".join([str(root), *libs]),
-                 f"-DCMAKE_HIP_FLAGS=--rocm-path={root} --rocm-device-lib-path={bitcode}",
-                 f"-DSTRATA_GGML_DIR={llama}", *isa_floor_defs(floor, ROOT / "build-hip", meta)], None, "")
-    if stale_binary(ROOT / "build-hip" / EXE):            # #2054: no stamp for a binary of another version
+    bdir = ROOT / "build-hip"
+    files = [EXE, *programs, *(["strata-device.exe"] if WIN else [])]   # hip_card asks strata-device on Windows
+    compile_hip(ROOT, bdir, cmake_targets(files), root, dirs,
+                [*hip_engine_defs(archs, llama, programs), *isa_floor_defs(floor, bdir, meta)], "build-strata-hip.bat")
+    if stale_binary(bdir / EXE):                          # #2054: no stamp for a binary of another version
         fail(f"the engine build finished without a new engine ({EXE} is version "
-             f"{binary_engine_version(ROOT / 'build-hip' / EXE)}, this source is {source_version()}): "
+             f"{binary_engine_version(bdir / EXE)}, this source is {source_version()}): "
              "the installed engine is left as it was", "delete the folder build-hip and run this again")
-    shutil.copy2(ROOT / "build-hip" / EXE, eng / EXE)
+    for f in files:
+        shutil.copy2(bdir / f, eng / f)
     meta = {"source": "local-hip", "backend": "hip", "version": source_version(), "archs": archs, "vision": "none",
-            "lib_dirs": dirs, "src": src, **({"isa_floor": floor} if floor else {})}
+            "lib_dirs": dirs, "src": src, **({"programs": programs} if programs else {}),
+            **({"isa_floor": floor} if floor else {})}
     if vision != "none":
-        return build_vision_hip(eng, stamp, meta, llama, vsrc, archs, vision)
-    stamp.write_text(json.dumps(meta, indent=1))
-    ok(f"engine compiled: {eng / EXE}")
+        build_vision_hip(eng, stamp, meta, llama, vsrc, archs, vision)
+    else:
+        stamp.write_text(json.dumps(meta, indent=1))
+        ok(f"engine compiled: {eng / EXE}")
+    if WIN:
+        hip_runtime_beside_exe(eng)                       # #468 #461
     return eng
+
+
+def use_rocm(archs) -> tuple:
+    """Gets ROCm for `archs` as rocm_root does and points this process's environment at it, for the HIP builds and the
+    programs they start."""
+    root, dirs = rocm_root(archs)
+    os.environ.update({"HIP_PLATFORM": "amd", "HIP_COMPILER": "clang", "HIP_RUNTIME": "rocclr", "ROCM_PATH": str(root),
+                       "HIP_PATH": str(root)})
+    os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(dirs + [os.environ.get("LD_LIBRARY_PATH", "")]).rstrip(os.pathsep)
+    os.environ["PATH"] = os.pathsep.join([str(root / "bin"), str(rocm_llvm_bin(root)), os.environ.get("PATH", "")])
+    return root, dirs
+
+
+def hip_engine_defs(archs, llama, programs) -> list:
+    """Gets the CMake definitions of the HIP engine for the architectures `archs` with the programs `programs`.  Setup's
+    build and the Windows release build (tools/hip/build_release.py) share them."""
+    return ["-DSTRATA_ENABLE_HIP=ON", "-DSTRATA_ENABLE_CUDA=OFF", "-DSTRATA_BUILD_TESTS=OFF", "-DSTRATA_PREFILL_MMQ=ON",
+            "-DSTRATA_Q6K_EXPERTS=ON", "-DSTRATA_MMQ_KQUANTS=ON", "-DCMAKE_HIP_ARCHITECTURES=" + ";".join(archs),
+            f"-DSTRATA_GGML_DIR={llama}", *program_defs(programs)]
+
+
+def compile_hip(src: Path, bdir: Path, targets: str, root: Path, dirs: list, defs: list, bat_name: str) -> None:
+    """Compiles `targets` of the CMake project `src` in `bdir` with the ROCm of use_rocm (`root`, `dirs`), adding
+    `defs`.  On Windows ROCm's clang compiles the host code too (CMake refuses to mix cl.exe with Clang's HIP), with
+    MSVC's headers and linker from vcvars; `bat_name` is the build script's name there (cmake_build)."""
+    clang = (rocm_llvm_bin(root) / "clang").as_posix()
+    cmake_build(src, bdir, targets,
+                [*([f"-DCMAKE_C_COMPILER={clang}.exe", f"-DCMAKE_CXX_COMPILER={clang}++.exe"] if WIN else []),
+                 f"-DCMAKE_HIP_COMPILER={clang}++{'.exe' if WIN else ''}",
+                 f"-DCMAKE_HIP_COMPILER_ROCM_ROOT={root.as_posix()}",
+                 "-DCMAKE_PREFIX_PATH=" + ";".join([root.as_posix(), *(Path(d).parent.as_posix() for d in dirs[1:])]),
+                 f"-DCMAKE_HIP_FLAGS={rocm_flags(root)}", *defs],
+                find_vcvars() if WIN else None, bat_name if WIN else "")
+
+
+def rocm_flags(root: Path) -> str:
+    """Gets the compiler flags that point ROCm's clang at the ROCm in `root` and its device libraries."""
+    bitcode = next((p for p in (root / "lib" / "llvm" / "amdgcn" / "bitcode", root / "amdgcn" / "bitcode")
+                    if p.is_dir()), root / "amdgcn" / "bitcode")
+    return f"--rocm-path={root.as_posix()} --rocm-device-lib-path={bitcode.as_posix()}"
 
 
 def hip_vision(asked, vram_gb: float = 0.0) -> str:
@@ -4369,29 +4442,16 @@ def hip_reader(eng: Path, vision: str, gpu: dict):
 
 def build_vision_hip(eng: Path, stamp: Path, meta: dict, llama, vsrc, archs: list, vision: str) -> Path:
     """The picture readers beside the HIP engine: the CPU reader always (the fallback), and for "gpu" the HIP reader
-    (tools/vision, STRATA_VISION_HIP) for the same architectures.  The HIP reader needs the ROCm environment the engine build
-    sets; a build that fails leaves the CPU reader and says so (pictures still work, on the CPU)."""
-    if vision == "gpu" and not (shutil.which("hipconfig") or os.environ.get("ROCM_PATH")):
-        root, dirs = rocm_root(archs)                    # the engine was built earlier: set the same environment again
-        os.environ.update({"HIP_PLATFORM": "amd", "HIP_COMPILER": "clang", "HIP_RUNTIME": "rocclr", "ROCM_PATH": str(root),
-                           "HIP_PATH": str(root)})
-        os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(dirs + [os.environ.get("LD_LIBRARY_PATH", "")]).rstrip(os.pathsep)
-        os.environ["PATH"] = os.pathsep.join([str(root / "bin"), str(root / "llvm" / "bin"), os.environ.get("PATH", "")])
+    (tools/vision, STRATA_VISION_HIP) for the same architectures.  A build that fails leaves the CPU reader and says so
+    (pictures still work, on the CPU)."""
     build_vision_cpu(eng, stamp, meta, llama, vsrc)
     meta = json.loads(stamp.read_text(encoding="utf-8"))
     if vision != "gpu":
         return eng
-    root, dirs = rocm_root(archs)
-    libs = [str(Path(d).parent) for d in dirs[1:]]
-    bitcode = next((p for p in (root / "lib" / "llvm" / "amdgcn" / "bitcode", root / "amdgcn" / "bitcode") if p.is_dir()),
-                   root / "amdgcn" / "bitcode")
+    root, dirs = use_rocm(archs)
     say("  Compiling the picture reader for your AMD GPU (a few minutes, once) ...")
     try:
-        cmake_build(ROOT / "tools" / "vision", ROOT / "build-vision-hip", "strata-vision",
-                    [f"-DLLAMA_DIR={llama}", "-DSTRATA_VISION_HIP=ON", "-DSTRATA_VISION_HIP_ARCHS=" + ";".join(archs),
-                     "-DSTRATA_PORTABLE=OFF", f"-DCMAKE_HIP_COMPILER={root / 'llvm' / 'bin' / 'clang++'}",
-                     f"-DCMAKE_HIP_COMPILER_ROCM_ROOT={root}", "-DCMAKE_PREFIX_PATH=" + ";".join([str(root), *libs]),
-                     f"-DCMAKE_HIP_FLAGS=--rocm-path={root} --rocm-device-lib-path={bitcode}"], None, "")
+        compile_hip_reader(ROOT / "build-vision-hip", archs, root, dirs, llama, portable=False)
         shutil.copy2(ROOT / "build-vision-hip" / "bin" / HVEXE, eng / HVEXE)
     except SystemExit:
         raise
@@ -4407,14 +4467,28 @@ def build_vision_cpu(eng: Path, stamp: Path, meta: dict, llama, vsrc) -> Path:
     """#304: the CPU image encoder beside the HIP engine (tools/vision without CUDA), recorded in its BUILD.json."""
     if not ((eng / VEXE).exists() and meta.get("vision_src") == vsrc):
         say("  Compiling the image encoder (for the CPU) ...")
-        cmake_build(ROOT / "tools" / "vision", ROOT / "build-vision", "strata-vision",
-                    [f"-DLLAMA_DIR={llama}", "-DSTRATA_VISION_CUDA=OFF", "-DSTRATA_PORTABLE=OFF"],
-                    find_vcvars() if WIN else None,
-                    "build-vision-cpu.bat" if WIN else "")   # #881: MSVC's environment on Windows, as the CUDA path has
+        compile_cpu_reader(ROOT / "build-vision", llama, portable=False)
         shutil.copy2(ROOT / "build-vision" / "bin" / VEXE, eng / VEXE)
     stamp.write_text(json.dumps({**meta, "vision": "cpu", "vision_src": vsrc}, indent=1))
     ok(f"engine: {eng / EXE}, image encoder (CPU): {eng / VEXE}")
     return eng
+
+
+def compile_hip_reader(bdir: Path, archs: list, root: Path, dirs: list, llama, portable: bool) -> None:
+    """Compiles the HIP picture reader (strata-vision-hip) in `bdir`; `portable`: for other PCs (a release)."""
+    compile_hip(ROOT / "tools" / "vision", bdir, "strata-vision", root, dirs,
+                [f"-DLLAMA_DIR={llama}", "-DSTRATA_VISION_HIP=ON", "-DSTRATA_VISION_HIP_ARCHS=" + ";".join(archs),
+                 f"-DSTRATA_PORTABLE={'ON' if portable else 'OFF'}",
+                 *([f"-DCMAKE_CXX_FLAGS={rocm_flags(root)}"] if WIN else [])], "build-vision-hip.bat")
+
+
+def compile_cpu_reader(bdir: Path, llama, portable: bool) -> None:
+    """Compiles the CPU picture reader (strata-vision) in `bdir`: with MSVC on Windows (#881), even when ROCm's clang is
+    first on the PATH; `portable`: for other PCs (a release)."""
+    cmake_build(ROOT / "tools" / "vision", bdir, "strata-vision",
+                [f"-DLLAMA_DIR={llama}", "-DSTRATA_VISION_CUDA=OFF", f"-DSTRATA_PORTABLE={'ON' if portable else 'OFF'}",
+                 *(["-DCMAKE_C_COMPILER=cl", "-DCMAKE_CXX_COMPILER=cl"] if WIN else [])],
+                find_vcvars() if WIN else None, "build-vision-cpu.bat" if WIN else "")
 
 
 # ------------------------------------------------------------------------------------------------ image generation
@@ -5285,12 +5359,14 @@ def fresh_if_other_generator(bdir: Path, generator: str = "Ninja") -> bool:
 
 
 def cmake_build(src, bdir, target, defs, vcvars, bat_name):
+    """Configures and compiles `target` (one CMake target, or several separated by spaces) of the project `src` in
+    `bdir`.  On Windows the commands run from the script `bat_name` after MSVC's `vcvars`."""
     acquisition.require("a compile (cmake)")
     cmake, ninja = ensure_build_tools()
     fresh_if_other_generator(bdir)
     conf = [cmake, "-G", "Ninja", f"-DCMAKE_MAKE_PROGRAM={ninja}", "-S", str(src), "-B", str(bdir),
             "-DCMAKE_BUILD_TYPE=Release", *defs]
-    build = [cmake, "--build", str(bdir), "--target", target, "-j", str(max(2, (os.cpu_count() or 4) // 2))]
+    build = [cmake, "--build", str(bdir), "--target", *target.split(), "-j", str(max(2, (os.cpu_count() or 4) // 2))]
     # A failed build is tried once more: CUDA 13.0's ptxas now and then fails to parse a PTX file it just wrote, and
     # the same command then gets past it (issue #45); a second attempt only compiles what is still missing.
     if WIN:
@@ -5363,6 +5439,29 @@ def engine_defs(archs, toolkit=13) -> list:
     return ["-DSTRATA_EXPERIMENTAL_SM60=ON"] if min(int(x) for x in archs) < 75 or int(toolkit) == 12 else []
 
 
+def built_programs(meta: dict, programs) -> list:
+    """Gets the new engines (Q38EXE, DS41EXE; DSV41EXE beside DS41EXE) a compile of the engine folder whose BUILD.json
+    is `meta` makes beside strata: `programs`, and every one an earlier compile there made, so that a recompile (a
+    source change, a card added) keeps them current too."""
+    return sorted(set(programs) | set(meta.get("programs") or []))
+
+
+def has_programs(eng: Path, meta: dict, programs) -> bool:
+    """Has the engine folder `eng` (its BUILD.json: `meta`) every program in `programs`, compiled with its engine?"""
+    return all(p in (meta.get("programs") or []) and (eng / p).is_file() for p in programs)
+
+
+def program_defs(programs) -> list:
+    """Gets the CMake definitions the engine programs `programs` need: the DeepSeek engines are STRATA_BUILD_DSV41's."""
+    return ["-DSTRATA_BUILD_DSV41=ON"] if {DS41EXE, DSV41EXE} & set(programs) else []
+
+
+def cmake_targets(files) -> str:
+    """Gets the CMake targets that make the program files `files` (strata-q38.exe -> strata-q38) as cmake_build takes
+    them."""
+    return " ".join(Path(f).stem for f in files)
+
+
 def prebuilt_vision(meta: dict, gpu: dict, vision: str) -> str:
     """The image encoder to use with a ready-made engine (`meta`: its BUILD.json).  The encoder can cover fewer cards
     than the engine (0.1.30/0.1.31: no RTX 20 code, #331): such a card gets the CPU encoder - the same program - instead
@@ -5389,11 +5488,11 @@ def local_build_archs(archs, found) -> list:
     return sorted({int(x) for x in archs} | present)
 
 
-def build_engine(gpu, vision, yes, llama, toolkit=None) -> Path:
+def build_engine(gpu, vision, yes, llama, toolkit=None, programs=()) -> Path:
     """Compile the engine (and, for images, the encoder) for this GPU; the results go to engine/.  A compiled
     engine whose source files changed since (a `git pull`) is compiled again: only the changed files, a few minutes.
     toolkit 12 (default: 12 for a card older than CUDA 13 supports): the experimental CUDA 12 engine, in
-    engine-cuda12/ with its own build folders."""
+    engine-cuda12/ with its own build folders.  programs: the new engines to compile beside strata (built_programs)."""
     acquisition.require("an engine build")
     if toolkit is None:
         toolkit = 12 if min(int(x) for x in gpu.get("archs", [gpu["arch"]])) < CUDA13_MIN_ARCH else 13
@@ -5412,8 +5511,9 @@ def build_engine(gpu, vision, yes, llama, toolkit=None) -> Path:
     # same; the compile keeps the generations it was built for
     new_arch = local and not set(archs) <= built
     floor = cpu_floor(cpu_info()[1])                     # "" on an AVX2 CPU: the normal engine
+    programs = built_programs(meta, programs)
     engine_ok = local and (eng / EXE).exists() and meta.get("src") == src and not new_arch and \
-        (meta.get("isa_floor") or "") == floor and not stale_binary(eng / EXE)
+        (meta.get("isa_floor") or "") == floor and not stale_binary(eng / EXE) and has_programs(eng, meta, programs)
     vision_ok = not want_vision or ((eng / VEXE).exists() and (not local or meta.get("vision_src") == vsrc))
     if engine_ok and vision_ok:
         ok("engine already built for this PC")
@@ -5426,20 +5526,22 @@ def build_engine(gpu, vision, yes, llama, toolkit=None) -> Path:
     if not engine_ok:
         say("  Compiling the engine for " + ", ".join(f"sm_{x}" for x in archs) + " (a card it had no code for; "
             "10-20 minutes, once) ..." if new_arch else
-            "  The engine's source changed: compiling it again (only what changed, a few minutes) ..."
+            ("  Compiling the new engine beside it (a few minutes) ..." if meta.get("src") == src else
+             "  The engine's source changed: compiling it again (only what changed, a few minutes) ...")
             if local and (eng / EXE).exists() else "  Compiling the Strata engine for your GPU (10-20 minutes, once) ...")
-        cmake_build(ROOT, bdir, "strata",
+        cmake_build(ROOT, bdir, cmake_targets([EXE, *programs]),
                     ["-DSTRATA_ENABLE_CUDA=ON", "-DSTRATA_BUILD_TESTS=OFF", "-DSTRATA_Q6K_EXPERTS=ON", "-DSTRATA_MMQ_KQUANTS=ON",
                      f"-DCMAKE_CUDA_ARCHITECTURES={cuda_archs}",
                      f"-DCMAKE_CUDA_COMPILER={nvcc}", *toolkit_root_defs(nvcc), f"-DSTRATA_GGML_DIR={llama}",
-                     *host_compiler_defs(True), *engine_defs(archs, toolkit),
+                     *host_compiler_defs(True), *engine_defs(archs, toolkit), *program_defs(programs),
                      *isa_floor_defs(floor, bdir, meta)],
                     vcvars, "build-strata-cuda12.bat" if t12 else "build-strata.bat")
         if stale_binary(bdir / EXE):                      # #2054: the stamp below is written only for a binary of this source
             fail(f"the engine build finished without a new engine ({EXE} is version {binary_engine_version(bdir / EXE)}, "
                  f"this source is {source_version()}): the installed engine and its stamp are left as they were",
                  "the build folder " + str(bdir) + " may be configured for something else: delete it and run this again")
-        shutil.copy2(bdir / EXE, eng / EXE)
+        for f in [EXE, *programs]:
+            shutil.copy2(bdir / f, eng / f)
         if (bdir / KQ_LIB).exists():                      # built with it (Phase 1): it goes next to the engine
             shutil.copy2(bdir / KQ_LIB, eng / KQ_LIB)
         elif (eng / KQ_LIB).exists():                     # an older one of another build would only be refused
@@ -5459,6 +5561,7 @@ def build_engine(gpu, vision, yes, llama, toolkit=None) -> Path:
     stamp.write_text(json.dumps({"source": "local", "version": source_version(), "archs": archs,
                                  "vision": vision, **({"toolkit": 12} if t12 else {}),
                                  "cuda_dirs": dirs, "src": src, "vision_src": vsrc if want_vision else None,
+                                 **({"programs": programs} if programs else {}),
                                  **({"isa_floor": floor} if floor else {})}, indent=1))
     ok(f"engine compiled: {eng / EXE}")
     return eng
@@ -6086,12 +6189,32 @@ def args_dropped(old: dict, cfg: dict) -> list[str]:
 SHAPE_ENGINE: dict = {}       # the model-shape engine the chosen model runs on: {"shape": "q4_lite"} (strata_control/shape_engine.py); empty: the Strata engine
 
 
-def engine_exe(eng: Path) -> str:
-    """The `exe` of a run config: the engine component in the app, else the engine binary's path. A model of its own shape names that shape's engine."""
+def engine_exe(eng: Path, new: str | None = None) -> str:
+    """The `exe` of a run config: the engine component in the app, else the engine binary's path - the new engine `new`
+    (Q38EXE) when the folder has it. A model of its own shape names that shape's engine."""
     if SHAPE_ENGINE.get("shape"):
         from strata_control import shape_engine
         return shape_engine.reference(SHAPE_ENGINE["shape"])
-    return "component:strata-engine" if CONTROL else str(eng / EXE)
+    if CONTROL:
+        return "component:strata-engine"
+    return str(new_engine_or(Path(eng) / EXE, new) if new else Path(eng) / EXE)
+
+
+def new_engine_or(exe: Path, new: str) -> Path:
+    """Gets the new engine `new` (Q38EXE, DS41EXE) from the folder of the older engine `exe`, else `exe`."""
+    return exe.with_name(new) if exe.with_name(new).is_file() else exe
+
+
+def note_engine(exe: Path, new: str) -> Path:
+    """Says which engine program a model will run on - the new engine `new` beside the older engine `exe`, else `exe`
+    and how to get the new one - and returns it."""
+    chosen = new_engine_or(exe, new)
+    ok(f"engine: {chosen}" + (" (the new engine)" if chosen != exe else ""))
+    if chosen == exe:
+        say(f"  The new engine ({Path(new).stem}) is not in this engine folder yet. Once a release carries it, "
+            f"`strata update` ({'UPDATE.bat' if WIN else './update.sh'}) fetches it and running setup again switches "
+            "to it; or run setup again with --build to compile it now.")
+    return chosen
 
 
 def write_setup_config(cfg_path: Path, cfg: dict, source: Path | None = None, explicit: list[str] | None = None, after_carry=None) -> None:
@@ -7151,8 +7274,11 @@ def get_cuda12_engine(url_base, gpu, vision, yes, build=False) -> Path:
 
 
 def engine_lib_dirs(eng: Path, toolkit=13) -> list:
-    """The library folders a CUDA engine loads from: its own (a compiled one: the toolkit's), else pip's wheels."""
+    """The library folders an engine loads from: a Windows HIP engine's ROCm DLLs (hip_lib_dirs); else its own (a
+    compiled CUDA one: the toolkit's), else pip's wheels."""
     meta = json.loads((eng / "BUILD.json").read_text(encoding="utf-8"))
+    if WIN and meta.get("backend") == "hip":
+        return [str(d) for d in hip_lib_dirs(eng)]
     return meta.get("lib_dirs") or meta.get("cuda_dirs") or cuda_lib_dirs(toolkit)
 
 
@@ -7170,13 +7296,13 @@ def use_cuda12(cards, cfg_path: Path, cfg: dict, yes: bool) -> dict:
     vision = "gpu" if cfg.get("vision") else "none"
     eng = get_cuda12_engine(os.environ.get("STRATA_PREBUILT_URL", PREBUILT_URL),
                             {**main, "archs": sorted({int(g["arch"]) for g in cards})}, vision, yes)
-    cfg["exe"] = str(eng / EXE)
+    cfg["exe"] = str(new_engine_or(eng / EXE, Q38EXE))
     cfg["cuda"] = 12
     cfg["lib_dirs"] = engine_lib_dirs(eng, 12)
     if cfg.get("vision") and (eng / VEXE).exists():
         cfg["vision"]["exe"] = str(eng / VEXE)
     write_config(cfg_path, cfg)
-    ok(f"engine: {eng / EXE} (CUDA 12, experimental)")
+    ok(f"engine: {cfg['exe']} (CUDA 12, experimental)")
     return cfg
 
 
@@ -7411,23 +7537,21 @@ def shape_engine_step(a, gpu, vision):
     return llama, eng, meta, [], gpu, "none"
 
 
-def engine_step(a, gpu, hip, amd, cuda_tk, vision):
-    """Step 4: llama.cpp's sources and the engine (ready-made, or compiled here).  Returns (llama, engine folder, its
-    BUILD.json, its library folders, the GPU (AMD on Windows: as the engine sees it), the image-encoder choice)."""
+def engine_step(a, gpu, hip, amd, cuda_tk, vision, programs=()):
+    """Step 4: llama.cpp's sources and the engine (ready-made, or compiled here, with the new engines `programs` beside
+    it: built_programs).  Returns (llama, engine folder, its BUILD.json, its library folders, the GPU (AMD on Windows:
+    as the engine sees it), the image-encoder choice)."""
     if SHAPE_ENGINE.get("shape"):
         return shape_engine_step(a, gpu, vision)
     if CONTROL:
         return control_engine_step(gpu, vision)
     llama = get_llama_cpp()
     ok(f"llama.cpp {LLAMA_CPP_COMMIT[:7]} (gguf-py, ggml, mtmd)")
-    if hip and WIN:                                    # AMD on Windows: the ready-made HIP engine (no compiler)
-        eng = None if a.build else get_prebuilt_hip(a.prebuilt, gpu)
+    if hip and WIN and not a.build:                    # AMD on Windows: the ready-made HIP engine (no compiler)
+        eng = get_prebuilt_hip(a.prebuilt, gpu)
         if eng is None:
-            fail("no ready-made AMD engine for this Strata version" + (" (--build)" if a.build else ""),
-                 "compiling it on Windows: tools\\hip\\build_windows.bat makes strata-windows-x64-hip.zip, then run "
-                 "START-HERE.bat --backend hip --prebuilt <its dist folder> (docs/AMD_HIP.md)")
-        gpu = hip_card(eng, gpu, amd)
-        a.gpu = gpu["index"] if gpu["count"] > 1 else a.gpu
+            fail("no ready-made AMD engine for this Strata version",
+                 "compile one here: run the same command again with --build (docs/AMD_HIP.md)")
     else:
         eng = None if a.build or hip else get_prebuilt(a.prebuilt, gpu, vision, **({"toolkit": 12} if cuda_tk == 12
                                                                                     else {}))
@@ -7439,13 +7563,13 @@ def engine_step(a, gpu, hip, amd, cuda_tk, vision):
         else:
             vision = prebuilt_vision(json.loads((eng / "BUILD.json").read_text(encoding="utf-8")), gpu, vision)
     if eng is None:
-        eng = build_engine_hip(gpu, llama, vision) if hip else build_engine(gpu, vision, a.yes, llama, toolkit=cuda_tk)
+        eng = build_engine_hip(gpu, llama, vision, programs) if hip else \
+            build_engine(gpu, vision, a.yes, llama, toolkit=cuda_tk, programs=programs)
+    if hip and WIN:
+        gpu = hip_card(eng, gpu, amd)
+        a.gpu = gpu["index"] if gpu["count"] > 1 else a.gpu
     meta = json.loads((eng / "BUILD.json").read_text(encoding="utf-8"))
-    if hip and WIN:                                    # the ready-made engine's rocm/bin, first on the engine's PATH
-        lib_dirs = [str(d) for d in hip_lib_dirs(eng)]
-    else:
-        lib_dirs = meta.get("lib_dirs") or meta.get("cuda_dirs") or cuda_lib_dirs(cuda_tk)
-    return llama, eng, meta, lib_dirs, gpu, vision
+    return llama, eng, meta, engine_lib_dirs(eng, cuda_tk), gpu, vision
 
 
 def engine_families(eng: Path) -> set:
@@ -7890,15 +8014,24 @@ def get_dsv41_engine(eng: Path, hip: bool, package: str | None = None, feed: str
     return exe
 
 
+def build_deepseek_engines(a, gpu, hip, cards, cuda_tk) -> tuple:
+    """--build for DeepSeek: compiles strata-ds41 into engine/ beside the Strata engine, with strata-dsv41 for setup's
+    pack check and test question, for the cards `cards`.  Returns (strata-dsv41, the engine's library folders)."""
+    llama = get_llama_cpp()
+    card = {**gpu, "archs": sorted({c["arch"] for c in cards if c.get("arch")}) or [gpu["arch"]]}
+    eng = build_engine_hip(card, llama, "none", (DS41EXE, DSV41EXE)) if hip else \
+        build_engine(card, "none", a.yes, llama, toolkit=cuda_tk, programs=(DS41EXE, DSV41EXE))
+    return eng / DSV41EXE, engine_lib_dirs(eng, cuda_tk)
+
+
 def dsv41_exe(eng: Path) -> Path | None:
     """The DeepSeek-V4.1 engine (strata-dsv41): STRATA_DSV41_EXE (a build of your own), else its own package folder beside the engine (engine-dsv41/),
     else beside the engine in `eng` (an older all-in-one package); None when there is none."""
     own = (os.environ.get("STRATA_DSV41_EXE") or "").strip()
     if own:
         return Path(own) if Path(own).is_file() else None
-    name = "strata-dsv41.exe" if WIN else "strata-dsv41"
     from strata_control import dsv41_engine
-    exe = dsv41_engine.find(dsv41_engine_dir(eng)) or (Path(eng) / name)
+    exe = dsv41_engine.find(dsv41_engine_dir(eng)) or (Path(eng) / DSV41EXE)
     if exe.is_file() and not WIN and not os.access(exe, os.X_OK):      # a package copied without its modes (scp / tar from Windows): fix it, do not stop
         try:
             exe.chmod(0o755)
@@ -8440,7 +8573,11 @@ def install_dsv41(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopted, 
     # them is downloaded or test-started here (they were ~700 MB, and a stop on every one of them when GitHub could not be reached).
     step(4, "the DeepSeek engine")
     eng, meta, lib_dirs = ROOT / "engine", {"version": None}, []
-    exe = dsv41_exe(eng)
+    built = getattr(a, "build", False) and not CONTROL and not mac
+    if built:
+        exe, lib_dirs = build_deepseek_engines(a, gpu, hip, cards, cuda_tk)
+    else:
+        exe = dsv41_exe(eng)
     if (exe is None and not getattr(a, "dsv41_package", None) and not dsv41_engine_pending(eng) and not local_feed(getattr(a, "feed", None))
         and not github_reachable()):
         fail("Strata can't reach GitHub to download the DeepSeek engine.",
@@ -8454,7 +8591,8 @@ def install_dsv41(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopted, 
     if exe is not None and exe.parent != Path(eng):
         from strata_control import dsv41_engine
         lib_dirs = [*lib_dirs, *dsv41_engine.lib_dirs(exe)]   # its own package, and the rocm/bin an AMD package keeps the ROCm DLLs in
-    if hip and exe is not None:                            # cards (named or setup's own pick) that this package holds no code for: said, never refused
+    # cards (named or setup's own pick) that this package holds no code for: said, never refused
+    if hip and exe is not None and not built:
         covered = dsv41_covered_archs(eng)
         for c in cards if covered else []:
             if c.get("arch") and c["arch"] not in covered:
@@ -8479,7 +8617,11 @@ def install_dsv41(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopted, 
                  if is_arm64() else "")) + dsv41_manual_steps(eng)
              + " Or update Strata later (a newer version may add your card), pick another model, or build the engine for your card yourself "
              "(docs/DEEPSEEK41.md, \"Building the engine for your card\"). Nothing has been downloaded.")
-    ok(f"engine: {exe}")
+    if mac:                                          # (no new engine for Metal yet)
+        ok(f"engine: {exe}")
+        run_exe = exe
+    else:                                            # the run config starts it; setup's pack check runs `exe`
+        run_exe = note_engine(exe, DS41EXE)
     if mac and ds_vision == "on":                    # the Mac's pictures need an engine with the Metal picture tower: its program says so (dsv41_engine.MARK_MAC_VISION)
         from strata_control import dsv41_engine as _dsv41_engine
         if _dsv41_engine.mac_vision_state(exe) == "no":
@@ -8585,7 +8727,7 @@ def install_dsv41(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopted, 
     step(7, "writing the start script")
     from strata_control import setup_config            # the seam (strata_control/setup_config.py): the lines that built the run config
     _built = setup_config.dsv41_config_for(setup_config.Dsv41Inputs(
-        a=a, cards=cards, ctx=ctx, cuda_tk=cuda_tk, ds_vision=ds_vision, exe=exe, fam=fam, hip=hip, lib_dirs=lib_dirs, mac=mac, md=md, named=named, pack=pack, plan=plan, port=port, ram=ram, tag=tag), sys.modules[__name__])
+        a=a, cards=cards, ctx=ctx, cuda_tk=cuda_tk, ds_vision=ds_vision, exe=run_exe, fam=fam, hip=hip, lib_dirs=lib_dirs, mac=mac, md=md, named=named, pack=pack, plan=plan, port=port, ram=ram, tag=tag), sys.modules[__name__])
     cfg, cfg_path = _built.cfg, _built.cfg_path
     write_setup_config(cfg_path, cfg, adopted if adopted is not None and adopted.name == cfg_path.name else None, explicit_args(a))
     script = write_run_script(tag, cfg_path, port, cfg.get("open_browser") is not False)
@@ -9517,9 +9659,6 @@ def main() -> int:
              f"PC for {'AVX' if floor == 'avx' else 'SSE4.2'} (STRATA_ISA_FLOOR={floor}; 10-20 minutes, once), and the "
              "CPU's share of the experts runs on ggml-cpu's kernels, a few times slower than on an AVX2 CPU. "
              "See \"Older CPUs\" in docs/INSTALL.md")
-        if hip and WIN:
-            fail("the older-CPU engine is compiled from source, and setup compiles the AMD engine on Linux only",
-                 "use Linux for an AMD card on this CPU, or an NVIDIA card")
         a.build = True
     if a.check:
         say()
@@ -9917,7 +10056,7 @@ def main() -> int:
 
     # ---- 4. the engine
     step(4, "the Strata engine")
-    llama, eng, meta, lib_dirs, gpu, vision = engine_step(a, gpu, hip, amd, cuda_tk, vision)
+    llama, eng, meta, lib_dirs, gpu, vision = engine_step(a, gpu, hip, amd, cuda_tk, vision, (Q38EXE,))
     reader = None
     if hip and vision != "none":                       # AMD: the engine folder's reader (GPU, else CPU), settled now the engine is known
         vision, reader = hip_reader(eng, vision, gpu)
@@ -9926,7 +10065,7 @@ def main() -> int:
         # a ready-made engine from before NVFP4 / Gyro cannot read these experts: one compiled from this source can
         warn(f"the ready-made engine {meta.get('version')} has no {'NVFP4' if ready else 'Gyro'} experts yet: compiling "
              "the engine from this source")
-        eng = build_engine(gpu, vision, a.yes, llama, toolkit=cuda_tk)
+        eng = build_engine(gpu, vision, a.yes, llama, toolkit=cuda_tk, programs=(Q38EXE,))
         meta = json.loads((eng / "BUILD.json").read_text(encoding="utf-8"))
         lib_dirs = meta.get("lib_dirs") or meta.get("cuda_dirs") or cuda_lib_dirs(cuda_tk)
     engine_ver = tuple(int(x) for x in str(meta.get("version", "0")).split(".")[:4] if x.isdigit())
@@ -9935,7 +10074,10 @@ def main() -> int:
     if (MODELS[model].get("budget") or family == "gyro") and engine_ver < need_engine:
         fail(f"{model} needs engine {'.'.join(map(str, need_engine))} or newer; this one is {meta.get('version')}",
              "update Strata (or compile the engine with --build) and run setup again")
-    ok("engine: the engine component (looked up when the model loads)" if CONTROL else f"engine: {eng / EXE}")
+    if CONTROL or SHAPE_ENGINE.get("shape"):
+        ok("engine: the engine component (looked up when the model loads)" if CONTROL else f"engine: {eng / EXE}")
+    else:
+        note_engine(eng / EXE, Q38EXE)
 
     # ---- 5. the model files
     step(5, f"downloading {fam['title']} {model}")

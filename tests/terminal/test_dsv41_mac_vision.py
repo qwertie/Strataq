@@ -43,7 +43,7 @@ class SetupFollowsTheEngine(unittest.TestCase):
         src = (ROOT / "setup.py").read_text(encoding="utf-8")
         self.assertNotIn("DSV41_MAC_VISION", src.replace("# DeepSeek's pictures on a Mac are decided by the installed engine", ""))
         self.assertIn('ds_vision = "off" if a.vision in ("no", "off") else "on"', src)
-        i = src.index('ok(f"engine: {exe}")\n    if mac and ds_vision == "on":')
+        i = src.index('run_exe = note_engine(exe, DS41EXE)\n    if mac and ds_vision == "on":')
         self.assertIn('_dsv41_engine.mac_vision_state(exe) == "no"', src[i:i + 600])
         self.assertIn("warn(_dsv41_engine.MAC_TEXT_LINE)", src[i:i + 600])
         j = src.index("step(5, f\"downloading {fam['title']} {model}\")", i)        # the next step 5 after the engine line: before any model file is fetched

@@ -14,6 +14,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +27,56 @@ def quiet(fn, *args, **kw):
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         return fn(*args, **kw), out.getvalue()
+
+
+class NewEngines(unittest.TestCase):
+    """The run config starts the new engine (strata-q38, strata-ds41) whenever the engine folder has it; a compile keeps
+    building every new engine an earlier compile there made."""
+
+    def test_run_config_names_the_new_engine_when_it_is_there(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(setup, "CONTROL", False), \
+                mock.patch.dict(setup.SHAPE_ENGINE, clear=True):
+            eng = Path(d)
+            (eng / setup.EXE).write_text("x")
+            self.assertEqual(setup.engine_exe(eng, setup.Q38EXE), str(eng / setup.EXE))
+            said = quiet(setup.note_engine, eng / setup.EXE, setup.Q38EXE)[1]
+            self.assertIn("is not in this engine folder yet", said)
+            (eng / setup.Q38EXE).write_text("x")
+            self.assertEqual(setup.engine_exe(eng, setup.Q38EXE), str(eng / setup.Q38EXE))
+            self.assertEqual(setup.engine_exe(eng), str(eng / setup.EXE))
+            self.assertEqual(quiet(setup.note_engine, eng / setup.EXE, setup.Q38EXE)[0], eng / setup.Q38EXE)
+
+    def test_a_recompile_keeps_the_new_engines(self):
+        meta = {"programs": [setup.DS41EXE, setup.DSV41EXE]}
+        self.assertEqual(setup.built_programs(meta, (setup.Q38EXE,)),
+                         sorted([setup.Q38EXE, setup.DS41EXE, setup.DSV41EXE]))
+        self.assertEqual(setup.program_defs([setup.Q38EXE]), [])
+        self.assertEqual(setup.program_defs([setup.DS41EXE]), ["-DSTRATA_BUILD_DSV41=ON"])
+        self.assertEqual(setup.cmake_targets([setup.EXE, setup.Q38EXE]), "strata strata-q38")
+
+    def test_linux_hip_requests_new_programs_with_or_without_build(self):
+        """Linux AMD always compiles its engine, so a new user gets the new engine without --build too."""
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(setup, "WIN", False), \
+                mock.patch.object(setup, "CONTROL", False), mock.patch.dict(setup.SHAPE_ENGINE, clear=True), \
+                mock.patch.object(setup, "get_llama_cpp", return_value="llama"), \
+                mock.patch.object(setup, "engine_lib_dirs", return_value=[]), \
+                mock.patch.object(setup, "build_engine_hip", return_value=Path(d)) as build:
+            (Path(d) / "BUILD.json").write_text("{}")
+            for requested in (False, True):
+                a = SimpleNamespace(build=requested, prebuilt=None)
+                quiet(setup.engine_step, a, {"arch": "gfx1151"}, True, [], 13, "none", (setup.Q38EXE,))
+                self.assertEqual(build.call_args.args[-1], (setup.Q38EXE,))
+
+    def test_cuda12_migration_uses_the_new_engine_when_available(self):
+        """Moving to an older GPU keeps the selected engine family when CUDA 12 carries it."""
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(setup, "get_cuda12_engine", return_value=Path(d)), \
+                mock.patch.object(setup, "gpu_info", return_value=None), \
+                mock.patch.object(setup, "engine_lib_dirs", return_value=[]), \
+                mock.patch.object(setup, "write_config"):
+            for name in (setup.EXE, setup.Q38EXE):
+                (Path(d) / name).write_text("x")
+                cfg = quiet(setup.use_cuda12, [{"index": 0, "arch": "61"}], Path(d) / "config.json", {}, True)[0]
+                self.assertEqual(cfg["exe"], str(Path(d) / name))
 
 
 class PrebuiltVision(unittest.TestCase):
@@ -441,6 +492,8 @@ class HipVision(unittest.TestCase):
             eng = root / "engine"
             eng.mkdir()
             (eng / setup.EXE).write_bytes(b"engine")
+            if setup.WIN:
+                (eng / "strata-device.exe").write_bytes(b"probe")
             if vexe:
                 (eng / setup.VEXE).write_bytes(b"vision")
             src, vsrc = "S", "V"

@@ -170,11 +170,16 @@ engine\strata-device.exe --list-devices
 engine\strata-device.exe --selftest
 ```
 
-**Building it yourself.** `tools\hip\build_windows.bat` (Visual Studio 2022 Build Tools with the C++ workload, Python, git; no
-admin, no AMD GPU) installs ROCm from AMD's TheRock wheels into `.rocm-win`, builds, and packages
-`dist\strata-windows-x64-hip.zip`. `START-HERE.bat --backend hip --prebuilt dist\` installs that one.
-`tools\hip\build_windows.bat tests` also builds the HIP tests. `STRATA_HIP_ARCHS` picks other architectures; for the RX 6000
-package use `STRATA_HIP_ARCHS="gfx1030;gfx1031"` and `package_engine.py --variant rdna2`.
+**Building it yourself.** `START-HERE.bat --build` compiles the engine for your card, the same way setup does on
+Linux. It needs Visual Studio 2022 Build Tools with the C++ workload and git; no admin rights. ROCm comes from AMD's
+TheRock wheels (about 10 GB, installed into Strata's `.venv`), or from a TheRock folder you already have: set
+`ROCM_PATH` to it (`rocm-sdk path --root`). It also compiles the new engine of your model (`strata-q38` or
+`strata-ds41`), and the run config starts that one.
+
+The release zip comes from the same build: `.venv\Scripts\python.exe tools\hip\build_release.py` builds for every
+supported card and packages `dist\strata-windows-x64-hip.zip`, which `START-HERE.bat --backend hip --prebuilt dist\`
+installs. `--tests` also builds the HIP tests. `STRATA_HIP_ARCHS` picks other architectures; for the RX 6000 package use
+`STRATA_HIP_ARCHS="gfx1030;gfx1031"` and `package_engine.py --variant rdna2`.
 
 ## Build
 
@@ -539,7 +544,7 @@ Other gfx103x and RDNA2-adjacent cards (community reports):
 
 | Card | Report |
 | --- | --- |
-| gfx1031, RX 6700 XT 12 GB (#524, #1027) | Setup knows it (`gfx103X-all` wheels, unvalidated). IQ2_XS on ROCm 7.2.4: decode 30-32 tok/s, prompt about 300 tok/s, 6 of 6 needles. The default list of `build_windows.bat` includes it. |
+| gfx1031, RX 6700 XT 12 GB (#524, #1027) | Setup knows it (`gfx103X-all` wheels, unvalidated). IQ2_XS on ROCm 7.2.4: decode 30-32 tok/s, prompt about 300 tok/s, 6 of 6 needles. The default list of `tools/hip/build_release.py` includes it. |
 | RX 6800M 12 GB, Windows, self-built (#915, #1078) | Q2_0: decode 9-27 tok/s, prompt 50-114 tok/s; experts stream from disk with 31 GB RAM |
 | gfx1032, RX 6600 / 6600 XT | Unvalidated. Ran under Windows as the helper expert GPU of an RX 6800 ([SECOND_GPU.md](SECOND_GPU.md)): +8-18% decode over the 6800 alone. No report as a primary card. |
 | gfx1150, Radeon 890M (#1217) | Builds and runs as an unvalidated target. MINISFORUM N5 PRO, 96 GB, TheRock ROCm 7.14.1, IQ3_XXS: decode 15-19 tok/s, prompts 125-130 tok/s on plain hipBLAS and 1.5-1.7x faster with `gfx1150-hipblaslt-100401.txt`. Setup does not install for it: build with `-DCMAKE_HIP_ARCHITECTURES=gfx1150` and point `STRATA_HIPBLASLT_TUNING` at the table. [Report](../bench/results/2026-10-07-community-gfx1150/README.md). |

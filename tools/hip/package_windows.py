@@ -4,14 +4,15 @@
     python tools/hip/package_windows.py --build build-hip-win --rocm <rocm-sdk path --root> \\
         --archs "gfx1100;gfx1201" --rocm-version 10.2.0a20260930 --out dist
 
-tools/hip/build_windows.bat runs it after the build.  The zip holds:
+tools/hip/build_release.py runs it after the build.  The zip holds:
 
-    strata.exe, strata-device.exe, BUILD.json      (backend "hip", the archs, the ROCm and hipBLASLt versions)
+    strata.exe, strata-device.exe, strata-q38.exe  the programs (strata-q38: the new Qwen3.8 engine)
+    BUILD.json                                     backend "hip", the archs, the ROCm and hipBLASLt versions
     strata-vision.exe, strata-vision-hip.exe       the picture readers when --vision-cpu / --vision-hip are given: the CPU reader
                                                    (the fallback; starts on any PC) and the GPU reader (tools/vision,
                                                    STRATA_VISION_HIP; imports the same ROCm DLLs as strata.exe)
     amdhip64_7.dll, amd_comgr.dll + what they import   the HIP runtime beside the exes too (#468 #461: before System32)
-    rocm/bin/*.dll                                 the ROCm DLLs the two programs load (their import tables, followed
+    rocm/bin/*.dll                                 the ROCm DLLs the programs load (their import tables, followed
                                                    through the ROCm DLLs, + amd_comgr.dll, which the HIP runtime loads
                                                    by name) and the Microsoft C++ runtime they import
     rocm/bin/rocblas/library, rocm/bin/hipblaslt/library   the GEMM kernels, for these archs only
@@ -41,7 +42,7 @@ sys.path.insert(0, str(ROOT))
 from strata_common import hipblaslt_tuning as ht  # noqa: E402
 
 ASSET = "strata-windows-x64-hip.zip"
-PROGRAMS = ("strata.exe", "strata-device.exe")
+PROGRAMS = ("strata.exe", "strata-device.exe", "strata-q38.exe")
 DYNAMIC = ("amd_comgr.dll",)                     # LoadLibrary'd by amdhip64_7.dll: not in any import table
 CRT = ("msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "vcruntime140.dll", "vcruntime140_1.dll",
        "msvcp140_atomic_wait.dll", "msvcp140_codecvt_ids.dll", "vcruntime140_threads.dll", "concrt140.dll")      # strata.exe imports msvcp140_atomic_wait.dll (VS 2022 std::atomic wait)

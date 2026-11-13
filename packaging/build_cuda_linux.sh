@@ -37,7 +37,7 @@ cd "$repo"
 cmake -G Ninja -S . -B "$build" -DCMAKE_BUILD_TYPE=Release -DSTRATA_ENABLE_CUDA=ON -DSTRATA_BUILD_TESTS=OFF \
     -DSTRATA_EXPERIMENTAL_SM60=$sm60 -DSTRATA_NATIVE_EXPERTS=ON -DSTRATA_PORTABLE=ON -DSTRATA_Q6K_EXPERTS=ON -DSTRATA_MMQ_KQUANTS=ON \
     "-DCMAKE_CUDA_ARCHITECTURES=${real};${last}-virtual" -DSTRATA_GGML_DIR="$repo/third_party/llama.cpp" ${STRATA_CMAKE_EXTRA:-}
-cmake --build "$build" --target strata strata_kq -j "$(nproc)"
+cmake --build "$build" --target strata strata_kq strata-q38 -j "$(nproc)"
 
 # The picture reader is built for the SAME architectures as the engine (#3669: a reader reused from an older build had no sm_60, and on
 # a Pascal card the engine ran while the reader died with "device kernel image is invalid"). BUILD_VISION=0 ships a text-only package.
@@ -51,7 +51,7 @@ fi
 ver=$(sed -n 's/^[[:space:]]*project([^)]*VERSION[[:space:]]*\([0-9][0-9.]*\).*/\1/p' CMakeLists.txt | head -1)
 stage=$(mktemp -d "${TMPDIR:-/tmp}/strata-engine-stage.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
-cp "$build/strata" "$stage/"
+cp "$build/strata" "$build/strata-q38" "$stage/"
 [ -f "$build/libstrata_kq.so" ] && cp "$build/libstrata_kq.so" "$stage/"
 vision_json=""
 if [ -f "$vision_dir/bin/strata-vision" ]; then

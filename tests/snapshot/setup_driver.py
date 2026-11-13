@@ -50,7 +50,7 @@ class ProbeLib:
             "hipblaslt_table": lambda arch, lib_dirs, ver=None, extra_dirs=(): None,
             "vision_threads": lambda logical=None: 8,
             "is_gb10": lambda g: m.key == "dgx_spark",
-            "engine_exe": lambda eng: str(eng / self.EXE),
+            "engine_exe": lambda eng, new=None: str(eng / self.EXE),      # the simulated engine has no new engine
         }
 
     def __getattr__(self, name):

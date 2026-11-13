@@ -64,17 +64,19 @@ if [ -z "${VISION_ONLY:-}" ]; then
     -DSTRATA_PREFILL_MMQ=ON "-DCMAKE_HIP_ARCHITECTURES=$ARCHS" "${HIPDEFS[@]}" -DSTRATA_GGML_DIR="$LLAMA" -DSTRATA_PORTABLE=ON \
     "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath,'\$ORIGIN' -Wl,--enable-new-dtags" ${STRATA_CMAKE_EXTRA:-} > "$OUT/cfg.log" 2>&1
   chk $? "engine configured"
-  nice -n 10 cmake --build "$OUT/b" --target strata -j "$JOBS" > "$OUT/build.log" 2>&1
+  nice -n 10 cmake --build "$OUT/b" --target strata strata-q38 -j "$JOBS" > "$OUT/build.log" 2>&1
   chk $? "engine built"
   [ -x "$OUT/b/strata" ] || { st "ABORT no strata"; exit 1; }
+  [ -x "$OUT/b/strata-q38" ] || { st "ABORT no strata-q38"; exit 1; }
   if [ "$DSV41" = 1 ]; then      # own build tree: the engine's flags stay as they were; STRATA_NATIVE_EXPERTS=ON is what the DeepSeek path was built with
-    rm -f "$OUT/bd/CMakeCache.txt" "$OUT/bd/strata-dsv41"      # (the build id is baked in at configure time: always configure again)
+    rm -f "$OUT/bd/CMakeCache.txt" "$OUT/bd/strata-dsv41" "$OUT/bd/strata-ds41"      # (the build id is baked in at configure time: always configure again)
     cmake -G Ninja -S . -B "$OUT/bd" -DCMAKE_BUILD_TYPE=Release -DSTRATA_ENABLE_HIP=ON -DSTRATA_ENABLE_CUDA=OFF -DSTRATA_BUILD_TESTS=OFF       -DSTRATA_BUILD_DSV41=ON -DSTRATA_NATIVE_EXPERTS=ON "-DCMAKE_HIP_ARCHITECTURES=$ARCHS" "${HIPDEFS[@]}" -DSTRATA_GGML_DIR="$LLAMA" -DSTRATA_PORTABLE=ON       "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath,'\$ORIGIN' -Wl,--enable-new-dtags" > "$OUT/cfg-dsv41.log" 2>&1
     chk $? "dsv41 configured"
-    nice -n 10 cmake --build "$OUT/bd" --target strata-dsv41 -j "$JOBS" > "$OUT/build-dsv41.log" 2>&1
+    nice -n 10 cmake --build "$OUT/bd" --target strata-dsv41 strata-ds41 -j "$JOBS" > "$OUT/build-dsv41.log" 2>&1
     chk $? "dsv41 built"
     if [ "$COMMIT" != unknown ]; then grep -aq "$ID9" "$OUT/bd/strata-dsv41" || { st "ABORT strata-dsv41 does not carry the build id $ID9"; exit 1; }; st "dsv41 build id $ID9 present"; fi
     [ -x "$OUT/bd/strata-dsv41" ] || { st "ABORT no strata-dsv41 (DSV41=0 leaves it out)"; tail -20 "$OUT/build-dsv41.log" >> "$S"; exit 1; }
+    [ -x "$OUT/bd/strata-ds41" ] || { st "ABORT no strata-ds41"; tail -20 "$OUT/build-dsv41.log" >> "$S"; exit 1; }
   fi
 fi
 # the CPU reader: portable (AVX2), the fallback that runs on any PC
@@ -98,7 +100,7 @@ cat > "$STAGE/BUILD.json" <<EOJ
 EOJ
 # the libraries the engine and the GPU reader load (the CPU reader needs only the system's), collected from the build outputs
 DATA=(--data "$LIBW/lib/rocblas/library=rocblas/library" --data "$LIBW/lib/hipblaslt/library=hipblaslt/library" --data-arch "$DATAARCH")
-BINS=("$OUT/b/strata" "$OUT/bh/bin/strata-vision-hip"); [ "$DSV41" = 1 ] && BINS+=("$OUT/bd/strata-dsv41")
+BINS=("$OUT/b/strata" "$OUT/b/strata-q38" "$OUT/bh/bin/strata-vision-hip"); [ "$DSV41" = 1 ] && BINS+=("$OUT/bd/strata-dsv41" "$OUT/bd/strata-ds41")
 for b in "${BINS[@]}"; do
   python3 packaging/collect_libs.py --binary "$b" --search "$LIBW/lib" --search "$HP/lib" --search "$CORE/lib" --search "$CORE/lib/llvm/lib" ${SYSDEPS:+--search "$HP/lib/rocm_sysdeps/lib"} \
     --also 'libamd_comgr.so*' --also 'libhiprtc*.so*' --out "$STAGE" \
@@ -106,12 +108,12 @@ for b in "${BINS[@]}"; do
   chk $? "collected for $(basename "$b")"
   DATA=()                                              # the kernel data once
 done
-cp "$OUT/b/strata" "$OUT/bv/bin/strata-vision" "$OUT/bh/bin/strata-vision-hip" "$STAGE/"
-[ "$DSV41" = 1 ] && cp "$OUT/bd/strata-dsv41" "$STAGE/"
+cp "$OUT/b/strata" "$OUT/b/strata-q38" "$OUT/bv/bin/strata-vision" "$OUT/bh/bin/strata-vision-hip" "$STAGE/"
+[ "$DSV41" = 1 ] && cp "$OUT/bd/strata-dsv41" "$OUT/bd/strata-ds41" "$STAGE/"
 # the all-cards split engines (packaging/build_split_hip.sh: strata-split-2/3/4-amd, RUNPATH $ORIGIN) ride in the package when SPLIT_DIR names the folder holding them (--tree takes them)
 [ -n "${SPLIT_DIR:-}" ] && cp "$SPLIT_DIR"/strata-split-*-amd "$STAGE/"
 for f in "$STAGE"/*.so "$STAGE"/*.so.*; do [ -f "$f" ] && [ ! -L "$f" ] && patchelf --set-rpath '$ORIGIN' "$f"; done
-for f in "$STAGE/strata" "$STAGE/strata-vision" "$STAGE/strata-vision-hip" $([ "$DSV41" = 1 ] && echo "$STAGE/strata-dsv41"); do
+for f in "$STAGE/strata" "$STAGE/strata-q38" "$STAGE/strata-vision" "$STAGE/strata-vision-hip" $([ "$DSV41" = 1 ] && echo "$STAGE/strata-dsv41 $STAGE/strata-ds41"); do
   st "RUNPATH $(basename "$f"): $(readelf -d "$f" | grep -E 'RPATH|RUNPATH' | cut -d'[' -f2 | tr -d ']' | paste -sd' ')"
 done
 # the hipBLASLt version of this ROCm into BUILD.json, and the tuning tables of tools/hip that match it (architecture and version) into tuning/

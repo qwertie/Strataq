@@ -107,7 +107,7 @@ if(CMAKE_HIP_ARCHITECTURES MATCHES "gfx11")
 endif()
 target_link_libraries(strata_hip_runtime INTERFACE hip::host)
 # The shim renames the CUDA runtime to HIP, force-included into every host and device source. On Windows the host
-# compiler is ROCm's clang++ too (tools/hip/build_windows.bat: CMake refuses to mix cl.exe with Clang HIP), which takes
+# compiler is ROCm's clang++ too (setup.py compile_hip: CMake refuses to mix cl.exe with Clang HIP), which takes
 # -include like it does on Linux; an MSVC-style front end (cl / clang-cl) takes /FI instead. Forward slashes, so /FI
 # does not read the path's backslashes as escapes.
 file(TO_CMAKE_PATH "${STRATA_HIP_COMPAT_INCLUDE_DIR}/cuda_runtime.h" _strata_hip_force)

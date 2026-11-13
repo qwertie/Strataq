@@ -436,7 +436,7 @@ class WindowsZip(unittest.TestCase):
         msg = self.warnings[0]
         self.assertIn("no gfx1151 code", msg)
         self.assertIn("docs/STRIX_HALO.md", msg)
-        self.assertIn("build_windows.bat", msg)
+        self.assertIn("--build", msg)
         self.assertFalse((self.root / "engine" / "strata-windows-x64-hip.zip").exists())   # dropped
         self.assertFalse((self.root / "engine" / setup.EXE).exists())                      # nothing installed
 
@@ -452,11 +452,11 @@ class WindowsZip(unittest.TestCase):
         g = {"index": 0, "name": "x", "vram_gb": 24.0, "arch": "gfx1100", "vendor": "amd", "driver": "amd"}
         self.assertIsNotNone(setup.get_prebuilt_hip("https://example.invalid/", g))
 
-    def test_windows_build_script_lists_gfx1151(self):
-        bat = (ROOT / "tools/hip/build_windows.bat").read_text(encoding="utf-8")
-        m = re.search(r'if not defined STRATA_HIP_ARCHS set "STRATA_HIP_ARCHS=([^"]+)"', bat)
-        self.assertIn("gfx1151", m.group(1).split(";"))
-        self.assertTrue({"gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201", "gfx1030"} <= set(m.group(1).split(";")))
+    def test_windows_release_build_lists_gfx1151(self):
+        script = (ROOT / "tools/hip/build_release.py").read_text(encoding="utf-8")
+        archs = re.search(r'^ARCHS = "([^"]+)"', script, re.M).group(1).split(";")
+        self.assertIn("gfx1151", archs)
+        self.assertTrue({"gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201", "gfx1030"} <= set(archs))
 
 
 class Recommendation(unittest.TestCase):

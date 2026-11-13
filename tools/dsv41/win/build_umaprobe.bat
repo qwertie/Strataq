@@ -1,5 +1,6 @@
 @echo off
-rem umaprobe.exe for gfx1151 (HIP, ROCm 10.2 wheels + MSVC headers), into %OUT% (default C:\wdsv41s\umaprobe.exe).  ROCM_VENV as in build_hip_win.bat.
+rem umaprobe.exe for gfx1151 (HIP, ROCm 10.2 wheels + MSVC headers), into %OUT% (default C:\wdsv41s\umaprobe.exe).
+rem ROCM_VENV: a venv with TheRock's ROCm wheels.
 setlocal
 if not defined ROCM_VENV set "ROCM_VENV=%~dp0..\..\..\.rocm-win"
 if not defined OUT set "OUT=C:\wdsv41s\umaprobe.exe"
