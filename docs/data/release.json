@@ -3,9 +3,9 @@
  "tag": "v0.2.13",
  "published": "2026-11-09",
  "product_version": "0.2.13",
- "terminal_version": "0.2.13.1",
- "control_version": "0.1.59.1",
- "engine_version": "0.1.59",
+ "terminal_version": "0.2.50",
+ "control_version": "0.1.150",
+ "engine_version": "0.1.59.1",
  "assets": [
   "SHA256SUMS.txt",
   "Strata-0.2.13-linux-x86_64.AppImage",
@@ -49,5 +49,11 @@
   "strata-feed-linux-aarch64.json.sig",
   "strata-feed.json",
   "strata-feed.json.sig"
- ]
+ ],
+ "fork_release": {
+  "repository": "qwertie/Strataq",
+  "tag": "v0.2.50",
+  "sequence": 1000,
+  "app": false
+ }
 }

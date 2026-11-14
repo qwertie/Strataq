@@ -481,6 +481,9 @@ def main() -> int:
 
 def _source_version() -> str:
     """The version the source reports, so the artifact name cannot disagree with the code."""
+    version_file = ROOT / "VERSION"
+    if version_file.is_file():
+        return version_file.read_text(encoding="utf-8").strip()
     text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="replace")
     # `project(strata VERSION 0.1.44.1 LANGUAGES C CXX ...)` - the version is a dotted run of numbers and must be
     # read as one. Taking "everything after VERSION" yields "0.1.44.1.LANGUAGES.CXX".

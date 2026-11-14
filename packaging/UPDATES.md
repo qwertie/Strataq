@@ -39,12 +39,12 @@ Comments are for this document only; actual feed files must be strict JSON.
     "version": "0.2.13", "notes": "...", "pub_date": "2026-10-20T10:00:00Z",
     "platforms": {"windows-x86_64": {"url": "app/Strata-0.2.13-windows-x64-setup.exe", "signature": "<minisign, base64>", "sha256": "...", "size": 71000000}}
   },
-  "control": {"version": "0.1.59.1", "packages": [{"platform": "linux-x86_64", "format": "tar.gz", "url": "control/...tar.gz",
+  "control": {"version": "0.1.150", "packages": [{"platform": "linux-x86_64", "format": "tar.gz", "url": "control/...tar.gz",
                                                   "size": 0, "sha256": "...", "installed_bytes": 0, "entry": "strata.py"}]},
   "engine": {"packages": [{
-    "version": "0.1.59", "platform": "linux-x86_64", "backend": "cuda", "variant": "cuda13",
+    "version": "0.1.59.1", "platform": "linux-x86_64", "backend": "cuda", "variant": "cuda13",
     "archs": ["sm_75", "sm_86", "sm_89", "sm_120", "compute_120"], "min_driver": {"nvidia": "580.65"}, "min_runtime": null,
-    "build_id": "be885026f96a-cuda13.0", "format": "tar.gz", "url": "engine/strata-engine-0.1.59-linux-x86_64-cuda-cuda13.tar.gz",
+    "build_id": "be885026f96a-cuda13.0", "format": "tar.gz", "url": "engine/strata-engine-0.1.59.1-linux-x86_64-cuda-cuda13.tar.gz",
     "size": 505568970,                      // bytes of the archive
     "sha256": "...",                        // of the archive
     "manifest_sha256": "...",               // of the package's engine-component.json (it holds every file's hash)
@@ -66,7 +66,7 @@ separate component, picked by the model, and never in place of the Strata engine
 
 ```jsonc
 "shape_engines": {"packages": [{            // the same entry as "engine" (pack-engine writes it), plus the shape = the geometry's name the engine was compiled for
-  "shape": "q4_lite", "version": "0.1.59", "platform": "linux-x86_64", "backend": "cuda", "variant": "cuda13", "archs": ["sm_120"], "min_driver": {"nvidia": "580.65"},
+  "shape": "q4_lite", "version": "0.1.59.1", "platform": "linux-x86_64", "backend": "cuda", "variant": "cuda13", "archs": ["sm_120"], "min_driver": {"nvidia": "580.65"},
   "min_runtime": "0.1.58", "build_id": "...", "format": "tar.gz", "url": "strata-q4-lite-0.1.58-linux-x86_64-cuda-cuda13.tar.gz", "size": 0, "sha256": "...", "manifest_sha256": "...", "installed_bytes": 0}]},
 "models": {"packages": [{"id": "qwen4-lite", "family": "qwen4exp_q4_lite", ...}]}     // the family names the shape: qwen4exp_<shape>
 ```
@@ -206,9 +206,9 @@ All signing happens on the release PC, on the finished files.
 
     python packaging/feed_tool.py sign-package <engine package folder> --key <feed-key.json>        # every engine package (the Mac app bundles its UNSIGNED copy)
     python packaging/feed_tool.py pack-engine  <engine package folder> --out RELEASE/engine --url-prefix=
-    python packaging/feed_tool.py pack-control <control folder> --version 0.1.59.1 --platform P --out RELEASE/control --url-prefix=   # --format zip for windows-x86_64
+    python packaging/feed_tool.py pack-control <control folder> --version 0.1.150 --platform P --out RELEASE/control --url-prefix=   # --format zip for windows-x86_64
     # --url-prefix= (not --url-prefix "") because PowerShell 5.1 drops an empty argument. The Control version is the VERSION file
-    # (0.1.59.1), not the app version: a Control package newer than the installed one is installed by `strata update`.
+    # (0.1.150), not the app version: a Control package newer than the installed one is installed by `strata update`.
     # Pack Linux and Mac packages on Linux / the Mac or on Windows with this tool: it sets the execute bit from the file header either way.
     cd apps/desktop && npx tauri build --bundles nsis --config src-tauri/tauri.update.conf.json    # Windows installer (no engine inside)
     # Linux: tauri build --bundles appimage (no engine inside) is the AppImage
@@ -232,7 +232,8 @@ upstream's `5d1bc23abbeffd0d`, so the fork's feed may list upstream's signed pac
 packages) under their absolute upstream URLs. The desktop app is not part of the fork's release (no Tauri key): its links still go upstream.
 
 * **Versions.** The engine packages carry CMakeLists.txt's version (0.1.59.1 at the first release), which must be newer than upstream's
-  (0.1.59), or `strata update` offers nothing to a PC that has upstream's engine. The Control package's version must be newer than
+  (0.1.59), or `strata update` offers nothing to a PC that has upstream's engine. Control has its own `VERSION` file
+  (0.1.150); Terminal reports 0.2.50. The Control package's version must be newer than
   upstream's for the same reason. `--sequence` must be above every sequence a PC may have accepted from upstream's feed (124 on
   2026-11-09): the fork's first feed uses 1000 and counts up. A PC that accepted the fork's feed refuses upstream's afterwards (a lower
   sequence).

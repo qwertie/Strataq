@@ -6,7 +6,7 @@
 
 What it covers (standard library only, no network):
   * the manifest against the code: app/Terminal version (strata_cli/__init__.py, apps/host and apps/desktop package
-    files, Cargo.toml) and Control/engine version (the CMake project version);
+    files, Cargo.toml) and Control version (VERSION) and engine version (the CMake project version);
   * the three installer file names in the manifest's asset list;
   * every installer file name (Strata-<version>-windows-x64-setup.exe, ...-linux-x86_64.AppImage, ...-macos-arm64.dmg)
     in a current page: the version must be the manifest's, and the file must be in the release's asset list;
@@ -81,7 +81,8 @@ def code_versions():
         "apps/desktop/package.json": (json.loads(read("apps/desktop/package.json")).get("version"), "product_version"),
         "apps/desktop/src-tauri/Cargo.toml": (first("apps/desktop/src-tauri/Cargo.toml", r'^version = "([^"]+)"'), "product_version"),
         "CMakeLists.txt (engine)": (cmake, "engine_version"),
-        "CMakeLists.txt (Control)": (cmake, "control_version"),
+        "VERSION (Control)": (read("VERSION").strip() if os.path.isfile(os.path.join(ROOT, "VERSION")) else cmake,
+                              "control_version"),
     }
 
 
@@ -130,9 +131,8 @@ def check(manifest):
     for where, (found, key) in code_versions().items():
         want = manifest.get(key, manifest["product_version"]) if key == "terminal_version" else manifest[key]
         if where == "CMakeLists.txt (engine)":
-            # the CMake project version is Control's. The engine packages carry it, except after a Control-only hotfix (Control 0.1.59.1,
-            # engines still 0.1.59): then Control is the engine version plus one hotfix part.
-            if found != manifest["control_version"] or not (found == want or found.startswith(want + ".")):
+            # Older source trees used the CMake version for Control-only hotfixes too.
+            if not (found == want or (found == manifest["control_version"] and found.startswith(want + "."))):
                 problems.append("%s says %s, docs/data/release.json %s is %s (control_version %s)" % (where, found, key, want, manifest["control_version"]))
         elif found != want:
             problems.append("%s says %s, docs/data/release.json %s is %s" % (where, found, key, want))
