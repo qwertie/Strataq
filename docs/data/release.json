@@ -1,5 +1,5 @@
 {
- "_about": "The release the current docs describe. tools/release_manifest.py --write puts these values into the version lines and installer file names of the current pages; --check fails when a page or a version source disagrees. Historical pages (release notes, measurements, history/) keep their own versions.",
+ "_about": "Tracks upstream app documentation and the independent fork release. Historical pages keep their own versions.",
  "tag": "v0.2.13",
  "published": "2026-11-09",
  "product_version": "0.2.13",
@@ -54,6 +54,29 @@
   "repository": "qwertie/Strataq",
   "tag": "v0.2.50",
   "sequence": 1000,
-  "app": false
+  "app": false,
+  "assets": [
+   "SHA256SUMS.txt",
+   "install-manifest.txt",
+   "install.ps1",
+   "install.sh",
+   "strata-control-0.1.150-linux-aarch64.tar.gz",
+   "strata-control-0.1.150-linux-x86_64.tar.gz",
+   "strata-control-0.1.150-windows-x86_64.zip",
+   "strata-dsv41-0.1.59.1-linux-x86_64-cuda-cuda13.tar.gz",
+   "strata-dsv41-0.1.59.1-windows-x86_64-hip-rdna3.tar.gz",
+   "strata-engine-0.1.59.1-linux-x86_64-cuda-cuda13.tar.gz",
+   "strata-engine-0.1.59.1-windows-x86_64-hip-rdna2.tar.gz",
+   "strata-engine-0.1.59.1-windows-x86_64-hip-rdna3.tar.gz",
+   "strata-engine-0.1.59.1-windows-x86_64-hip-rx9070.tar.gz",
+   "strata-feed.json",
+   "strata-feed.json.sig",
+   "strata-terminal-0.1.150-linux-aarch64.manifest.json",
+   "strata-terminal-0.1.150-linux-aarch64.tar.gz",
+   "strata-terminal-0.1.150-linux-x86_64.manifest.json",
+   "strata-terminal-0.1.150-linux-x86_64.tar.gz",
+   "strata-terminal-0.1.150-windows-x86_64.manifest.json",
+   "strata-terminal-0.1.150-windows-x86_64.zip"
+  ]
  }
 }

@@ -43,11 +43,11 @@ class ReleaseManifest(unittest.TestCase):
         m = rm.load()
         self.assertEqual(rm.check(m), [])
         wrong = copy.deepcopy(m)
-        wrong["control_version"] = m["engine_version"]              # the manifest says the hotfix is not there, the source says it is
+        wrong["control_version"] = m["engine_version"]
         problems = "\n".join(rm.check(wrong))
         self.assertIn("VERSION (Control) says", problems)
         wrong = copy.deepcopy(m)
-        wrong["engine_version"] = "0.1.58"                          # engines two builds behind Control: not a hotfix
+        wrong["engine_version"] = "0.1.58"
         self.assertIn("CMakeLists.txt (engine) says", "\n".join(rm.check(wrong)))
         wrong = copy.deepcopy(m)
         del wrong["terminal_version"]                               # no terminal_version: the Terminal must say the product version

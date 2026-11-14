@@ -39,8 +39,8 @@ LINES = [
     ("docs/AI_SETUP.md", r"install Strata \(version " + V + r"\)", ["product_version"]),
     ("docs/SOURCE_INSTALL.md", r"use Strata \(version " + V + r"\)", ["product_version"]),
     ("AGENTS.md", r"^Version " + V + r", engine " + V + r"\.", ["product_version", "engine_version"]),
-    ("docs/AI_REFERENCE.md", r"against the " + V + r" release tree \(app and Terminal " + V + r"; Control and engines " + V + r"\)",
-     ["product_version", "product_version", "engine_version"]),
+    ("docs/AI_REFERENCE.md", r"against the " + V + r" release tree \(app " + V + r"; Terminal " + V + r"; Control " + V + r"; engines " + V + r"\)",
+     ["product_version", "product_version", "terminal_version", "control_version", "engine_version"]),
     ("packaging/UPDATES.md", r"one per OS \(" + V + r"\)", ["product_version"]),
     ("packaging/UPDATES.md", r'"app": \{[^\n]*\n\s*"version": "' + V + '"', ["product_version"]),
     ("packaging/UPDATES.md", r"--target [a-z0-9_-]+ +--version " + V, ["product_version"]),
@@ -50,7 +50,8 @@ LINES = [
     ("packaging/UPDATES.md", r'"version": "' + V + r'", "platform": "linux-x86_64", "backend": "cuda"', ["engine_version"]),
     ("packaging/UPDATES.md", r"engine/strata-engine-" + V + r"-linux-x86_64-cuda-cuda13", ["engine_version"]),
     ("docs/MEDIA_KIT.md", r"for Strata " + V + r"\.", ["product_version"]),
-    ("packaging/README.md", r"\(app and Terminal " + V + r", Control and engines " + V + r"\)", ["product_version", "engine_version"]),
+    ("packaging/README.md", r"\(app " + V + r", Terminal " + V + r",\s*Control " + V + r" and engines " + V + r"\)",
+     ["product_version", "terminal_version", "control_version", "engine_version"]),
     ("packaging/ENGINE-COMPONENT.md", r'"name": "strata-engine", "version": "' + V + '"', ["engine_version"]),
     ("packaging/ENGINE-COMPONENT.md", r"package_engine.py --src <build folder> --backend cuda --version " + V, ["engine_version"]),
 ]
@@ -92,6 +93,7 @@ def expand(manifest):
 
 def rewrite(text, regex, keys, manifest):
     """Replace each version group of every match of `regex` with the manifest's value."""
+    manifest = {"terminal_version": manifest["product_version"], **manifest}
     def sub(m):
         out, last = [], m.start()
         for i, key in enumerate(keys, 1):
@@ -126,6 +128,7 @@ def check(manifest):
             problems.append("docs/data/release.json has no %r" % key)
     if problems:
         return problems
+    manifest = {"terminal_version": manifest["product_version"], **manifest}
     if manifest["tag"] != "v" + manifest["product_version"]:
         problems.append("tag %s does not match product_version %s" % (manifest["tag"], manifest["product_version"]))
     for where, (found, key) in code_versions().items():
