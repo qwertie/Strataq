@@ -85,7 +85,7 @@ checks its SHA-256, unpacks it into your home folder (no administrator rights, n
 with the Terminal it just unpacked and removes it again if that fails, and puts `strata` on your PATH.
 
 Those checks have a limit. The checksum comes from the same release as the archive, and the public key that checks the feed arrives inside
-that archive, so for the first install all trust rests on HTTPS and on the `Niko1221/Strata` GitHub release itself. The checks catch a
+that archive, so for the first install all trust rests on HTTPS and on the `qwertie/Strataq` GitHub release itself. The checks catch a
 damaged or half-finished download and a feed that was not signed by the release key; they do not protect you if the release has been replaced
 by someone who controls it. Later updates are checked against the key already on your PC, which is a stronger position.
 

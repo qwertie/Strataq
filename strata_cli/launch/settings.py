@@ -336,6 +336,8 @@ def flags_text(s: LaunchSettings, *, preset: str | None = None) -> str:
             parts.append(f"--model {s.model.lower()}" + (f" --family {s.family}" if s.family and s.family != "qwen" else ""))
         if s.data_dir:
             parts.append(f'--data-dir "{s.data_dir}"')
+        if s.engine:
+            parts.append(f"--engine {s.engine}")
         if s.context:
             parts.append(f"--context {context_label(s.context).lower()}")
         if s.kv:

@@ -6211,11 +6211,12 @@ def choose_engine(a, exe: Path, new: str) -> Path:
     """Settles which engine program a model runs on: the original engine `exe` or the new engine `new` (Q38EXE, DS41EXE)
     beside it.  Asks when the folder has both and --engine did not say (the new one is the default), keeps the answer
     in `a.engine` for the run config, says the choice and returns the program."""
-    have_new = exe.with_name(new).is_file()
+    preferred = new_engine_or(exe, new)
+    have_new = preferred != exe
     a.engine = getattr(a, "engine", None)          # (an `a` made by other callers than setup's parser has none)
     if have_new and a.engine is None:
         say("  Which engine should run this model?")
-        say(f"  1) Original engine: {exe.stem} (the engine upstream Strata ships)")
+        say(f"  1) Original engine: {exe.stem} (qwertie/Strataq build of Niko1221/Strata's engine)")
         say(f"  2) New engine: {Path(new).stem} (qwertie/Strataq: conversations share one memory pool)   (recommended)")
         a.engine = ENGINE_CHOICES[int(ask("Which engine?", ["1", "2"], "2", a.yes)) - 1]
     if not have_new and a.engine != "original":
@@ -6225,7 +6226,7 @@ def choose_engine(a, exe: Path, new: str) -> Path:
             f"`strata update` ({'UPDATE.bat' if WIN else './update.sh'}) fetches it and running setup again offers "
             "it; or run setup again with --build to compile it now.")
         a.engine = "original"
-    chosen = exe.with_name(new) if a.engine == "new" else exe
+    chosen = preferred if a.engine == "new" else exe
     ok(f"engine: {chosen}" + (" (the new engine)" if chosen != exe else ""))
     return chosen
 
@@ -7309,7 +7310,7 @@ def use_cuda12(cards, cfg_path: Path, cfg: dict, yes: bool) -> dict:
     vision = "gpu" if cfg.get("vision") else "none"
     eng = get_cuda12_engine(os.environ.get("STRATA_PREBUILT_URL", PREBUILT_URL),
                             {**main, "archs": sorted({int(g["arch"]) for g in cards})}, vision, yes)
-    on_new = Path(str(cfg.get("exe", ""))).stem == Path(Q38EXE).stem      # the engine setup's --engine chose stays
+    on_new = Path(str(cfg.get("exe", ""))).stem == Path(Q38EXE).stem
     cfg["exe"] = str(new_engine_or(eng / EXE, Q38EXE) if on_new else eng / EXE)
     cfg["cuda"] = 12
     cfg["lib_dirs"] = engine_lib_dirs(eng, 12)

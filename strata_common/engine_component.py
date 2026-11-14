@@ -1216,7 +1216,9 @@ def expand(value: str, cfg: dict | None = None, *, root: Path | None = None, ful
     --engine new) resolves to that program beside the entry point."""
     if not is_reference(value):
         return value
-    name, _, program = value[len(REFERENCE_PREFIX):].partition("/")
+    name, separator, program = value[len(REFERENCE_PREFIX):].partition("/")
+    if separator and (name != COMPONENT_ID or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", program)):
+        raise EngineMissing(f"the run config names an invalid engine program {value!r}", root or components_dir())
     backend = (cfg or {}).get("backend")
     if name not in ("", COMPONENT_ID):
         from strata_control import shape_engine
@@ -1229,13 +1231,16 @@ def expand(value: str, cfg: dict | None = None, *, root: Path | None = None, ful
             raise
         except EngineMissing as exc:
             raise shape_engine.ShapeEngineMissing(shape, exc.reason, shape_engine.root(shape, root), problems=exc.problems, title=(cfg or {}).get("shape_title")) from None
-    exe = resolve(root, backend=backend if backend in BACKEND_MATRIX else None, full=full).exe
+    component = resolve(root, backend=backend if backend in BACKEND_MATRIX else None, full=full)
+    exe = component.exe
     if not program:
         return str(exe)
-    if not exe.with_name(program + exe.suffix).is_file():
+    chosen = exe.with_name(program + exe.suffix)
+    relative = chosen.relative_to(component.root).as_posix()
+    if relative not in {rel for rel, _, _ in component.files}:
         raise EngineMissing(f"the installed engine package has no {program}: `strata update` fetches one that has "
                             "it, or set up the model again with --engine original", root or components_dir())
-    return str(exe.with_name(program + exe.suffix))
+    return str(chosen)
 
 
 def status(root: Path | None = None, *, backend: str | None = None, full: bool = False) -> dict:

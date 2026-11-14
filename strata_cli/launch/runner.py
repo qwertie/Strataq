@@ -1070,14 +1070,20 @@ class Runner:
         return path, desc
 
     def installed_serves_request(self, path: Path) -> bool:
-        """C08: the installed copy is what this launch asked for. A --model-path (or the Folder step's own files) and a --data-dir always win:
-        when the installed config names files outside them, it is not reused (that served another copy without a word) and setup runs with
-        the given folders, which rewrites the config so the profile follows."""
+        """Checks whether the saved model uses the requested engine and folders before reusing its setup."""
         s = self.s
-        if not (s.model_path or s.data_dir):
+        if not (s.engine or s.model_path or s.data_dir):
             return True
         try:
             cfg = read_config(path)
+            if s.engine:
+                program = Path(str(cfg.get("exe", ""))).stem
+                original = program in ("strata", "strata-dsv41", "component:strata-engine")
+                new = program in ("strata-q38", "strata-ds41")
+                if (s.engine == "new" and original) or (s.engine == "original" and new):
+                    return False
+            if not (s.model_path or s.data_dir):
+                return True
             args = [str(a) for a in cfg.get("args") or []]
             if s.model_path:
                 want = Path(s.model_path).expanduser().resolve()
@@ -1213,8 +1219,7 @@ class Runner:
             if self.installed_serves_request(path):
                 self.emit("model", f"{s.family} {s.model} is already installed with these choices.", 100)
                 return path
-            self.emit("model", "The model already installed here is somewhere else than the folder you gave, so Strata uses the folder you gave "
-                               "and points this launch at it.", 0)
+            self.emit("model", "Preparing the installed model with the engine and folders you chose.", 0)
         title = f"{s.family} {s.model}"
         try:                                                 # the name on screen (DeepSeek's sets are ISTA-DAS there, their ids keep the first spelling)
             title = next((r.title for r in self.catalog.rows() if r.family == s.family and r.model == s.model), title)

@@ -346,6 +346,14 @@ class RunConfig(unittest.TestCase):
 
 
 class SetupArgs(unittest.TestCase):
+    def test_the_engine_choice_reaches_setup(self):
+        """Both engine choices must survive the launch wrapper's noninteractive setup call."""
+        for family in ("qwen", "deepseek41"):
+            for choice in ("original", "new"):
+                with self.subTest(family=family, engine=choice):
+                    args = self.args_for(family=family, engine=choice)
+                    self.assertEqual(args[args.index("--engine") + 1], choice)
+
     def runner(self, **kw):
         with Home():
             cat = catalog(HW_12)
