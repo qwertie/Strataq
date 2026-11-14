@@ -15,6 +15,7 @@ from tests.terminal import update_fixture as fx
 
 ROOT = Path(__file__).resolve().parents[2]
 RELEASE_KEY_ID = "5d1bc23abbeffd0d"
+FORK_KEY_ID = "f8aabae844c8ba19"      # qwertie/Strataq's feed key (packaging/UPDATES.md, "This fork's release")
 TAURI_CONF = ROOT / "apps" / "desktop" / "src-tauri" / "tauri.conf.json"
 
 
@@ -22,8 +23,9 @@ class ShippedKeys(unittest.TestCase):
     def test_the_release_feed_key_is_shipped_and_valid(self):
         with mock.patch.dict(os.environ, {signing.ENV_EXTRA_KEYS: ""}):
             keys = signing.load_trusted_keys()
-        self.assertEqual(list(keys), [RELEASE_KEY_ID])           # only the release key: no tester or local-test key in a release build
-        self.assertEqual(signing.key_id_of(keys[RELEASE_KEY_ID]), RELEASE_KEY_ID)
+        self.assertEqual(list(keys), [RELEASE_KEY_ID, FORK_KEY_ID])   # only release keys: no tester or local-test key in a release build
+        for key_id in keys:
+            self.assertEqual(signing.key_id_of(keys[key_id]), key_id)
 
     def test_the_app_key_is_the_one_in_the_tauri_config(self):
         shipped = json.loads((ROOT / "strata_common" / "update_keys.json").read_text(encoding="utf-8-sig"))["app_minisign_public"]

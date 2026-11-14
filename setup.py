@@ -233,12 +233,12 @@ LLAMA_CPP_ZIP = f"https://github.com/ggml-org/llama.cpp/archive/{LLAMA_CPP_COMMI
 # "https://github.com/<you>/Strata/releases/latest/download/" (or pass --prebuilt / set STRATA_PREBUILT_URL).
 # With the default, the release of this checkout's own version (PREBUILT_TAG_URL, CMakeLists.txt's version) is
 # tried first and the latest release is the fallback (#214): an older checkout keeps the engine it shipped with.
-PREBUILT_URL = "https://github.com/Niko1221/Strata/releases/latest/download/"
+PREBUILT_URL = "https://github.com/qwertie/Strataq/releases/latest/download/"
 # The repository the release assets and their SHA-256 come from; `engine_digest` reads the API here even
 # when --prebuilt points the download somewhere else, because the hash is only worth having if it comes
 # from somewhere the download does not.
-REPO = "Niko1221/Strata"
-PREBUILT_TAG_URL = "https://github.com/Niko1221/Strata/releases/download/v{version}/"
+REPO = "qwertie/Strataq"
+PREBUILT_TAG_URL = "https://github.com/qwertie/Strataq/releases/download/v{version}/"
 PREBUILT_ASSET = "strata-windows-x64.zip" if WIN else "strata-linux-x64.zip"
 # the CUDA libraries the ready-made engine loads (the same CUDA 13.0 it is built with), from NVIDIA's pip packages
 CUDA_WHEELS = ["nvidia-cublas==13.0.2.14", "nvidia-cuda-runtime==13.0.96"]
@@ -283,6 +283,7 @@ HVEXE = "strata-vision-hip.exe" if WIN else "strata-vision-hip"     # AMD: the p
 Q38EXE = "strata-q38.exe" if WIN else "strata-q38"
 DS41EXE = "strata-ds41.exe" if WIN else "strata-ds41"
 DSV41EXE = "strata-dsv41.exe" if WIN else "strata-dsv41"   # the older DeepSeek engine: setup's pack check runs it
+ENGINE_CHOICES = ("original", "new")   # --engine: the original engine (EXE, DSV41EXE) or the new one (Q38EXE, DS41EXE)
 # MODEL-UPDATE Phase 1: the K-quant prompt kernels (Unsloth's UD-Q4/Q5/Q6_K_XL experts) are a library next to the CUDA
 # engine, opened only for those models; an engine without it runs them on the FP16 prompt path
 KQ_LIB = "strata_kq.dll" if WIN else "libstrata_kq.so"
@@ -6190,13 +6191,14 @@ SHAPE_ENGINE: dict = {}       # the model-shape engine the chosen model runs on:
 
 
 def engine_exe(eng: Path, new: str | None = None) -> str:
-    """The `exe` of a run config: the engine component in the app, else the engine binary's path - the new engine `new`
-    (Q38EXE) when the folder has it. A model of its own shape names that shape's engine."""
+    """The `exe` of a run config: the engine component in the app (its program `new` when given), else the engine
+    binary's path - the new engine `new` (Q38EXE) when the folder has it. A model of its own shape names that shape's
+    engine."""
     if SHAPE_ENGINE.get("shape"):
         from strata_control import shape_engine
         return shape_engine.reference(SHAPE_ENGINE["shape"])
     if CONTROL:
-        return "component:strata-engine"
+        return EC.REFERENCE_PREFIX + EC.COMPONENT_ID + (f"/{Path(new).stem}" if new else "")
     return str(new_engine_or(Path(eng) / EXE, new) if new else Path(eng) / EXE)
 
 
@@ -6205,15 +6207,26 @@ def new_engine_or(exe: Path, new: str) -> Path:
     return exe.with_name(new) if exe.with_name(new).is_file() else exe
 
 
-def note_engine(exe: Path, new: str) -> Path:
-    """Says which engine program a model will run on - the new engine `new` beside the older engine `exe`, else `exe`
-    and how to get the new one - and returns it."""
-    chosen = new_engine_or(exe, new)
-    ok(f"engine: {chosen}" + (" (the new engine)" if chosen != exe else ""))
-    if chosen == exe:
+def choose_engine(a, exe: Path, new: str) -> Path:
+    """Settles which engine program a model runs on: the original engine `exe` or the new engine `new` (Q38EXE, DS41EXE)
+    beside it.  Asks when the folder has both and --engine did not say (the new one is the default), keeps the answer
+    in `a.engine` for the run config, says the choice and returns the program."""
+    have_new = exe.with_name(new).is_file()
+    a.engine = getattr(a, "engine", None)          # (an `a` made by other callers than setup's parser has none)
+    if have_new and a.engine is None:
+        say("  Which engine should run this model?")
+        say(f"  1) Original engine: {exe.stem} (the engine upstream Strata ships)")
+        say(f"  2) New engine: {Path(new).stem} (qwertie/Strataq: conversations share one memory pool)   (recommended)")
+        a.engine = ENGINE_CHOICES[int(ask("Which engine?", ["1", "2"], "2", a.yes)) - 1]
+    if not have_new and a.engine != "original":
+        if a.engine == "new":
+            warn(f"--engine new: this engine folder has no {Path(new).stem}, so the original engine runs this model")
         say(f"  The new engine ({Path(new).stem}) is not in this engine folder yet. Once a release carries it, "
-            f"`strata update` ({'UPDATE.bat' if WIN else './update.sh'}) fetches it and running setup again switches "
-            "to it; or run setup again with --build to compile it now.")
+            f"`strata update` ({'UPDATE.bat' if WIN else './update.sh'}) fetches it and running setup again offers "
+            "it; or run setup again with --build to compile it now.")
+        a.engine = "original"
+    chosen = exe.with_name(new) if a.engine == "new" else exe
+    ok(f"engine: {chosen}" + (" (the new engine)" if chosen != exe else ""))
     return chosen
 
 
@@ -7296,7 +7309,8 @@ def use_cuda12(cards, cfg_path: Path, cfg: dict, yes: bool) -> dict:
     vision = "gpu" if cfg.get("vision") else "none"
     eng = get_cuda12_engine(os.environ.get("STRATA_PREBUILT_URL", PREBUILT_URL),
                             {**main, "archs": sorted({int(g["arch"]) for g in cards})}, vision, yes)
-    cfg["exe"] = str(new_engine_or(eng / EXE, Q38EXE))
+    on_new = Path(str(cfg.get("exe", ""))).stem == Path(Q38EXE).stem      # the engine setup's --engine chose stays
+    cfg["exe"] = str(new_engine_or(eng / EXE, Q38EXE) if on_new else eng / EXE)
     cfg["cuda"] = 12
     cfg["lib_dirs"] = engine_lib_dirs(eng, 12)
     if cfg.get("vision") and (eng / VEXE).exists():
@@ -8621,7 +8635,7 @@ def install_dsv41(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopted, 
         ok(f"engine: {exe}")
         run_exe = exe
     else:                                            # the run config starts it; setup's pack check runs `exe`
-        run_exe = note_engine(exe, DS41EXE)
+        run_exe = choose_engine(a, exe, DS41EXE)
     if mac and ds_vision == "on":                    # the Mac's pictures need an engine with the Metal picture tower: its program says so (dsv41_engine.MARK_MAC_VISION)
         from strata_control import dsv41_engine as _dsv41_engine
         if _dsv41_engine.mac_vision_state(exe) == "no":
@@ -9267,6 +9281,9 @@ def main() -> int:
     ap.add_argument("--rollback-engine", action="store_true",
                     help="put back the engine an update replaced (kept in engine/.previous), and keep the current one there")
     ap.add_argument("--build", action="store_true", help="compile the engine instead of using the ready-made one")
+    ap.add_argument("--engine", choices=ENGINE_CHOICES, default=None,
+                    help="the engine program for Qwen3.8 and DeepSeek: original (strata, strata-dsv41) or new "
+                         "(strata-q38, strata-ds41, the default when the engine folder has it); asked when not given")
     ap.add_argument("--source", choices=SOURCES, default=None,
                     help="where the model files come from: auto (default: Hugging Face), huggingface or modelscope "
                          "(mainland China: the same files, checked against ModelScope's published SHA-256; "
@@ -10074,10 +10091,10 @@ def main() -> int:
     if (MODELS[model].get("budget") or family == "gyro") and engine_ver < need_engine:
         fail(f"{model} needs engine {'.'.join(map(str, need_engine))} or newer; this one is {meta.get('version')}",
              "update Strata (or compile the engine with --build) and run setup again")
-    if CONTROL or SHAPE_ENGINE.get("shape"):
-        ok("engine: the engine component (looked up when the model loads)" if CONTROL else f"engine: {eng / EXE}")
+    if SHAPE_ENGINE.get("shape"):
+        ok(f"engine: {eng / EXE}")
     else:
-        note_engine(eng / EXE, Q38EXE)
+        choose_engine(a, eng / EXE, Q38EXE)
 
     # ---- 5. the model files
     step(5, f"downloading {fam['title']} {model}")

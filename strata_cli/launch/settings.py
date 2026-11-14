@@ -113,6 +113,7 @@ class LaunchSettings:
     model: str | None = None                   # catalog size (IQ3_XXS ...)
     model_path: str | None = None              # "Use model files I already have": a .gguf file or a folder
     dsv41_package: str | None = None           # DeepSeek: the engine package the person downloaded by hand (checked, then installed)
+    engine: str | None = None                  # setup's --engine: "original" or "new"; None = setup's default
     data_dir: str | None = None                # where model files are stored (None: the Strata default)
     gpus: list[int] | None = None              # None = the engine's choice (all usable cards)
     gpu_roles: dict[str, str] | None = None    # {"1": "main", "0": "helper", "2": "off"}: a role for every card; None = the recommendation

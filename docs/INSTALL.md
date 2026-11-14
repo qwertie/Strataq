@@ -67,13 +67,13 @@ Install once, then use `strata launch`. The Terminal includes Python and downloa
 **Linux / Mac**
 
 ```sh
-curl -fsSL https://github.com/Niko1221/Strata/releases/latest/download/install.sh -o install.sh && sh install.sh
+curl -fsSL https://github.com/qwertie/Strataq/releases/latest/download/install.sh -o install.sh && sh install.sh
 ```
 
 **Windows PowerShell**
 
 ```powershell
-irm https://github.com/Niko1221/Strata/releases/latest/download/install.ps1 | iex
+irm https://github.com/qwertie/Strataq/releases/latest/download/install.ps1 | iex
 ```
 
 On Windows, open a **new terminal** afterwards. On Linux and Mac, if `strata` is not found, use the full path printed

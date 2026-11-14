@@ -351,7 +351,7 @@ class Fetch(Base):
         with mock.patch.dict("os.environ", env, clear=True), mock.patch("strata_control.feed.fetch", fetch):
             self.assertIsNone(drafting_fetch.ensure_tuned(self.data))
         self.assertEqual(asked, [updater.default_feed()])
-        self.assertTrue(updater.default_feed().startswith("https://github.com/Niko1221/Strata/releases/"))
+        self.assertTrue(updater.default_feed().startswith("https://github.com/qwertie/Strataq/releases/"))
 
     def test_a_download_that_fails_the_safety_check_is_deleted_and_said(self):
         (self.host / drafting.TUNED_NAME).write_bytes(b"z" * len(TUNED_BYTES))

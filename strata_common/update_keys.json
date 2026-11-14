@@ -5,6 +5,11 @@
       "alg": "ed25519",
       "key_id": "5d1bc23abbeffd0d",
       "public": "KjnXZB0T1r3dmBNot8h+c4rTicRtllg1LH9fUlTw4ZY="
+    },
+    {
+      "alg": "ed25519",
+      "key_id": "f8aabae844c8ba19",
+      "public": "HFApCEyEyj4+sXme/7fSF/KLdNZcHg8/yCUp/h0d+j8="
     }
   ],
   "app_minisign_public": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI2QjA5OTk5MDU1MjFGNUUKUldSZUgxSUZtWm13dHNGRU40N2xOUjdZZGpvcGl0NTB2WGxnS3VTc2RlakpSbnBxUkxndHNFY0oK"

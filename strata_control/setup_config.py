@@ -423,7 +423,8 @@ def config_for(inp: SetupInputs, lib) -> SetupConfig:
         # Keep these settings saved; the paged-launch adapter still needs support before it can honor them.
         args += ["--control-vector-scaled", f"{esp}:1.0", "--control-vector-layer-range", "4", "44",
                  "--cvec-mode", "project", "--cvec-dir", "per-layer"]
-    cfg = {"exe": engine_exe(eng, lib.Q38EXE), "args": args, "cwd": str(ROOT), "tokenizer": str(pack / "tokenizer"),
+    new = lib.Q38EXE if getattr(a, "engine", None) == "new" else None        # setup's choose_engine settled it
+    cfg = {"exe": engine_exe(eng, new), "args": args, "cwd": str(ROOT), "tokenizer": str(pack / "tokenizer"),
            "model_name": f"{fam['name']}-{model.lower()}", "log": str(home() / f"strata-{tag.lower()}.log"),
            "lib_dirs": lib_dirs, "port": port}
     if cuda_tk == 12:                                  # the experimental CUDA 12 engine (engine-cuda12/)

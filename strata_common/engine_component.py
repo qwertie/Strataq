@@ -1099,7 +1099,7 @@ def arch_notice(built: tuple[str, ...], here: list[str]) -> str:
             f"Ask for the {make(have)} build.")
 
 
-RELEASES_URL = "https://github.com/Niko1221/Strata/releases"
+RELEASES_URL = "https://github.com/qwertie/Strataq/releases"
 MAKE_NAMES = {"cuda": "NVIDIA", "hip": "AMD", "sycl": "Intel"}
 
 
@@ -1211,10 +1211,12 @@ def is_reference(value: object) -> bool:
 
 def expand(value: str, cfg: dict | None = None, *, root: Path | None = None, full: bool = True) -> str:
     """The engine path for `value`: unchanged when it is a path, resolved when it is a component reference. This is the
-    start path, so every file's SHA-256 is checked (`full`): a changed file refuses the start instead of running."""
+    start path, so every file's SHA-256 is checked (`full`): a changed file refuses the start instead of running.  A
+    reference to another program of the Strata engine's package ("component:strata-engine/strata-q38", setup's
+    --engine new) resolves to that program beside the entry point."""
     if not is_reference(value):
         return value
-    name = value[len(REFERENCE_PREFIX):]
+    name, _, program = value[len(REFERENCE_PREFIX):].partition("/")
     backend = (cfg or {}).get("backend")
     if name not in ("", COMPONENT_ID):
         from strata_control import shape_engine
@@ -1227,7 +1229,13 @@ def expand(value: str, cfg: dict | None = None, *, root: Path | None = None, ful
             raise
         except EngineMissing as exc:
             raise shape_engine.ShapeEngineMissing(shape, exc.reason, shape_engine.root(shape, root), problems=exc.problems, title=(cfg or {}).get("shape_title")) from None
-    return str(resolve(root, backend=backend if backend in BACKEND_MATRIX else None, full=full).exe)
+    exe = resolve(root, backend=backend if backend in BACKEND_MATRIX else None, full=full).exe
+    if not program:
+        return str(exe)
+    if not exe.with_name(program + exe.suffix).is_file():
+        raise EngineMissing(f"the installed engine package has no {program}: `strata update` fetches one that has "
+                            "it, or set up the model again with --engine original", root or components_dir())
+    return str(exe.with_name(program + exe.suffix))
 
 
 def status(root: Path | None = None, *, backend: str | None = None, full: bool = False) -> dict:

@@ -100,7 +100,7 @@ class ShareSibling(unittest.TestCase):
 class MacPicturesPlan(unittest.TestCase):
     def test_a_dropped_picture_file_leaves_the_download_total_and_nothing_is_fetched_before(self):
         src = (Path(setup.__file__).resolve()).read_text(encoding="utf-8")
-        i = src.index('run_exe = note_engine(exe, DS41EXE)\n    if mac and ds_vision == "on":')
+        i = src.index('run_exe = choose_engine(a, exe, DS41EXE)\n    if mac and ds_vision == "on":')
         j = src.index("step(5, f\"downloading {fam['title']} {model}\")", i)
         block = src[i:j]
         self.assertIn("is not fetched", block)                    # the corrected figure is said

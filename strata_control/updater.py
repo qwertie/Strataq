@@ -53,9 +53,9 @@ from strata_base import atomic as _atomic_mod
 STATE_DIR = ".updates"
 STAGE_DIR = ".s"                 # staging is short on purpose: <components>\.s\<4 hex>\engine\<folder> (see longpath.py)
 SKEW_FREE_BYTES = 1.15
-#: Where the feed is read when nothing else is set: the files of the latest GitHub release of Niko1221/Strata (the same folder the
+#: Where the feed is read when nothing else is set: the files of the latest GitHub release of qwertie/Strataq (the same folder the
 #: one-line installers use). Only a feed signed with a key in update_keys.json (or STRATA_UPDATE_TRUSTED_KEYS) is accepted.
-DEFAULT_FEED = "https://github.com/Niko1221/Strata/releases/latest/download/strata-feed.json"
+DEFAULT_FEED = "https://github.com/qwertie/Strataq/releases/latest/download/strata-feed.json"
 ENV_FEED = "STRATA_UPDATE_FEED"
 
 

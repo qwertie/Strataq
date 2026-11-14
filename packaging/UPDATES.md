@@ -223,6 +223,32 @@ All signing happens on the release PC, on the finished files.
 `set-app-platform` checks each `.sig` against the public key in `tauri.conf.json` over the exact bytes, so a file signed with another key, or changed after
 signing, stops the release. The Mac dmg is not in `latest.json` (the updater uses `Strata.app.tar.gz`) and needs no Tauri signature; it is downloaded by hand.
 
+### This fork's release (qwertie/Strataq, branch strataq-main)
+
+The fork's Terminal, setup and `strata update` read `https://github.com/qwertie/Strataq/releases/latest/download/`
+(`DEFAULT_FEED`, `PREBUILT_URL`, `install.sh` / `install.ps1`). Its feed is signed with the fork's key (key id `f8aabae844c8ba19`; the
+secret `feed-key.json` is in `C:\Users\qwert\strata-keys`, outside git, and must be backed up). `update_keys.json` trusts that key and
+upstream's `5d1bc23abbeffd0d`, so the fork's feed may list upstream's signed packages it does not rebuild (the Mac, SYCL and drafter
+packages) under their absolute upstream URLs. The desktop app is not part of the fork's release (no Tauri key): its links still go upstream.
+
+* **Versions.** The engine packages carry CMakeLists.txt's version (0.1.59.1 at the first release), which must be newer than upstream's
+  (0.1.59), or `strata update` offers nothing to a PC that has upstream's engine. The Control package's version must be newer than
+  upstream's for the same reason. `--sequence` must be above every sequence a PC may have accepted from upstream's feed (124 on
+  2026-11-09): the fork's first feed uses 1000 and counts up. A PC that accepted the fork's feed refuses upstream's afterwards (a lower
+  sequence).
+* **Packages.** Every engine package carries the original and the new programs (strata and strata-q38; the DeepSeek package strata-dsv41
+  and strata-ds41); setup asks which one runs a model (`--engine original|new`). Windows AMD: `tools\hip\build_release.py` per variant
+  (`STRATA_HIP_ARCHS`: rdna3 = gfx1100;gfx1101;gfx1102;gfx1151, rx9070 = gfx1200;gfx1201, rdna2 = gfx1030;gfx1031), then
+  `package_engine.py --variant <name>`; the rdna3 build also yields the Windows AMD DeepSeek package. Linux: `packaging/build_hip_linux.sh`
+  and `build_cuda_linux.sh` in an Ubuntu 22.04 environment (the packages must run on 22.04's glibc), `build_dsv41_*.sh` for DeepSeek.
+  The Terminal archives (`package_terminal.py`, one per platform) and `install-manifest.txt` go in the same release.
+* **Steps.** The "Steps" above with `--key C:\Users\qwert\strata-keys\feed-key.json`, `--sequence 1000` (then 1001, ...) and no
+  `--app-json`; `verify-feed RELEASE --pub C:\Users\qwert\strata-keys\feed-key.pub.json`; then upload the release folder:
+
+      gh release create v0.1.59.1-strataq --repo qwertie/Strataq --target strataq-main --title "Strataq 0.1.59.1" --notes "..." RELEASE/*
+
+  `releases/latest` must point at this release: GitHub picks the newest release that is not a pre-release, so do not mark it one.
+
 ### The Mac app
 
 `tauri build` signs its installers with the Tauri key before anything else touches them. On a Mac that is too early: `sign-and-notarize.sh` then re-signs every
