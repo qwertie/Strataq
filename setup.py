@@ -4477,10 +4477,12 @@ def build_vision_cpu(eng: Path, stamp: Path, meta: dict, llama, vsrc) -> Path:
 
 def compile_hip_reader(bdir: Path, archs: list, root: Path, dirs: list, llama, portable: bool) -> None:
     """Compiles the HIP picture reader (strata-vision-hip) in `bdir`; `portable`: for other PCs (a release)."""
+    # The Windows hip::device target caches its own architecture list across reader rebuilds.
     compile_hip(ROOT / "tools" / "vision", bdir, "strata-vision", root, dirs,
                 [f"-DLLAMA_DIR={llama}", "-DSTRATA_VISION_HIP=ON", "-DSTRATA_VISION_HIP_ARCHS=" + ";".join(archs),
                  f"-DSTRATA_PORTABLE={'ON' if portable else 'OFF'}",
-                 *([f"-DCMAKE_CXX_FLAGS={rocm_flags(root)}"] if WIN else [])], "build-vision-hip.bat")
+                 *([f"-DCMAKE_CXX_FLAGS={rocm_flags(root)}", "-DGPU_BUILD_TARGETS=" + ";".join(archs)]
+                   if WIN else [])], "build-vision-hip.bat")
 
 
 def compile_cpu_reader(bdir: Path, llama, portable: bool) -> None:
