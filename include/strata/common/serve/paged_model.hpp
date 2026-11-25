@@ -214,8 +214,9 @@ public:
     /// table of addresses per layer (PagePool::page_address of each first page).
     virtual bool publish_residency(const PagedCard& card, std::string& err) = 0;
     /// Gets the routings each expert (layer * n_expert + expert) of the trunk's PagedModelFacts::n_layers layers had
-    /// in the decode steps, which the adaptive tier counts and decays; empty when the tier is off.  A card's ranking
-    /// may hold experts past them (a drafter's), which have no count.
+    /// in the decode steps, which the adaptive tier counts and decays; empty when the tier is off.  A model may count
+    /// its drafter's experts too, as the layers after the trunk's (strata-q38's MTP draft layer; DeepSeek's DSpark
+    /// blocks have no count); the tier then swaps them as it swaps the trunk's.
     virtual std::vector<float>& get_usage() = 0;
     /// Gets how many experts the CPU has computed since the model loaded, each (layer, expert) counted once a step;
     /// the engine's STATS line reports the decode steps' share of it.

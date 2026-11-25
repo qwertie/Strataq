@@ -463,13 +463,14 @@ private:
     void apply_settings();
     /// Gets the conversation in place `place` of `at_`.
     Held& get_held(size_t place) const { return *held_[at_[place]]; }
-    /// Gets the card that runs layer `layer`.
+    /// Gets the card that runs layer `layer`; a drafter's layer (from n_layers on) is the last card's.
     PagedCard& get_card_of(int64_t layer) const {
-        return *std::find_if(cards_.begin(), cards_.end(), [&](const PagedCard& c) { return layer < c.le; });
+        return layer >= facts_.n_layers ? cards_.back()
+             : *std::find_if(cards_.begin(), cards_.end(), [&](const PagedCard& c) { return layer < c.le; });
     }
     /// Tells whether a card other than the one that runs `layer` holds its expert `expert` (PagedCard::lent).
     bool is_lent(int64_t layer, int64_t expert) const {
-        const int32_t holder = holder_.empty() ? -1 : holder_[(size_t) layer];
+        const int32_t holder = holder_.empty() || layer >= facts_.n_layers ? -1 : holder_[(size_t) layer];
         return holder >= 0 && cards_[(size_t) holder].lent[(size_t) (layer * facts_.n_expert + expert)] >= 0;
     }
     /// Gets the card whose pool holds expert `i` (layer * n_expert + expert) for decode steps: the one that runs its
@@ -766,9 +767,10 @@ int PagedEngine::serve() {
         for (const PagedCard& card : cards_) {
             const std::vector<strata::core::ExpertKey>& ranking = card.experts.get_ranking();
             for (size_t i = 0; i < ranking.size(); ++i) {
-                if (ranking[i].layer >= facts_.n_layers)   // a drafter's expert (DeepSeek's DSpark blocks)
+                const size_t index = (size_t) (ranking[i].layer * facts_.n_expert + ranking[i].expert);
+                if (index >= usage.size())   // DeepSeek's DSpark blocks have no routing counts.
                     continue;
-                float& u = usage[(size_t) (ranking[i].layer * facts_.n_expert + ranking[i].expert)];
+                float& u = usage[index];
                 u = std::max(u, 1.0f - (float) i / (float) ranking.size());
             }
         }
@@ -2214,7 +2216,7 @@ bool PagedEngine::adapt_experts() {
         if (PagedCard* const holder = usage[i] > seen_[i] ? find_holder(i, residency) : nullptr)
             holder->experts.note_use({(int32_t) (i / (size_t) n_expert), (int32_t) (i % (size_t) n_expert)});
     const std::vector<strata::core::ExpertSwap> swaps = strata::core::choose_expert_swaps(
-        usage, residency, facts_.n_layers, n_expert, facts_.adapt_min_gain,
+        usage, residency, (int64_t) (usage.size() / (size_t) n_expert), n_expert, facts_.adapt_min_gain,
         [this](int64_t l, int32_t e) { return is_lent(l, e); }, true);
     std::string err;
     int moved = 0;
