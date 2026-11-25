@@ -11,30 +11,30 @@ compatible pack that fits the selected model and hardware. ISTA-DASLab is the de
 memory-saving fallback and is currently slower. Honor an explicit user choice. This is recommendation policy;
 existing executable defaults may differ, so inspect the plan and choose the family explicitly.
 
+Strataq is a fork of [Strata](https://github.com/Niko1221/Strata); see [README.md](README.md) for what it adds. It
+supports NVIDIA (CUDA) and AMD (HIP) GPUs only: upstream's Mac (Metal) and Intel Arc (SYCL) engines were removed.
+Qwen3.8 and DeepSeek V4.1 run on the paged engines `strata-q38` and `strata-ds41`; Qwen3.6 runs on `strata-q36`.
+
 Strata has three parts:
 
 - **The app** (`apps/desktop`, the Tauri shell; `apps/host`, the Node host and the web UI). It is for people who do
-  not want a terminal. One installer per system ([latest release](https://github.com/Niko1221/Strata/releases/latest)):
-  `Strata-0.2.13-windows-x64-setup.exe`, `Strata-0.2.13-linux-x86_64.AppImage`, `Strata-0.2.13-macos-arm64.dmg`.
-  The Windows and Linux installers carry no engine: the app downloads the engine for the graphics card on first
-  start, or installs a file the user already has. The Mac dmg keeps its small Metal engine inside.
+  not want a terminal. Strataq has published no app installer yet; upstream's installers carry upstream's engines.
 - **The Terminal** (`strata.py`, `strata_cli/`, `strata_control/`): the `strata` command. It sets up a model, serves
   it and watches it. Agents use this part.
-- **The engine and the server** (`src/`, `include/`, `metal/`, `sycl/` for the C++/CUDA/HIP/SYCL/Metal engine;
-  `strata_server/` for the Python server with an OpenAI- and Anthropic-compatible API and a web page). `setup.py`,
-  started by `START-HERE.bat` or `setup.sh`, is setup from a source checkout, for developers. The release paths are the
-  installer and `strata launch`.
+- **The engine and the server** (`src/` and `include/` for the C++/CUDA/HIP engine; `strata_server/` for the Python
+  server with an OpenAI- and Anthropic-compatible API and a web page). `setup.py`, started by `START-HERE.bat` or
+  `setup.sh`, is setup from a source checkout; `--build` compiles the engine for the chosen model. The release paths
+  are the installer and `strata launch`.
 
 ## Installing Strata for a user
 
-Follow **[docs/AI_SETUP.md](docs/AI_SETUP.md)**. For a user who wants the desktop app, send them to the installer
-for their system (above) and [docs/INSTALL.md](docs/INSTALL.md). For an agent that has a shell, use the Terminal; the
+Follow **[docs/AI_SETUP.md](docs/AI_SETUP.md)**. For an agent that has a shell, use the Terminal; the
 short version is:
 
 1. Install the Terminal. It needs no administrator rights.
 
    ```sh
-   curl -fsSL https://github.com/qwertie/Strataq/releases/latest/download/install.sh -o install.sh && sh install.sh                  # Linux, Mac
+   curl -fsSL https://github.com/qwertie/Strataq/releases/latest/download/install.sh -o install.sh && sh install.sh                  # Linux
    irm https://github.com/qwertie/Strataq/releases/latest/download/install.ps1 | iex                         # Windows PowerShell
    ```
 
@@ -75,8 +75,7 @@ Source setup does not make an unsupported model or backend compatible. Strata's 
   the [paper](docs/paper/Strata-Paper.pdf).
 - The Terminal: [docs/TERMINAL.md](docs/TERMINAL.md) and [docs/TERMINAL_LAUNCH.md](docs/TERMINAL_LAUNCH.md). The app,
   the packages and the update feed: [packaging/README.md](packaging/README.md) and [packaging/UPDATES.md](packaging/UPDATES.md).
-- AMD (HIP) build and validation: [docs/AMD_HIP.md](docs/AMD_HIP.md); multi-GPU: [docs/MULTI_GPU.md](docs/MULTI_GPU.md);
-  Mac (Metal): [docs/MAC.md](docs/MAC.md).
+- AMD (HIP) build and validation: [docs/AMD_HIP.md](docs/AMD_HIP.md); multi-GPU: [docs/MULTI_GPU.md](docs/MULTI_GPU.md).
 - Tests: the Terminal and Control tests are in `tests/terminal` (`python -m pytest tests/terminal`); the layering
   rules are checked by `python -m pytest tests/architecture`. The app's UI tests run with `npm test` in `apps/host`.
   Setup's own tests run without a GPU or downloads:
@@ -205,7 +204,7 @@ follow it whether a person or an agent writes the text. The short version:
 - One problem per pull request. Lead with the problem and the result, then the approach, then the validation
   (passed, failed and not run, kept apart) and the limits.
 - A new feature is opt-in, and the default path stays byte-identical to the last release. Say how you checked.
-- Build every backend a file touches (CUDA, HIP, SYCL) before asking for review.
+- Build every backend a file touches (CUDA, HIP) before asking for review.
 - Change a default only where you measured it faster, and show the numbers with what they were measured on.
 - Never submit measurements, logs or reproduction steps you did not produce. Mark a finding from reading code as
   unconfirmed static analysis.
