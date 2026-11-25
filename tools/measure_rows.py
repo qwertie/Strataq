@@ -10,18 +10,19 @@ experts live is set by the engine's arguments: run it once per memory case.
         --out results/rows-ram -- --gpu-mib 20480
 
 `--config`: a run config (strata-<model>.json: the model's arguments, the environment, the library folders, the
-tokenizer); its arguments are used as they are (they need --mtp, the drafter), with 3 batch slots, 8 rows and no
-suffix drafting added, and `--vision` left out.  The arguments after `--` go last (they win).  `--report A.json
-B.json ...` prints the medians of earlier runs as Markdown tables instead.
+tokenizer); its arguments are used as they are (they need --mtp, the drafter), with capacity for 3 conversations,
+8 rows and no suffix drafting added, and `--vision` left out.  The arguments after `--` go last (they win).
+`--report A.json B.json ...` prints the medians of earlier runs as Markdown tables instead.
 
-A conversation alone decodes each prompt (GEN, its rate from the engine's DONE line); several decode at once in
-batch slots (BGEN), their rate counted from the last admission to the first conversation that ends.  The guesses kept
+A conversation alone decodes each prompt (one RUN, its rate from the engine's DONE line); several are sent at once
+(a RUN each), their rate counted from when all of them decode to the first that ends.  The guesses kept
 come from the engine's stderr, and so do the experts the steps routed to (each counted once a step, and only where the
 CPU sees the routing: with every expert on the GPU the device decides alone and none are counted).
 """
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import os
 import queue
@@ -38,12 +39,13 @@ import strata_tokenizer  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from strata_common.expert_fill import wait_for_experts  # noqa: E402
 
+# Short prompts request long answers because decode, rather than prompt processing, is measured.
 PROMPTS = {
-    "story": "Write a long, detailed story about a lighthouse keeper who counts ships. Use at least 600 words.",
-    "code": "Write a Python module with a class for a bank account (deposit, withdraw, transfer, statement), with "
-            "docstrings and unit tests. Use at least 150 lines.",
-    "chat": "My partner and I are spending a long weekend in Lisbon in spring. We like food, old neighbourhoods and a "
-            "bit of walking, not museums all day. How would you plan the three days?",
+    "story": "Write a 3,000-word short story in five titled chapters about a lighthouse keeper who logs a ship that "
+             "never appears at sea.",
+    "code": "Print out a JS-based game of Tetris in HTML.",
+    "chat": "Plan a ten-day trip through Portugal by train, from Lisbon to Porto, day by day: where to stay, what to "
+            "see, where to eat, travel times and a budget per day.",
 }
 KINDS = list(PROMPTS)
 # Name: (conversations at once, rows per step, lookahead).  Several conversations take story, code and chat in turn;
@@ -58,7 +60,7 @@ def main() -> None:
     ap.add_argument("--exe", help="strata-q38 (default: the run config's exe)")
     ap.add_argument("--case", default="default", help="a name for where the experts live, kept in the results")
     ap.add_argument("--rounds", type=int, default=3)
-    ap.add_argument("--tokens", type=int, default=160, help="tokens each conversation decodes")
+    ap.add_argument("--tokens", type=int, default=1024, help="maximum tokens each conversation decodes")
     ap.add_argument("--only", help="configurations to run, comma-separated (default: all)")
     ap.add_argument("--out", help="the results' path without .json; the engine's output goes beside it")
     ap.add_argument("--report", nargs="+", metavar="JSON", help="print the medians of these results and exit")
@@ -106,12 +108,14 @@ def measure(a, configs: dict, extra: list[str]) -> None:
 
 
 def run_config(e: "Engine", prompts: dict, config: tuple, n: int) -> dict:
-    """Sets `config` live and decodes `n` tokens of each prompt (one conversation) or of the first c prompts at once;
+    """Sets `config` live and decodes up to `n` tokens of each prompt or of the first c prompts at once;
     gets the rates and what the engine's stderr said meanwhile."""
     c, rows, lookahead = config
     e.ask(f"CHANGE_SETTINGS concurrent={c} rows={rows} lookahead={lookahead}", "END_MEMORY")
     at = e.err_size()
     res = {k: e.solo(prompts[k], n) for k in KINDS} if c == 1 else e.together([prompts[k] for k in KINDS[:c]], n)
+    made = [res[k]["tokens"] for k in KINDS] if c == 1 else res["tokens"]
+    res["short"] = {k: t for k, t in zip(KINDS, made) if t < n}
     time.sleep(0.2)   # (the engine's last stderr lines of the run)
     res["err"] = parse_stderr(e.err_since(at))
     return res
@@ -136,14 +140,16 @@ def describe(r: dict) -> str:
             f"together {r['tok_s']:.2f} (" + ", ".join(f"{v:.2f}" for v in r["each"]) + ")")
     per = f"; experts/step {er['experts'] / er['steps']:.0f}, rows/step {er['rows'] / er['steps']:.2f}" \
         if er["steps"] else ""
-    return f"{rate} tok/s; guesses kept {er['right']}/{er['guessed']}{per}"
+    short = f"; ENDED EARLY {r['short']}" if r["short"] else ""
+    return f"{rate} tok/s; guesses kept {er['right']}/{er['guessed']}{per}{short}"
 
 
 def print_report(runs: list[dict]) -> None:
-    """Prints the medians of each run's rounds: one table of the rates, one of the guesses and the experts."""
+    """Prints median rates, warns about short runs, and reports the guesses and the experts."""
     def med(values):
         values = list(values)
         return statistics.median(values) if values else float("nan")
+    warnings = []
     print("| case | config | " + " | ".join(KINDS) + " | together (each) |\n|---|---|" + "---:|" * (len(KINDS) + 1))
     for run in runs:
         for name in run["rounds"][0]:
@@ -154,6 +160,12 @@ def print_report(runs: list[dict]) -> None:
                 each = ", ".join(f"{med(x['each'][i] for x in rs):.2f}" for i in range(len(rs[0]["each"])))
                 cells = [""] * len(KINDS) + [f"{med(x['tok_s'] for x in rs):.2f} ({each})"]
             print(f"| {run['case']} | {name} | " + " | ".join(cells) + " |")
+            for rnd, r in enumerate(rs, 1):
+                if r.get("short"):
+                    warnings.append(f"ENDED EARLY: {run['case']} {name}, round {rnd}: {r['short']} "
+                                    f"(requested {run['tokens']} per conversation; included in medians).")
+    if warnings:
+        print("\n" + "\n".join(warnings))
     print("\n| case | config | guesses kept | rows/step | experts/step | experts/row | copied back (ms) |\n"
           "|---|---|---:|---:|---:|---:|---:|")
     for run in runs:
@@ -178,6 +190,7 @@ class Engine:
                                   stderr=open(self.err_path, "w", encoding="utf-8"), text=True, encoding="utf-8",
                                   bufsize=1, env=env)
         self.lines: queue.Queue = queue.Queue()
+        self.ids = itertools.count()
         self.log = open(out + ".out", "w", encoding="utf-8", newline="\n")
         threading.Thread(target=self._pump, daemon=True).start()
 
@@ -187,16 +200,16 @@ class Engine:
         self.lines.put(None)
 
     def until(self, *starts: str) -> str:
-        """Gets the next line that starts with one of `starts`; an ERR line ends the measurement."""
+        """Gets the next line that starts with one of `starts`; an ERR line, tagged or not, ends the measurement."""
         while True:
             line = self.lines.get(timeout=1800)
             if line is None:
                 raise SystemExit("the engine ended early")
             self.log.write(line)
+            if line.startswith("ERR") or line.split(maxsplit=3)[2:3] == ["ERR"]:
+                raise SystemExit(line)
             if line.startswith(starts):
                 return line
-            if line.startswith("ERR"):
-                raise SystemExit(line)
 
     def send(self, command: str) -> None:
         """Writes `command` to the engine (and its first 200 characters to the log)."""
@@ -206,11 +219,12 @@ class Engine:
         self.p.stdin.flush()
 
     def ask(self, command: str, end: str) -> list[str]:
-        """Sends `command` and gets its answer's lines up to `end`."""
-        self.send(command)
+        """Sends `command` as an ASK and gets its answer's lines, untagged, up to `end`."""
+        cid = f"c{next(self.ids)}"
+        tag = f"C {cid} "
+        self.send(f"ASK {cid} {command}")
         lines = []
-        while not (line := self.until("MEMORY", "EXPERT_FILL", "CONVERSATION", "SETTINGS",
-                                      "SHORTFALL", end)).startswith(end):
+        while not (line := self.until(tag)[len(tag):]).startswith(end):
             lines.append(line.strip())
         return lines
 
@@ -219,27 +233,48 @@ class Engine:
         return self.ask("GET_MEMORY_USE", "END_MEMORY")
 
     def solo(self, ids: list[int], n: int) -> dict:
-        """One conversation: a GEN of `n` tokens; its rate and guesses from DONE."""
-        self.send(f"GEN {n} {','.join(map(str, ids))}")
-        f = self.until("DONE").split()
-        return {"tok_s": int(f[1]) * 1000 / float(f[4]), "right": int(f[6]), "guessed": int(f[7])}
+        """Gets one conversation's rate, produced count and guesses from DONE after requesting up to `n` tokens."""
+        rid = self.run(ids, n)
+        f = self.until(f"R {rid} DONE").split()[2:]
+        return {"tok_s": int(f[1]) * 1000 / float(f[4]), "tokens": int(f[1]), "right": int(f[6]),
+                "guessed": int(f[7])}
 
     def together(self, prompts: list[list[int]], n: int) -> dict:
-        """Several conversations: a BGEN of `n` tokens per prompt into slots 0.. (each read before the next); the
-        tokens each slot gave from the last admission to the first BDONE, over that time."""
-        for slot, ids in enumerate(prompts):
-            self.send(f"BGEN {slot} {n} {','.join(map(str, ids))}")
-            self.until("BADM")
-        t0, counts, done, first = time.perf_counter(), [0] * len(prompts), set(), None
-        while len(done) < len(prompts):
-            f = self.until("BT ", "BDONE").split()
-            if f[0] == "BT" and first is None:
-                counts[int(f[1])] += 1
-            elif f[0] == "BDONE":
-                done.add(int(f[1]))
-                first = first or time.perf_counter()
-        dt = first - t0
-        return {"tok_s": sum(counts) / dt, "each": [c / dt for c in counts]}
+        """Requests up to `n` tokens per prompt, all at once.
+
+        Rates cover the time from when every conversation has decoded a token to the first DONE; totals include all
+        tokens each conversation produced.
+        """
+        rids = [self.run(ids, n) for ids in prompts]
+        index = {rid: i for i, rid in enumerate(rids)}
+        prefixes = tuple(f"R {rid} " for rid in rids)
+        counts, totals, decoding, done = [0] * len(rids), [0] * len(rids), set(), set()
+        started_at = ended_at = None
+        while len(done) < len(rids):
+            _, rid, kind, *rest = self.until(*prefixes).split()
+            i = index[rid]
+            if kind == "T" and ended_at is None:
+                if started_at is not None:
+                    counts[i] += 1
+                else:
+                    decoding.add(i)
+                    if len(decoding) == len(rids):
+                        started_at = time.perf_counter()
+            elif kind == "DONE":
+                if started_at is None:
+                    raise SystemExit(f"{rid} ended before every conversation was decoding")
+                done.add(i)
+                totals[i] = int(rest[0])
+                if ended_at is None:
+                    ended_at = time.perf_counter()
+        dt = ended_at - started_at
+        return {"tok_s": sum(counts) / dt, "each": [c / dt for c in counts], "tokens": totals}
+
+    def run(self, ids: list[int], n: int) -> str:
+        """Sends a RUN of up to `n` tokens after the prompt `ids` and gets its request id."""
+        rid = f"r{next(self.ids)}"
+        self.send(f"RUN {rid} {n} {','.join(map(str, ids))}")
+        return rid
 
     def err_size(self) -> int:
         """Gets how far the engine's stderr file has grown, for err_since."""
