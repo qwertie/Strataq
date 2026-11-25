@@ -228,10 +228,10 @@ class RealSets(unittest.TestCase):
         q = r["quant"]
         combos = {(c["gate"], c["up"], c["down"]) for c in q["expert_combinations"]}
         self.assertIn(("Q4_K", "Q4_K", "Q5_1"), combos)
-        for b in ("cuda", "hip", "sycl", "metal"):
+        for b in ("cuda", "hip"):
             self.assertIn(b, q["backends"])
         self.assertEqual(q["unknown_types"], [])
-        # Gyro's trellis experts: CUDA and HIP run them, the Metal list has them only partly; whatever the lists say, the report agrees
+        # Gyro's trellis experts: CUDA and HIP run them
         g = analyse(files_for("fn_gyro_s"))
         self.assertTrue(g["quant"]["backends"]["cuda"]["all_types_supported"])
 
@@ -282,7 +282,7 @@ class SyntheticSets(unittest.TestCase):
         self.assertEqual(r["layout"]["ok"], True, {k: r["layout"][k][:3] for k in ("missing", "reshaped", "unknown")})
         got = {d["key"]: (d["got"], d["kernels_built_for"]) for d in v["shape_fields_that_differ"]}
         self.assertEqual(got, {"qwen4exp.block_count": (64, 48), "qwen4exp.embedding_length": (3072, 2560)})
-        self.assertEqual(v["backends"], ["cuda", "hip", "sycl", "metal"][:len(v["backends"])] or v["backends"])
+        self.assertEqual(v["backends"], ["cuda", "hip"][:len(v["backends"])] or v["backends"])
         self.assertTrue(any("geometry header" in n for n in v["notes"]))
 
     def test_reshaped_with_more_differences_lists_them_all(self):
@@ -529,26 +529,8 @@ class TablesMatchTheSources(unittest.TestCase):
         self.assertRegex(_read("CMakeLists.txt"), r'option\(STRATA_Q6K_EXPERTS "[^"]*" ON\)')
 
     def test_mmvq_lists(self):
-        for rel in ("src/common/kernels/cuda/native_mmvq.cu",
-                    "sycl/src/common/kernels/cuda/native_mmvq.dp.cpp", "metal/src/engine/mmvq_host.cpp"):
-            with self.subTest(rel):
-                self.assertEqual(_ints(_func(_read(rel), "bool native_mmvq_supported"), r"ggml_type == (\d+)"), Q.MMVQ)
-
-    def test_sycl_lists(self):
-        text = _read("sycl/src/common/kernels/cuda/iq_kernels.dp.cpp")
-        L = Q.BACKEND_LISTS["sycl"]
-        self.assertEqual(_define(text, "STRATA_GU_FMTS"), L["gu"])
-        self.assertEqual(_define(text, "STRATA_D_FMTS"), L["down"])
-        self.assertEqual(_is_iq_ints(text), L["is_iq"])
-        self.assertEqual(_ints(_func(text, "bool embed_type_supported"), r"t == (\d+)"), L["embed_extra"])
-
-    def test_metal_lists(self):
-        text = _read("metal/src/engine/iq_host.cpp")
-        L = Q.BACKEND_LISTS["metal"]
-        self.assertEqual(_ints(_func(text, "int gu_qk(int t)"), r"case (\d+):"), L["gu"])
-        self.assertEqual(_ints(_func(text, "int d_qk(int t)"), r"case (\d+):"), L["down"])
-        self.assertEqual(_is_iq_ints(text) | _ints(_func(text, "bool is_tq(int t)"), r"t == (\d+)"), L["is_iq"])
-        self.assertEqual(_ints(_func(text, "bool embed_type_supported"), r"t == (\d+)"), L["embed_extra"])
+        text = _read("src/common/kernels/cuda/native_mmvq.cu")
+        self.assertEqual(_ints(_func(text, "bool native_mmvq_supported"), r"ggml_type == (\d+)"), Q.MMVQ)
 
     def test_block_sizes_known_for_every_expert_type(self):
         for be, L in Q.BACKEND_LISTS.items():

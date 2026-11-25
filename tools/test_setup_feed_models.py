@@ -103,16 +103,6 @@ class Base(unittest.TestCase):
         policy = mock.patch.object(feed_models, "UNAVAILABLE_POLICY", "not_offered")     # the tests below were written for "not_offered"; OwnerRule sets its own
         policy.start()
         self.addCleanup(policy.stop)
-        from strata_control import mac_fit             # the Mac tables are module globals: each test gets them back as they were
-        saved = (dict(mac_fit.MAC_MODELS), dict(mac_fit.MAC_ABOUT), list(mac_fit.FEED_FAMILIES))
-
-        def restore_mac():
-            mac_fit.MAC_MODELS.clear()
-            mac_fit.MAC_MODELS.update(saved[0])
-            mac_fit.MAC_ABOUT.clear()
-            mac_fit.MAC_ABOUT.update(saved[1])
-            mac_fit.FEED_FAMILIES[:] = saved[2]
-        self.addCleanup(restore_mac)
         self.setup = fresh_setup()
 
     def signed_feed(self, name="feed", sequence=1, models=None) -> str:
@@ -477,75 +467,6 @@ class OwnerRule(Base):
         self.assertEqual(feed_models.UNAVAILABLE_UNKNOWN, "this Strata version doesn't know this model yet: update Strata to use it")
         for family in ("qwen35moe", "qwen5new"):
             self.assertNotIn(family, feed_models.unavailable_reason(family))
-
-
-class MacTables(Base):
-    """The Mac (Metal) tables take the feed's models too: strata_control/mac_fit.py, metal/setup_mac.py and the app's Mac table."""
-
-    def setUp(self):
-        super().setUp()
-        from strata_control import mac_fit
-        self.mf = mac_fit
-        saved = (dict(mac_fit.MAC_MODELS), dict(mac_fit.MAC_ABOUT), list(mac_fit.FEED_FAMILIES))
-
-        def restore():
-            mac_fit.MAC_MODELS.clear()
-            mac_fit.MAC_MODELS.update(saved[0])
-            mac_fit.MAC_ABOUT.clear()
-            mac_fit.MAC_ABOUT.update(saved[1])
-            mac_fit.FEED_FAMILIES[:] = saved[2]
-        self.addCleanup(restore)
-
-    def test_nothing_changes_without_feed_models(self):
-        self.assertEqual(self.mf.all_families(), self.mf.APP_FAMILIES)
-        feed_models.apply(self.setup, (), None)
-        self.assertEqual(self.mf.all_families(), ("qwen", "unsloth", "gyro"))
-
-    def test_a_feed_model_of_one_or_two_files_is_a_mac_size(self):
-        feed_models.apply(self.setup, parsed(flash_next()), None)
-        self.assertEqual(self.mf.all_families(), ("qwen", "unsloth", "gyro", "qwen4-test"))
-        self.assertEqual(self.mf.app_sizes("qwen4-test"), ["Q4_K_M"])
-        d = self.mf.MAC_MODELS["Q4_K_M"]
-        self.assertEqual((d["family"], d["shards"], d["tested"]), ("qwen4-test", 2, False))
-        self.assertIn("has not been measured on a Mac", " ".join(self.mf.model_note("Q4_K_M", 64.0)))
-        self.assertEqual(self.mf.repacked_gb("Q4_K_M"), 0.0)
-
-    def test_a_model_of_more_than_two_files_is_not_offered_on_a_mac(self):
-        big = flash_next(id="big-one")
-        big["quants"][0]["files"] = [{**file_entry("a-00001-of-00002.gguf"), "name": f"b-0000{i}-of-00003.gguf", "path": f"Q4_K_M/b-0000{i}-of-00003.gguf"} for i in (1, 2, 3)]
-        result = feed_models.apply(self.setup, parsed(big), None)
-        self.assertEqual(result.registered, ["big-one"])
-        self.assertEqual(self.mf.app_sizes("big-one"), [])
-        self.assertNotIn("big-one", self.mf.FEED_FAMILIES)
-
-    def test_the_mac_table_lists_it_after_the_built_in_sizes(self):
-        feed_models.load(self.signed_feed("f", 7, [flash_next()]), trusted={self.key["key_id"]: base64.b64decode(self.key["public"])})
-        import strata_mcp as M
-        rows = M.Strata(ROOT).model_table({"ram_gb": 64.0, "gpus": [], "mac": {"chip": "M4", "unified_gb": 64}})
-        by = {r["family"]: r for r in rows}
-        self.assertTrue(by["qwen4-test"]["feed"])
-        self.assertEqual([x["model"] for x in by["qwen4-test"]["sizes"]], ["Q4_K_M"])
-        self.assertNotIn("feed", by["qwen"])
-
-    def test_the_terminal_setup_reads_the_feed_for_a_name_it_does_not_know(self):
-        sys.path.insert(0, str(ROOT / "metal"))
-        import setup as global_setup
-        import setup_mac
-        saved = {k: copy.deepcopy(getattr(global_setup, k)) for k in ("MODELS", "FAMILIES", "HF_REVISIONS", "REV_PINS", "FEED_MODELS", "FEED_UNAVAILABLE")}
-
-        def restore():
-            for k, v in saved.items():
-                if isinstance(v, dict) and k in ("MODELS", "FAMILIES", "HF_REVISIONS", "REV_PINS"):
-                    getattr(global_setup, k).clear()
-                    getattr(global_setup, k).update(v)
-                else:
-                    setattr(global_setup, k, v)
-        self.addCleanup(restore)
-        feed = self.signed_feed("f", 7, [flash_next()])
-        setup_mac._feed_models(["--family", "qwen4-test", "--feed", feed], False)
-        self.assertIn("qwen4-test", global_setup.FAMILIES)
-        self.assertEqual(setup_mac.model_shard_names("Q4_K_M"), ["a-00001-of-00002.gguf", "a-00002-of-00002.gguf"])
-        self.assertEqual(setup_mac.model_shard_names("Q2_0"), [global_setup.model_file(global_setup.FAMILIES["qwen"], "Q2_0", i) for i in (1, 2)])
 
 
 class TerminalRow(Base):

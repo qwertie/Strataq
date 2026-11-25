@@ -55,11 +55,11 @@ def build_package(parent: Path, version: str, *, engine_source: str = GOOD_ENGIN
     src.mkdir(parents=True)
     (src / "engine_main.py").write_text(engine_source, encoding="utf-8")
     if WINDOWS:
-        entry = "strata.cmd"
+        entry = "strata-q38.cmd"
         (src / entry).write_bytes(f'@echo off\r\n"{sys.executable}" "%~dp0engine_main.py" %*\r\n'.encode())
         library = "cudart64_13.dll"
     else:
-        entry = "strata"
+        entry = "strata-q38"
         (src / entry).write_text(f'#!/bin/sh\nexec "{sys.executable}" "$(dirname "$0")/engine_main.py" "$@"\n')
         (src / entry).chmod(0o755)
         library = "libcudart.so.13"

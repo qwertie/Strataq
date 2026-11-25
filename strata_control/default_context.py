@@ -3,7 +3,6 @@
 One rule for the app (apps/host/src/lib/default-context.ts says the same), the Terminal (`strata launch`, `setup`) and the MCP tools: 128K, or the
 largest size the model offers when that is under 128K (DeepSeek-V4.1-Flash: up to its pack's own limit). The VRAM tiers that used to lower it on small
 cards are gone; a card that 128K leaves little room on gets a warning, never a lower number (the engine says plainly if it cannot start).
-A Mac keeps its unified-memory rule (strata_control/mac_fit.py), which the owner has not changed.
 """
 from __future__ import annotations
 

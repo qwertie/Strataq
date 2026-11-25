@@ -9,7 +9,7 @@ set(STRATA_GGML_DIR "" CACHE PATH "llama.cpp checkout to take ggml from instead 
 if(STRATA_GGML_DIR)
   set(_strata_ggml_root "${STRATA_GGML_DIR}")
 else()
-  get_filename_component(_strata_ggml_root "${repo_root}/third_party/strata-ggml" ABSOLUTE)   # (normalised: sycl/ and metal/ pass <repo>/sycl/..)
+  get_filename_component(_strata_ggml_root "${repo_root}/third_party/strata-ggml" ABSOLUTE)
 endif()
 endmacro()
 

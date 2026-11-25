@@ -6,8 +6,8 @@
 # With neither set (or STRATA_GEOMETRY=flash_next) nothing is added: no include directory, no definition, so the compile
 # commands are the ones the build had before shapes were selectable.  Otherwise a one-line header
 # <build>/strata_geometry/strata/core/geometry_selected.hpp names the chosen file and its directory goes first on the include
-# path (geometry.hpp picks it up with __has_include).  Included by CMakeLists.txt, metal/CMakeLists.txt and sycl/CMakeLists.txt
-# before any target is declared.
+# path (geometry.hpp picks it up with __has_include).  Included by CMakeLists.txt before any target
+# is declared.
 set(STRATA_GEOMETRY "flash_next" CACHE STRING "model shape the kernels are compiled for: a header in include/strata/core/geometries")
 set(STRATA_GEOMETRY_FILE "" CACHE FILEPATH "a geometry header outside the tree (overrides STRATA_GEOMETRY)")
 

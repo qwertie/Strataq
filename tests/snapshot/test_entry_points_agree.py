@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 
 from tests.snapshot import allowlist  # noqa: E402
 from tests.snapshot.generate import GOLDEN  # noqa: E402
+from tests.snapshot.matrix import MACHINES, MODEL_SETS  # noqa: E402
 
 
 def flat(value, prefix=""):
@@ -48,7 +49,7 @@ class EntryPointsAgree(unittest.TestCase):
                 self.assertEqual(want["config"], got["config"], f"{cell}: run config")
                 self.assertEqual(want["fetches"], got["fetches"], f"{cell}: the drafter downloads asked for")
             seen += 1
-        self.assertGreaterEqual(seen, 32)
+        self.assertGreaterEqual(seen, len(MACHINES) * len(MODEL_SETS))
 
     def test_the_plain_load_starts_the_engine_as_launch_does(self):
         self.check("app_plain", set(allowlist.BY_DESIGN))

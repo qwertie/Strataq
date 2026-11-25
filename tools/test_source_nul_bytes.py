@@ -11,9 +11,9 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".cu", ".cuh", ".hip", ".mm", ".metal", ".py", ".cmake",
+SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".cu", ".cuh", ".hip", ".py", ".cmake",
                    ".txt", ".sh", ".bat", ".ps1", ".js", ".html", ".css", ".json", ".jinja", ".md", ".in"}
-SOURCE_DIRS = ("src", "include", "sycl", "metal", "strata_server", "tools", "tests", "cmake", "bench", "docs")
+SOURCE_DIRS = ("src", "include", "strata_server", "tools", "tests", "cmake", "bench", "docs")
 
 
 def source_files() -> list[Path]:

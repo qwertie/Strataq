@@ -32,7 +32,7 @@
     "700"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpus_asked": true,
    "lib_dirs": [
@@ -84,7 +84,7 @@
     "700"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpus_asked": true,
    "lib_dirs": [
@@ -136,7 +136,7 @@
     "700"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpus_asked": true,
    "lib_dirs": [
@@ -188,7 +188,7 @@
     "700"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpus_asked": true,
    "lib_dirs": [
@@ -241,7 +241,7 @@
    "env": {
     "STRATA_ROUTE_TAIL_SKIP": "0"
    },
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpus_asked": true,
    "lib_dirs": [
@@ -292,7 +292,7 @@
     "700"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": [
     0,
     1
@@ -352,7 +352,7 @@
     "700"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": [
     0,
     1
@@ -412,7 +412,7 @@
     "700"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": [
     0,
     1
@@ -472,7 +472,7 @@
     "700"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": [
     0,
     1
@@ -531,7 +531,7 @@
     "700"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpu_roles": {
     "0": "main",
@@ -584,7 +584,7 @@
     "--vision"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": [
     0,
     1
@@ -643,7 +643,7 @@
     "--vision"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": [
     0,
     1
@@ -703,7 +703,7 @@
     "--vision"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": [
     0,
     1
@@ -762,7 +762,7 @@
     "--vision"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": [
     0,
     1
@@ -820,7 +820,7 @@
     "--vision"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpu_roles": {
     "0": "main",
@@ -877,7 +877,7 @@
     "700"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpus_asked": true,
    "lib_dirs": [
@@ -929,7 +929,7 @@
     "700"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpus_asked": true,
    "lib_dirs": [
@@ -981,7 +981,7 @@
     "700"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpus_asked": true,
    "lib_dirs": [
@@ -1033,7 +1033,7 @@
     "700"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpus_asked": true,
    "lib_dirs": [
@@ -1085,7 +1085,7 @@
     "700"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpus_asked": true,
    "lib_dirs": [
@@ -1135,7 +1135,7 @@
     "--vision"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpus_asked": true,
    "lib_dirs": [
@@ -1186,7 +1186,7 @@
     "--vision"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpus_asked": true,
    "lib_dirs": [
@@ -1237,7 +1237,7 @@
     "--vision"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpus_asked": true,
    "lib_dirs": [
@@ -1288,7 +1288,7 @@
     "--vision"
    ],
    "cwd": "<T>",
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpus_asked": true,
    "lib_dirs": [
@@ -1340,7 +1340,7 @@
    "env": {
     "STRATA_ROUTE_TAIL_SKIP": "0"
    },
-   "exe": "<T>/engine/<EXE>",
+   "exe": "<T>/engine/<Q38EXE>",
    "gpu": 0,
    "gpus_asked": true,
    "lib_dirs": [

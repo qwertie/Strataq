@@ -77,7 +77,6 @@
 #include "strata/common/spec/draft_vocab.hpp"
 #include "strata/common/kernels/prefill/gemm.hpp"
 #include "strata/core/gfx12_chunk.hpp"
-#include "strata/core/lookup_default.hpp"
 #include "strata/core/pcie_share_rule.hpp"
 #include "strata/core/spill_gate.hpp"
 #include "strata/common/experts/split_walk.hpp"
@@ -89,20 +88,10 @@
 #include <unistd.h>
 #include <cerrno>
 #include <sys/stat.h>
-#if !defined(__APPLE__)   // major() / minor(): <sys/types.h> on macOS
 #include <sys/sysmacros.h>
-#endif
 #endif
 
 #include <cuda_runtime.h>
-#if defined(STRATA_GPU_METAL)
-namespace strata::metal_engine {
-void set_model_shard(const char* shard1);   // metal/src/engine/window.cpp
-void set_batch_slots(int n);   // metal/src/engine/window.cpp: how many --batch slots the window keeps state for
-std::string draft_vocab_default();   // metal/src/engine/window.cpp: the packaged default draft subset (data/draft_vocab.bin)
-bool draft_vocab_whole_head();       // STRATA_METAL_DRAFT_VOCAB=full
-}
-#endif
 
 #include <array>
 #include <chrono>
@@ -159,7 +148,6 @@ strata::kernels::cpu::PoolAffinity measure_pool_affinity(strata::core::ExpertSou
 double ple_direct_rows_per_s(strata::kernels::PleTable& t);
 bool pcie_share_gfx12_default();
 uint64_t nibble_max_slot_bytes();
-std::string nibble_refusal(const Options& o);
 void print_startup_gpu_report(const std::vector<int>& devices);
 }  // namespace
 
@@ -454,13 +442,6 @@ int Model::load() {
         }
     }
 #endif
-    if (o.prefill_auto && (o.no_prefill_borrow || o.expert_profile.empty())) {
-        o.prefill_auto = false;       // nothing to lend from: the buffers are reserved for the session, so keep them small
-        // 0.2.8 Strix Halo: apply_device_defaults' gfx1151 rule chose a chunk that fits this box; the "keep them small"
-        // 2048 would throw the whole 8K prompt back into 4 chunks (measured: 2048 against 8192 costs ~26% of an 8K prompt
-        // on this box).  Not measured with strata-q38, whose page pool pays for the larger buffers.
-        o.prefill_chunk = o.prefill_own_keep_chunk && !is_paged() ? o.prefill_chunk : 2048;
-    }
     if ((o.ple_io != "direct" && o.ple_io != "mmap" && o.ple_io != "ram") || o.ple_row_cache < 0 || o.ple_inflight < 1 ||
         o.ple_inflight > 1024 || !(o.ple_delay_us >= 0)) {
         std::fprintf(stderr, "strata generate: invalid --ple-io/--ple-row-cache/--ple-inflight/--ple-delay-us\n");
@@ -488,39 +469,8 @@ int Model::load() {
     const auto window_rows = strata::spec::get_window_rows(o.spec, o.mtp_max_t, o.suffix_draft, o.lookup_chain);
     o.spec = window_rows.total;
     o.mtp_max_t = window_rows.model;
-    // --lookup-max-t N: lookup windows up to N tokens, the MTP's stay at --spec.  Not given: 12 where the pr-nv2 runs measured it (serve, one GPU, the 8-row
-    // build: rewrites and agent edit turns +11..14%, prose and code within noise); --lookup-max-t 0 or STRATA_LOOKUP_MAX_T=0 turns it off.  The wide
-    // builds (HIP, 16 rows), a layer split, --batch, DFlash2 and --lookup-chain keep the old windows.  strata-q38's
-    // shared step has no lookup window sizes of their own: off there.
-    if (is_paged()) {
-        o.lookup_max_t = 0;
-    } else if (o.lookup_max_t < 0) {
-        const char* lme = std::getenv("STRATA_LOOKUP_MAX_T");
-        const bool env_off = lme != nullptr && lme[0] == '0';
-        const bool narrow = strata::kernels::kVerifyMaxT == strata::kernels::kVerifyNarrowT;
-        strata::core::LookupDefaultIn ld;
-        ld.env_off = env_off, ld.narrow_window = narrow, ld.serve = o.serve, ld.multi_gpu = multi_gpu;
-        ld.layer_split = !o.layer_split.empty(), ld.batch = o.batch > 1, ld.dflash2 = o.draft == "dflash2";
-        ld.lookup_chain = o.lookup_chain > 0, ld.suffix_draft = o.suffix_draft > 0, ld.spec_at_least_2 = o.spec >= 2;
-#if defined(STRATA_GPU_METAL)
-        ld.metal_build = true;   // (Metal's windows hold 8 rows and it has no 12-row window: "metal window: window size out of range")
-#endif
-        o.lookup_max_t = strata::core::default_lookup_max_t(ld);
-    }
-    if (o.lookup_max_t > 0 && o.suffix_draft > 0 && o.spec >= 2) {
-        if (o.mtp_max_t == 0) o.mtp_max_t = o.spec;
-        o.spec = std::max(o.spec, std::min(o.lookup_max_t, strata::kernels::kVerifyLongT));
-    }
-    // A speculative (solo) window holds at most kVerifyNarrowT rows: the hand-offs, the penalty history and the drafters'
-    // buffers are sized for that.  Only a plain --batch forms the wider windows of a build with kVerifyMaxT > 8.
-    // (--lookup-max-t: a prompt-lookup window may be longer, up to kVerifyLongT; the MTP drafts stay at mtp_max_t.
-    // strata-q38's --spec is its batch windows' room, up to kVerifyMaxT.)
-    const int spec_cap = o.lookup_max_t > 0 && o.suffix_draft > 0 ? (int) strata::kernels::kVerifyLongT
-                                                                  : (int) strata::kernels::kVerifyNarrowT;
-    if (!is_paged() && o.spec > spec_cap) {
-        std::fprintf(stderr, "strata generate: --spec %d: a speculative window holds 2..%d tokens\n", o.spec, spec_cap);
-        return 1;
-    }
+    // strata-q38's shared step has no prompt-lookup window sizes of its own
+    o.lookup_max_t = 0;
     // dflash2-kern: right after the start the resident experts are the profile's, not this text's; a speculative round carries
     // 2-5 tokens, so the adaptive tier (one swap round per adapt_every VERIFY rounds) learned the text 2-5 times slower per
     // token.  For the first STRATA_SPEC_ADAPT_WARM rounds it swaps every STRATA_SPEC_ADAPT_EVERY rounds (set per card by
@@ -584,13 +534,10 @@ int Model::load() {
                 std::find(o.native_dense_gguf.begin(), o.native_dense_gguf.end(), o.ple_gguf) == o.native_dense_gguf.end())
                 o.native_dense_gguf.push_back(o.ple_gguf);
         }
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && !defined(STRATA_GPU_METAL)
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906)
         // CUDA, a file that carries the hyper-connection projections as Q8_0 (Unsloth's UD-* files): the Q8_0 read is on by default (owner yes
         // 2026-11-07; was setup's unsloth_default_env, "closer to the file and faster").  The GSQ-RCO packs keep them BF16 and stay as they were.
-        // STRATA_HC_Q8=0 turns it off; a value the user set is kept.  Before the first read of the switch (the dense load below).
-        // Not measured with strata-q38: off there unless set.
-        if (!is_paged() && strata::core::NativeDense::gguf_carries_q8_hc(o.native_dense_gguf))
-            strata::platform::set_env("STRATA_HC_Q8", "1", false);
+        // STRATA_HC_Q8=0 turns it off; a value the user set is kept.  Not measured with strata-q38: off there unless set.
 #endif
         // Plan v0.3 (24 Sep): the CPU experts stay on the VNNI kernel.  The llama.cpp-CPU-exact q8_0 contract
         // cost 27.0 vs 17.2 ms/token of pool time and G-C does not need it; `--cpu-oracle-q8-0` still selects it.
@@ -724,21 +671,14 @@ int Model::load() {
     // compiled `/arch:AVX512`, so on a CPU without those features it does not fail - it executes an illegal
     // instruction at some unpredictable token.  Refusing at second zero is the whole point of P2.S3's check.
     strata::kernels::cpu::expert_set_oracle_q8_0(o.cpu_oracle_q8_0);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86) || defined(STRATA_GPU_METAL)
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
     // ... and nothing runs on a CPU without AVX2: every CPU expert kernel is AVX2 at least (the AVX-512 ones are
     // chosen above it), and so is ggml-cpu in the release build, which the native pack's layout load initializes
     // next.  Refused here, by name, rather than an illegal instruction in the first expert.
     // The experimental older-CPU build (STRATA_ISA_FLOOR=avx|none, compiled on that PC; #394 #595 #623) has ggml-cpu
     // for that floor, so a native pack's experts run there on ggml-cpu (every AVX2 kernel is behind cpu_avx2_ok).
     const char* isa_floor = strata::kernels::cpu::isa_floor_build();
-#if defined(STRATA_GPU_METAL)   // Apple Silicon: every expert is on the GPU; ggml-cpu (NEON) is the only CPU expert code
-    strata::metal_engine::set_model_shard(o.native_preset.c_str());   // the decode window reads the model GGUF itself
-    strata::metal_engine::set_batch_slots(o.batch);
-    o.mmap_experts = true;   // ... experts included: no resident copy of them (the GGUF shards in place)
-    if (false) {
-#else
     if (!strata::kernels::cpu::cpu_avx2_ok() && isa_floor[0] == '\0') {
-#endif
         std::fprintf(stderr, "strata generate: this CPU (%s) does not support AVX2 with FMA and F16C, which this engine's "
                              "CPU expert kernels need; Strata runs on Intel Haswell (2013), AMD Zen (2017) or newer. "
                              "Older CPUs are EXPERIMENTAL and slow: setup compiles an engine for them on this PC "
@@ -871,49 +811,15 @@ int Model::load() {
         }
         std::fprintf(stderr, "strata generate: primary device from STRATA_PRIMARY_DEVICE: CUDA%d\n", primary_device);
     }
-    // ---- STRATA_EXPERT_NIBBLE=1 keeps the gate/up experts of IQ2_S / IQ3_XXS / IQ3_S layers as 4-bit codes in their VRAM
-    // slots (strata/common/kernels/expert_nibble.hpp).  Unset or 0: nothing here runs, no table is set, and every slot size below is
-    // the GGUF blob's, as before.  On: if anything would read a converted slot as GGUF blocks or write GGUF bytes into
-    // one, the switch is ignored for this start with a warning (before anything is allocated); else the per-layer table
-    // is set before the first slot estimate and the adaptive tier is off (it swaps GGUF blobs in and out of slots).
-    // The residency, the loans and the prompt chunk are checked where they are known (those refuse the start).
-    const bool nib_asked = nib::config().on || nib::config().error.rfind("STRATA_EXPERT_NIBBLE=", 0) == 0;
+    // STRATA_EXPERT_NIBBLE=1 (4-bit codes in the VRAM slots, strata/common/kernels/expert_nibble.hpp) is ignored with a
+    // warning: strata-q38's page pools size every expert's page by its GGUF blob.
+    // TODO(delete-old-engines): only the deleted `strata` program could turn the 4-bit slots on, so nib::any_on() is now
+    // always false and the nibble cache, its kernels and their uses below are unreachable.
     nib_chunk_asked = o.prefill_chunk;
-    if (nib_asked) {
-        // (strata-q38's page pools size every expert's page by its GGUF blob)
-        std::string why = is_paged() ? "strata-q38 keeps the GGUF slots" : nibble_refusal(o);
-        if (why.empty()) {
-            nib::set_layers(nib::plan_layers(strata::kernels::cpu::expert_layout(), why));
-            if (why.empty() && !nib::any_on())
-                why = "no layer of this pack is IQ2_S / IQ3_XXS / IQ3_S at 2560 x 640 among STRATA_EXPERT_NIBBLE_FMTS "
-                      "and outside STRATA_EXPERT_NIBBLE_SKIP";
-            if (why.empty()) (void) strata::prefill::Prefill::nibble_prompt_check(why);
-        }
-        if (!why.empty()) {
-            // a warning, not a refusal: this start goes on as it would without the switch (the usual GGUF slots)
-            std::fprintf(stderr, "strata generate: WARNING: STRATA_EXPERT_NIBBLE is off for this start: %s; the expert slots "
-                                 "stay GGUF blocks\n", why.c_str());
-            nib::set_layers({});
-        } else {
-            o.adapt_swaps = 0;
-            o.peer_adapt_swaps = 0;
-            const auto& lay = strata::kernels::cpu::expert_layout();
-            int64_t n_on = 0, by_fmt[3] = {0, 0, 0};
-            uint64_t more = 0;
-            for (int64_t l = 0; l < lay.n_layers; ++l) {
-                const nib::LayerVram& v = nib::layer(l);
-                if (!v.on) continue;
-                ++n_on;
-                ++by_fmt[v.gu_type == nib::kIQ2_S ? 0 : v.gu_type == nib::kIQ3_XXS ? 1 : 2];
-                more += (v.slot_bytes - (v.raw_bytes + 255) / 256 * 256) * (uint64_t) lay.n_expert;
-            }
-            std::fprintf(stderr, "strata generate: STRATA_EXPERT_NIBBLE: %lld of %lld layers keep their gate/up experts as 4-bit "
-                                 "codes in VRAM (IQ2_S %lld, IQ3_XXS %lld, IQ3_S %lld), %.2f GiB more VRAM than their GGUF "
-                                 "blobs for all %lld experts of each; the adaptive tier is off (--adapt-swaps 0)%s\n",
-                         (long long) n_on, (long long) lay.n_layers, (long long) by_fmt[0], (long long) by_fmt[1],
-                         (long long) by_fmt[2], (double) more / 1073741824.0, (long long) lay.n_expert,
-                         nib::config().recheck ? "; STRATA_EXPERT_NIBBLE_RECHECK: every slot's hash after each request" : "");
-        }
+    if (nib::config().on || nib::config().error.rfind("STRATA_EXPERT_NIBBLE=", 0) == 0) {
+        std::fprintf(stderr, "strata generate: WARNING: STRATA_EXPERT_NIBBLE is off for this start: strata-q38 keeps the "
+                             "GGUF slots; the expert slots stay GGUF blocks\n");
+        nib::set_layers({});
     }
     // STRATA_EARLY_REMOTE_CONTEXTS=1: create EVERY secondary context here, like CUDA1's.  Under WSL2 the driver's
     // pinned/mapped host budget (dxg gpadl, ~1 GiB) is spent by CUDA0's weights and MTP before the later loop runs,
@@ -1533,14 +1439,6 @@ int Model::load() {
             const strata::kernels::PleIoOptions direct_pio = pio;
             const char* auto_ram = std::getenv("STRATA_PLE_AUTO_RAM");
             bool allowed = strata::core::ple_auto_ram_allowed(auto_ram, strata::defaults_026());
-#if defined(__APPLE__)
-            // Not on the Mac unless asked (STRATA_PLE_AUTO_RAM=1): unified memory with the experts mapped from the file cache.  M5 Max,
-            // IQ3_S, 3 interleaved pairs: with the 26.8 GiB table locked, a cold 4K prompt after decode work is 10.6% slower (-10.7 -10.6
-            // -10.0) than the same build with direct reads, the footprint is 42 GB against 15 and free memory dips to 19 GB against 46;
-            // decode is the same (+0.2..0.6% median, inside the spread).  The Mac had direct reads until sample_host_memory learned
-            // to read macOS RAM (the conversation cache fix), which let this policy fire there.
-            if (!(auto_ram && std::string(auto_ram) == "1")) allowed = false;
-#endif
             const uint64_t need = ple_table.table_bytes();
             const auto available = strata::core::available_host_bytes();
             // every routed expert's blob, the arena the engine copies into RAM at start (strata-q38: its RAM pool)
@@ -1786,14 +1684,7 @@ int Model::load() {
             return 2;
         }
         if (!strata::core::Dflash2Drafter::head_native()) {   // without the vocabulary subset the DFlash2 would run its head over all of the target's rows (+0.7 ms a round measured on Metal) without a word.
-            // Metal alone has a packaged default subset to fall back to (the Mac's MTP folder is empty by design); everywhere else a missing file is the error.
-            std::string packaged;
-            bool whole_head_ok = false;
-#if defined(STRATA_GPU_METAL)
-            packaged = strata::metal_engine::draft_vocab_default();
-            whole_head_ok = strata::metal_engine::draft_vocab_whole_head();
-#endif
-            const strata::spec::Df2Vocab dv = strata::spec::df2_vocab_resolve(o.mtp, o.mtp_draft_vocab, packaged, whole_head_ok, [](const std::string& p) {
+            const strata::spec::Df2Vocab dv = strata::spec::df2_vocab_resolve(o.mtp, o.mtp_draft_vocab, [](const std::string& p) {
                 std::error_code vec;
                 return std::filesystem::exists(p, vec);
             });
@@ -1801,7 +1692,6 @@ int Model::load() {
                 std::fprintf(stderr, "strata generate: %s\n", dv.why.c_str());
                 return 2;
             }
-            if (dv.packaged) std::fprintf(stderr, "strata generate: --draft dflash2: no draft vocabulary in the MTP folder: using the packaged default subset %s\n", dv.path.c_str());
             df2_vocab_file = dv.path;
         }
         o.mtp.clear();
@@ -2583,9 +2473,6 @@ int Model::load() {
         const char* e = std::getenv("STRATA_BATCH_DF2");
         const bool off = e != nullptr && e[0] == '0';
         const bool forced = e != nullptr && e[0] != '0' && e[0] != '\0';
-#if defined(STRATA_GPU_METAL)
-        return false;   // (no per-slot drafters on Metal: one card, and the Metal drafter has no clones)
-#endif
         if (off || !(o.draft == "dflash2" && !o.draft_auto && o.batch >= 2 && o.serve && !split_same)) return false;
         if (forced) return true;
         // an explicit --draft dflash2 with --batch N turns the slots' drafts on (the launcher sends that pair only when the user picks DFlash2; --draft auto and the MTP
@@ -2788,81 +2675,17 @@ int Model::load() {
     {
         const strata::prefill::KvaConfig& kc = strata::prefill::kva_config();
         strata::prefill::KvaEngine& ke = strata::prefill::kva_engine();
-        if (kc.explicit_on && !strata::prefill::kKvaBackend)
-            std::fprintf(stderr, "strata generate: STRATA_KVA is set, but this build has no state-only late-layer path; "
-                                 "every prompt is read exactly\n");
         if (kc.on) {
             // (strata-q38 has not been run with KVA: its conversations' cells and the draft layer's are pool pages)
-            if (is_paged()) ke.blocked = "strata-q38";
-            else if (multi_gpu) ke.blocked = "a layer split across GPUs";
-            else if (o.batch > 0) ke.blocked = "batch slots (--batch)";
-            else if (o.peer_device >= 0) ke.blocked = "a peer device (--peer-device)";
-            if (!ke.blocked.empty()) {
-                if (kc.explicit_on)
-                    std::fprintf(stderr, "strata generate: KVA (the approximate late-layer prompt read) is off here: %s\n",
-                                 ke.blocked.c_str());
-            }
+            ke.blocked = "strata-q38";
+            if (kc.explicit_on)
+                std::fprintf(stderr, "strata generate: KVA (the approximate late-layer prompt read) is off here: %s\n",
+                             ke.blocked.c_str());
             mtp.enable_cell_floor(kc.wants_cell_floor(ke, !o.mtp.empty() && o.spec >= 2));
         }
     }
     // Secure MTP's CUDA0 allocations before the large host arena is registered with both CUDA contexts.
     // In particular WDDM can refuse the draft weights after mapping tens of GiB of host pages.
-    // SHORT OF VRAM: THE DRAFT LAYER IS THE LAST THING TO GO.  The layer (about 0.9 GiB), the native head, the draft head and a working cache beside the
-    // prompt path's buffers must all fit after the slot sessions; on a card that cannot hold them (8 GB NVIDIA, 128K, 2 requests: 1.4 GiB free after
-    // the sessions) the start used to stop at "no VRAM is left for the expert cache" or run out of memory in the head upload.  Without the layer
-    // the model still answers (the verify window drafts from the prompt alone): slower decode, a start that works.  Not with DFlash2 (its own
-    // block decides), a split, or STRATA_MTP_KEEP=1.
-    // A LAYER SPLIT WALKS THE SAME STEP ON THE CARD THAT HOLDS THE DRAFTER (the last stage's, or CUDA0 with the drafter first): its free memory is read there, after its weights, session
-    // and head are in.  DFlash2 (its pack, its ring and buffers, its draft head) is dropped by the same rule on that card; the single card keeps it as before (its own block decides).
-    // Not in strata-q38: its page pool, sized after the load, decides what the drafter leaves.
-    if (!is_paged()) {
-        const bool split_walk_drafter = multi_gpu && !stages.empty() && std::getenv("STRATA_SPILL_OFF") == nullptr;
-        if (!o.mtp.empty() && !use_df2 && (split_walk_drafter || (!multi_gpu && stages.empty())) && std::getenv("STRATA_MTP_KEEP") == nullptr && spill_discrete_gpu()) {
-            std::error_code fec1, fec2;
-            const uint64_t layer_b = (uint64_t) std::filesystem::file_size(std::filesystem::path(o.mtp) / "dense.bin", fec1) +
-                                     (uint64_t) std::filesystem::file_size(std::filesystem::path(o.mtp) / "experts.bin", fec2);
-            const strata::core::WeightRef* wo_mtp = wt.find("output.weight");
-            const uint64_t head_b = (!o.native_head_gguf.empty() && wo_mtp != nullptr)
-                                        ? (uint64_t) wo_mtp->ne1 * (uint64_t) (g.n_embd / 256) * 176ull : 0;   // Q5_K: 176 bytes per 256 values
-            const int draft_dev = split_walk_drafter ? (last_st && !mtp_first ? last_st->dev : -1) : -1;
-            uint64_t free_now = 0;
-            {
-                const strata::core::OnDevice on_draft(draft_dev);
-                free_now = (uint64_t) strata::core::device_free_bytes();
-            }
-            const uint64_t need = strata::program::split_walk::draft_layer_need_bytes(layer_b, head_b);   // + the cache the loan needs (214 slots, 543 MiB) + what is allocated after it and the drafter beyond DFlash2 (measured: DFlash2 alone ends 391 MiB free, MTP 41 at the same cache)
-            if (!fec1 && !fec2 && strata::program::split_walk::draft_layer_short(free_now, layer_b, head_b)) {
-                const std::string card = split_walk_drafter ? "CUDA" + std::to_string(draft_dev < 0 ? 0 : draft_dev) + ": " : std::string();
-                std::fprintf(stderr, "strata generate: short of GPU memory: %s%.2f GiB is free, and the draft layer (%.2f GiB), the head (%.2f GiB) and a working cache "
-                                     "need about %.2f GiB: this start runs without the draft layer (decode is slower; STRATA_MTP_KEEP=1 keeps it)\n",
-                             card.c_str(), (double) free_now / 1073741824.0, (double) layer_b / 1073741824.0, (double) head_b / 1073741824.0, (double) need / 1073741824.0);
-                o.mtp.clear();
-            }
-        }
-        // DFlash2 alone (--draft-fallback none, what Auto passes) on a stage that cannot hold it: no drafter, said in one line, instead of a start that ends
-        if (split_walk_drafter && df2_solo && !use_df2 && std::getenv("STRATA_MTP_KEEP") == nullptr && spill_discrete_gpu()) {
-            std::error_code fec3;
-            const uint64_t pack_b = (uint64_t) std::filesystem::file_size(o.draft_model, fec3);
-            const strata::core::WeightRef* wo_df = wt.find("output.weight");
-            const uint64_t head_b = (!o.native_head_gguf.empty() && wo_df != nullptr)
-                                        ? (uint64_t) wo_df->ne1 * (uint64_t) (g.n_embd / 256) * 176ull : 0;
-            const int dev_df = last_st && !df2_first ? last_st->dev : -1;
-            uint64_t free_df = 0;
-            {
-                const strata::core::OnDevice on_df(dev_df);
-                free_df = (uint64_t) strata::core::device_free_bytes();
-            }
-            const uint64_t need_df = strata::program::split_walk::dflash2_need_bytes(pack_b, head_b / 2);
-            if (!fec3 && free_df > 0 && free_df < need_df) {
-                std::fprintf(stderr, "strata generate: short of GPU memory: CUDA%d: %.2f GiB is free, and DFlash2 (%.2f GiB with its buffers and draft head) and a working cache need about "
-                                     "%.2f GiB: this start runs without a drafter (decode is slower; STRATA_MTP_KEEP=1 keeps it)\n",
-                             dev_df < 0 ? 0 : dev_df, (double) free_df / 1073741824.0, (double) pack_b / 1073741824.0 + 0.45, (double) need_df / 1073741824.0);
-                df2_solo = false;
-                o.draft.clear();
-                o.draft_model.clear();
-            }
-        }
-    }
     if (!o.mtp.empty() || df2_solo) {   // (df2_solo: o.mtp is empty and no MTP layer is loaded; only the DFlash2 block below runs)
         if (o.spec < 2) {
             std::fprintf(stderr, "strata generate: --mtp is ignored without --spec T (T >= 2)\n");
@@ -2871,11 +2694,7 @@ int Model::load() {
         // the draft layer is the canonical model's MTP head (512 experts) even when the target is pruned,
         // so it always sees the canonical geometry; `static` because MtpDrafter keeps a reference
         if (!o.mtp.empty() && !load_drafter(err)) {
-            if (!is_paged()) {
-                std::fprintf(stderr, "strata generate: %s%s%s\n", err.c_str(), vram_free_note().c_str(), vram_batch_hint(err, o.batch).c_str());
-                return 1;
-            }
-            // (strata-q38: the drafter is optional; without --mtp from here on, nothing makes room for it)
+            // (the drafter is optional; without --mtp from here on, nothing makes room for it)
             std::fprintf(stderr, "strata-q38: WARNING: the drafter is off and cannot be switched on: %s%s\n",
                          err.c_str(), vram_free_note().c_str());
             unload_drafter();
@@ -3136,7 +2955,7 @@ int Model::load() {
         std::fprintf(stderr, "strata generate: GPU %d: %s, compute capability %d.%d%s\n", dev, name,
                      strata::cc_major_of(p.major), strata::cc_minor_of(p.minor),
                      strata::emulated_cc() ? " (STRATA_EMULATE_CC: a test mode, the card is emulated)" : "");
-#if !defined(STRATA_HIP_GFX906) && !defined(STRATA_GPU_METAL)   // a CUDA toolkit mismatch; the gfx906 HIP build has no CUDART_VERSION
+#if !defined(STRATA_HIP_GFX906)   // a CUDA toolkit mismatch; the gfx906 HIP build has no CUDART_VERSION
         {   // #542: a build whose libcudart is older than its headers (a CUDA 13 kit with a dangling libcudart.so that
             // CMake resolved to the system's CUDA 12 one) reads cudaDeviceProp shifted - silently, and slowly
             int rt = 0;
@@ -3666,19 +3485,6 @@ int Model::load() {
             (int64_t) free_b, reserve, blob, min_slots, strata::defaults_026() ? 0 : strata::core::kLateAllocMib);
         int64_t slots = auto_slots.slots;
         if (!profile.empty()) slots = std::min<int64_t>(slots, (int64_t) profile.size());
-#if defined(STRATA_GPU_METAL)
-        // Metal: the decode window reads its experts from its own arena (metal/src/engine/window.cpp), and the device copies the shared host
-        // code makes - this cache included - are given back before the arena is sized.  An auto cache of everything that is "free" (14.56 GiB on
-        // a 32 GB Mac) only held the memory the arena and the prompt buffers need, left 85 MiB free at the first request, and was touched
-        // again after it was given back.  1500 slots is the cache the identity gates run with; --expert-cache N sets another.
-        constexpr int64_t kMetalAutoCacheSlots = 1500;
-        if (slots > kMetalAutoCacheSlots) {
-            std::fprintf(stderr, "strata generate: expert cache auto: %d slots, not %lld: on a Mac the engine reads its experts from its own arena and "
-                                 "this cache would only hold memory the arena and the prompt buffers need (--expert-cache N sets it)\n",
-                         (int) kMetalAutoCacheSlots, (long long) slots);
-            slots = kMetalAutoCacheSlots;
-        }
-#endif
         o.expert_cache = (int) std::max<int64_t>(slots, 0);
         std::fprintf(stderr, "strata generate: expert cache auto: %.2f GiB free, %d MiB reserved (+%lld MiB for the "
                              "draft head%s) -> %d slots\n",
@@ -3906,7 +3712,7 @@ int Model::load() {
                                  "(layer, expert) pair lifts it - tools/make_profile.py)\n", o.expert_cache,
                          profile.size(), o.expert_profile.c_str(), profile.size());
         o.expert_cache = (int) sized_slots.size();
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_GPU_METAL) && !defined(_WIN32)
+#if !defined(STRATA_USE_HIP) && !defined(_WIN32)
         // ---- AUTO NO-BORROW (0.2.10).  With batch slots on one NVIDIA card the prompt path lent cache slots to its own
         // buffers, and every lent slot's expert was read again from the host during each chunk.  When the card holds EVERY
         // expert of the profile and still has room for the path's own buffers (the chunk the loan would have used, 8192)
@@ -3941,7 +3747,7 @@ int Model::load() {
         }
 #endif
     }
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_GPU_METAL) && !defined(_WIN32)
+#if !defined(STRATA_USE_HIP) && !defined(_WIN32)
     // 0.2.10.1 (round0212 item 7): the FP16 weight cache is on when the engine runs batch slots on Linux CUDA.  Bit-exact against the uncached
     // form (gemm_w16_parity, greedy identity 12/12, first-token KL 0); +3.8% (c=1) .. +6.6% (c=8) total tokens/s on l620.  It takes only VRAM beyond
     // 3 GiB kept free; STRATA_PF_W16_CACHE_MIB=0 turns it off, =N is an explicit budget.
@@ -4851,7 +4657,7 @@ int Model::build_hit_tables(bool dumping_layers) {
     if (graph_hits && !o.no_capture && !o.no_token_graph && !dumping_layers && half_dump == nullptr) {
         // (strata-q38 keeps its MTP drafter's experts in its pages as one more layer, layer n_layers: their rows follow)
         const size_t trunk = (size_t) (g.n_layers * g.n_expert);
-        host_res.assign(trunk + (is_paged() && !o.mtp.empty() ? (size_t) g.n_expert : 0), strata::core::kNotResident);
+        host_res.assign(trunk + (!o.mtp.empty() ? (size_t) g.n_expert : 0), strata::core::kNotResident);
         int64_t resident = 0;
         for (int64_t l = 0; l < g.n_layers; ++l)
             for (int64_t e = 0; e < g.n_expert; ++e) {
@@ -4933,16 +4739,6 @@ cudaError_t Model::put_residency(int32_t* dst) const {
     return e != cudaSuccess ? e : cudaStreamSynchronize(nullptr);
 }
 
-int Model::get_batch_max_t() const {
-    // (--batch-mtp and STRATA_PIPED_MTP draft with the draft layer's kernels, built for the narrow window: their windows
-    // stay at most kVerifyNarrowT rows; only the plain batch windows are wide)
-    if (batch_mtp && !piped_mtp) return (int) strata::kernels::kVerifyNarrowT;
-    const int plain = std::max(o.spec, std::min(o.batch, (int) strata::kernels::kVerifyMaxT));
-    const int group_rows = (piped_mtp && o.batch_groups > 1 && o.batch > 0)
-        ? std::min<int>(strata::kernels::kVerifyNarrowT, (o.batch / o.batch_groups) * (1 + pm_drafts)) : 0;
-    return std::max(plain, group_rows);
-}
-
 void Model::unload_drafter() {
     // MtpDrafter gives its memory back only in its destructor, and a new one is the unloaded state
     const strata::core::OnDevice on(mtp.device());   // (its destructor frees on the current device)
@@ -4985,57 +4781,8 @@ int64_t Model::count_gpu_held() const {
     return held;
 }
 
-void Model::refresh_file_tier() {
-    if (srcp != &src || !file_tier_idle_ok) return;
-    const int64_t total = g.n_layers * g.n_expert;
-    const int64_t held = count_gpu_held();
-    const bool all = held == total;
-    if (all == gpu_holds_all) return;
-    gpu_holds_all = all;
-    bool acted = false;
-    if (all) {
-        if (io_pf_by_default && src.io_prefetch()) {
-            src.set_io_prefetch(false, 0);
-            io_pf_suspended = true;
-            acted = true;
-            const char* sv = std::getenv("STRATA_IO_STATS");
-            src.set_io_stats(sv != nullptr && std::atoi(sv) != 0);
-        }
-        if (la_started && !la_asked && !fs_ahead && !la_stats && drive.d.lookahead != nullptr) { drive.d.lookahead = nullptr; acted = true; }
-        if (acted)
-            std::fprintf(stderr, "strata serve: every expert is in the GPU caches again (%lld of %lld): the file tier's Linux defaults are off\n",
-                         (long long) held, (long long) total);
-    } else {
-        if (io_pf_suspended) {
-            const char* th = std::getenv("STRATA_IO_PF_THREADS");
-            src.set_io_prefetch(true, th != nullptr ? std::atoi(th) : 0);
-            io_pf_suspended = !src.io_prefetch();
-            acted = true;
-        }
-        if (la_started && drive.d.lookahead == nullptr) {
-            drive.d.lookahead = &lookahead;
-            if (!std::getenv("STRATA_IO_PREFETCH_DEPTH") && src.io_prefetch()) lookahead.set_depth(2);
-            acted = true;
-        }
-        if (acted)
-            std::fprintf(stderr, "strata serve: %lld of %lld experts are in the GPU caches now: the file tier's Linux defaults are on again\n",
-                         (long long) held, (long long) total);
-    }
-}
-
 std::string Model::get_df2_vocab_path() const {
     return df2_solo ? df2_vocab_file : o.mtp_draft_vocab.empty() ? o.mtp + "/draft_vocab.bin" : o.mtp_draft_vocab;
-}
-
-void Model::offer_df2_head() {
-#if defined(STRATA_HAVE_DFLASH2)
-    strata::core::MtpDrafter::DraftHeadView hv;
-    if (!o.mtp.empty() && mtp.draft_head_view(&native_head, get_df2_vocab_path(), hv)) {
-        strata::core::Dflash2Drafter::SharedHead sh;
-        sh.rows = hv.rows; sh.vocab_dev = hv.vocab_dev; sh.vocab_host = hv.vocab_host; sh.n = hv.n; sh.type = hv.type;
-        df2.share_head(sh);
-    }
-#endif
 }
 
 int64_t Model::get_df2_head_bytes() const {
@@ -5131,147 +4878,6 @@ void Model::arm_prompt_cpu_share() {
         strata::prefill::share_rules::default_share_has_work(open_expert_pages ? xcache.resident() : xcache.slots(),
                                                              (int64_t) (g.n_layers * g.n_expert)) &&
         is_cpu_share_default_ok());   // H11
-}
-
-int Model::pin_resident_experts(const std::vector<std::pair<int32_t, int32_t>>& stage_pairs, int64_t lend_from) {
-    {   // the pack's and the MTP head's files: read at start, their cache is given back by the complement's drop
-        std::vector<std::string> drop;
-        for (const std::string& d : {o.pack, o.mtp}) {
-            std::error_code ec;
-            if (d.empty()) continue;
-            if (std::filesystem::is_regular_file(d, ec)) { drop.push_back(d); continue; }
-            for (const auto& f : std::filesystem::directory_iterator(d, ec))
-                if (f.is_regular_file(ec)) drop.push_back(f.path().string());
-        }
-        src.set_extra_drop_files(std::move(drop));
-    }
-    const std::vector<std::pair<int32_t, int32_t>>& rank_all = profile_all.empty() ? profile : profile_all;
-    bool resident_ok = src.pin_cache_complement(xcache, err, o.resident_pin, stage_pairs, lend_from,
-                                                o.resident_headroom, o.resident_budget, &rank_all);
-    std::string whole_err;
-    if (!resident_ok && o.resident_soft) {
-        // #467: the whole complement does not fit - keep what does, the hottest by the profile, through the #403
-        // budget path (sized by available memory) instead of none: the misses outside it read the same file bytes
-        // the mmap fallback reads, so the answers are unchanged.  Nothing pinned: the old fallback below.
-        whole_err = err;
-        resident_ok = src.pin_cache_complement(xcache, err, o.resident_pin, stage_pairs, -1, o.resident_headroom,
-                                               strata::core::FileExpertSource::kResidentWhatFits, &rank_all);
-        if (resident_ok)
-            std::fprintf(stderr, "strata generate: WARNING: the whole resident RAM mode does not fit (%s); %.2f "
-                                 "GiB of the experts the GPU does not hold, the hottest by the expert profile, are "
-                                 "kept in RAM and the rest are read from the model folder through the OS file "
-                                 "cache\n",
-                         whole_err.c_str(), (double) src.resident_bytes() / 1073741824.0);
-        else
-            err = whole_err + "; " + err;
-    }
-    // the startup reads are done: the view of experts.bin back, the file tier as chosen above
-    bool startup_kept = false;
-    if (src.startup_unbuffered()) {
-        std::string why;
-        const auto end_t0 = std::chrono::steady_clock::now();
-        startup_kept = !src.end_startup_unbuffered(why);
-        if (startup_kept) std::fprintf(stderr, "strata generate: WARNING: %s\n", why.c_str());
-        else
-            std::fprintf(stderr, "strata generate: the startup reads are done: experts.bin mapped again (%.0f ms)\n",
-                         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - end_t0).count());
-    }
-    // #669 / #765: a big chunk lends many cache slots to the prompt path, and each lent slot's expert is read back
-    // from the SSD whenever the RAM could not keep its copy (31 GB: auto:32768 read prompts ~3x slower than auto).
-    // Said, never capped: --prefill is the user's, and with the RAM for them it is the faster one (+21-35%).
-    // #1683: with a RAM budget the lend region is kept after the ranked experts, as far as the budget reaches, so
-    // the advice there is a larger budget, not a smaller chunk (the budget used to keep none of it whatever the chunk)
-    if (resident_ok && lend_from >= 0 && (o.prefill_chunk > 8192 || o.resident_budget > 0) && xcache.slots() > lend_from &&
-        src.resident_lent_slots() < xcache.slots() - lend_from)
-        std::fprintf(stderr, "strata generate: WARNING: a prompt chunk of %lld tokens lends %lld cache slots to the "
-                             "prompt path, but only %lld of their experts fit in RAM: the others are read from the "
-                             "SSD on every chunk, and prompts can read ~3x slower than with --prefill auto (#669). "
-                             "%s keeps them all in RAM\n",
-                     (long long) o.prefill_chunk, (long long) (xcache.slots() - lend_from),
-                     (long long) src.resident_lent_slots(),
-                     o.resident_budget > 0 ? "A larger --resident-budget-gib (the lend region comes after the ranked experts), or a smaller --prefill,"
-                                           : "A smaller --prefill, or auto,");
-    if (resident_ok) {
-        // --adapt-async: twice the exchange buffers - the second half bounces the copies in whose source is not
-        // page-locked (an asynchronous copy instead of the driver's staged, synchronous one)
-        if (o.adapt_async && !src.reserve_exchanges(2 * std::min<int64_t>(o.adapt_swaps, 96), err,
-                                                    std::min<int64_t>(o.adapt_swaps, 96)))
-            turn_off_adapt_async(err.c_str());
-        // pageable buffers would make every copy of a round synchronous (the driver stages them): that is the
-        // blocking tier's cost, so the asynchronous tier is not worth running - said, and the blocking tier stays
-        if (o.adapt_async && !src.exchange_pinned())
-            turn_off_adapt_async("the exchange buffers could not be page-locked");
-        if (o.adapt_every > 0 && o.adapt_swaps > 0 &&
-            !src.reserve_exchanges(std::min<int64_t>(o.adapt_swaps, 96), err)) {
-            std::fprintf(stderr, "strata generate: CPU expert residency: %s\n", err.c_str());
-            return 1;
-        }
-        {
-            cudaDeviceProp ucp{};
-            int ucd = 0;
-            if (src.complement_pinned() && cudaGetDevice(&ucd) == cudaSuccess && cudaGetDeviceProperties(&ucp, ucd) == cudaSuccess && ucp.integrated)
-                g_uma_pinned_complement.store(true);
-        }
-        std::fprintf(stderr, "strata generate: resident RAM mode: %.2f GiB of experts in RAM (%s), %lld in the GPU "
-                             "cache; adaptive swaps %s\n",
-                     (double) src.resident_bytes() / 1073741824.0,
-                     src.complement_pinned() ? "page-locked" : src.locked_bytes() > 0 ? "locked" : "pageable",
-                     (long long) xcache.resident(),
-                     o.adapt_every > 0 && o.adapt_swaps > 0 ? "exchange them with the GPU cache (no file reads)"
-                                                            : "off");
-    } else if (o.resident_soft) {
-        std::fprintf(stderr, "strata generate: WARNING: the resident RAM mode does not fit (%s); the experts the "
-                             "GPU does not hold are read from the model folder through the OS file cache "
-                             "(--mmap-experts), which is slower when the RAM cannot keep them\n", err.c_str());
-    } else if (o.resident_budget > 0) {
-        // #403: a RAM budget that cannot be kept is not a reason to stop - the experts it would have held are
-        // read from the files like the ones outside it (pin_cache_complement leaves nothing half-built)
-        std::fprintf(stderr, "strata generate: WARNING: the RAM budget (--resident-budget-gib) cannot be kept (%s); "
-                             "every expert the GPU does not hold is read from the model files %s "
-                             "(--mmap-experts), which is slower\n", err.c_str(),
-                     src.unbuffered() ? "with unbuffered I/O" : "through the OS file cache");
-    } else {
-        std::fprintf(stderr, "strata generate: CPU expert residency: %s\n", err.c_str());
-        return 1;
-    }
-    // #577: the unbuffered choice above was made before the RAM copy existed, from the budget asked for; now the
-    // copy is built, decide again from the RAM it really holds and the expert bytes outside it (on a 96 GB PC
-    // the file cache keeps those, and every refill after a prompt read the drive instead).  Windows and Linux: the
-    // unbuffered reads exist there
-#if defined(_WIN32) || defined(__linux__)
-    if (o.mmap_experts && o.resident_budget > 0 && !startup_kept) {
-        std::string why;
-        const bool was = src.unbuffered();
-        const bool ub = src.recheck_unbuffered(why);
-        std::fprintf(stderr, "strata generate: the file tier reads %s%s (%s)\n",
-                     ub ? "unbuffered" : "through the file cache", ub == was ? "" : " (changed)", why.c_str());
-        if (ub != was) {
-            // the plain line (owner 11-06): printed once, when the mode changes to the file cache; the RAM figures are the ones the rule
-            // used (the group's own limit and room, no operator cap).  STRATA_TRACE keeps the long technical line.
-            constexpr double GiB = 1073741824.0;
-            if (const auto mem = strata::core::sample_host_memory(strata::core::MemoryProbePaths{}, 0)) {
-                if (!ub)
-                    std::fprintf(stderr, "strata: expert reads now go through the file cache (%.1f GiB of RAM free for them, %.1f GiB limit)\n",
-                                 (double) mem->available / GiB, (double) mem->limit / GiB);
-                if (std::getenv("STRATA_TRACE") != nullptr)
-                    std::fprintf(stderr, "strata trace: the file tier changed: RAM at the re-check: limit %.1f GiB (source: %s), current %.1f GiB, "
-                                         "reclaimable cache credited %.1f GiB; available %.1f GiB (MemAvailable %.1f GiB)\n",
-                                 (double) mem->limit / GiB, strata::core::memory_source_name(mem->source), (double) mem->current / GiB,
-                                 (double) mem->credit / GiB, (double) mem->available / GiB, (double) mem->mem_available / GiB);
-            }
-        }
-        // MODEL-UPDATE round 2 (opt-in STRATA_PROMPT_DIRECT=1): the prompt path's batched reads unbuffered while
-        // decode keeps the file cache (z440, UD-Q4_K_XL, 39 GiB budget: all-unbuffered doubled the 6K prompt but
-        // cost decode 9-13%).  The same bytes either way.
-        if (!ub && [] { const char* v = std::getenv("STRATA_PROMPT_DIRECT"); return v != nullptr && v[0] == '1'; }()) {
-            std::string pw;
-            const bool pd = src.open_prompt_direct(pw);
-            std::fprintf(stderr, "strata generate: the prompt path's expert reads %s\n",
-                         pd ? "go unbuffered (STRATA_PROMPT_DIRECT=1)" : ("stay buffered: " + pw).c_str());
-        }
-    }
-#endif
-    return 0;
 }
 
 void Model::finish_expert_tiers() {
@@ -5434,17 +5040,13 @@ int64_t g_lend_keep = 128;
 std::atomic<bool> g_uma_pinned_complement{false};
 
 bool spill_discrete_gpu() {
-#if defined(STRATA_GPU_METAL)
-    return strata::spill_allowed(true, false);
-#else
     static const bool ok = [] {
         int d = 0;
         cudaDeviceProp pr{};
         if (cudaGetDevice(&d) != cudaSuccess || cudaGetDeviceProperties(&pr, d) != cudaSuccess) { (void) cudaGetLastError(); return false; }
-        return strata::spill_allowed(false, pr.integrated != 0);
+        return strata::spill_allowed(pr.integrated != 0);
     }();
     return ok;
-#endif
 }
 
 // #620 #486: " (N MiB of M MiB VRAM free on this GPU)" for an allocation's failure message (clears the error first)
@@ -5514,7 +5116,7 @@ static bool uma_launch_probe(std::string& why) {
 /// failed context aborts on the first call that touches it).  Never for the 16384 default, a chunk that borrows cache slots, or a discrete GPU.  STRATA_PF_OWN_PROBE_OFF=1 skips it.
 void uma_refuse_chunk_if_full(int64_t chunk, bool borrows, double cache_gib) {
 #if !defined(STRATA_USE_HIP)
-    (void) chunk; (void) borrows; (void) cache_gib;   // observed on the Strix Halo (HIP) only: CUDA and Metal builds are untouched
+    (void) chunk; (void) borrows; (void) cache_gib;   // observed on the Strix Halo (HIP) only: CUDA builds are untouched
     return;
 #else
     if (borrows || chunk <= 16384 || spill_discrete_gpu() || std::getenv("STRATA_PF_OWN_PROBE_OFF") != nullptr) return;
@@ -5579,7 +5181,7 @@ bool decode_defaults_arch_ok() {
 
 void set_tail_skip_default(const Model& m, int64_t gpu_experts, const char* who) {
     const Options& o = m.o;
-    const int64_t n_experts = m.is_paged() ? m.g.n_layers * m.g.n_expert : (int64_t) m.host_res.size();
+    const int64_t n_experts = m.g.n_layers * m.g.n_expert;
     const bool all_experts_resident = n_experts > 0 && gpu_experts >= n_experts;
     // STRATA_ROUTE_TAIL_SKIP: ON BY DEFAULT on CUDA builds (owner decision, 0.1.42) and on HIP gfx1200/gfx1201
     // (0.1.43): a missed expert that every token of a verify window routes at rank 7 or lower is neither copied nor
@@ -5633,8 +5235,6 @@ void set_tail_skip_default(const Model& m, int64_t gpu_experts, const char* who)
                              "STRATA_ROUTE_TAIL_SKIP=0 turns it off\n", who, strata::core::tail_skip_rank(),
                      tse == nullptr ? " (default)" : "", strata::core::tail_skip_rank());
 }
-
-double get_last_h2d_gbps() { return g_last_h2d_gbps; }
 
 #if !defined(_WIN32)
 // #605: whether `path` is on a rotational disk (1), not (0) or unknown (-1), from sysfs; `dev` is the disk's name
@@ -6077,8 +5677,7 @@ double ple_direct_rows_per_s(strata::kernels::PleTable& t) {
     constexpr size_t kTok = 4;   // 64 rows a batch
     std::vector<uint32_t> rows(kTok * 16);
     // one token's PLE rows are PLE_N_HEADS x PLE_HEAD_DIM floats = the compiled hidden size (2560 for Flash-Next, 4096 for q4_big): a
-    // buffer of 2560 floats a token was a heap overflow of 24 KB at hidden 4096 (found by an ASan run; on Metal it landed in Apple's
-    // shader-cache objects and the first pipeline of the first window died in MTLCompilerFSCache::getElementImpl)
+    // buffer of 2560 floats a token was a heap overflow of 24 KB at hidden 4096 (found by an ASan run)
     std::vector<float> out(kTok * (size_t) strata::kernels::PLE_N_HEADS * (size_t) strata::kernels::PLE_HEAD_DIM);
     uint64_t x = 0x9E3779B97F4A7C15ull ^ n;
     const auto t0 = std::chrono::steady_clock::now();
@@ -6105,45 +5704,6 @@ uint64_t nibble_max_slot_bytes() {
     return m;
 }
 
-/// With STRATA_EXPERT_NIBBLE=1, gets why this start cannot have 4-bit slots (empty: nothing here stops it): what the
-/// build, the GPUs, the environment and the options decide, before anything is allocated.  The full residency, the
-/// loans and the prompt chunk are checked where they are known.
-std::string nibble_refusal(const Options& o) {
-    const nib::Config& c = nib::config();
-    if (!c.error.empty()) return c.error;
-#if !STRATA_EXPERT_NIBBLE_BUILT || !defined(STRATA_NATIVE_EXPERTS)
-    (void) o;
-    return "the 4-bit slots and their kernels are in the CUDA build with STRATA_EXPERIMENTAL_SM60 and native experts only";
-#else
-    int count = 0;
-    if (cudaGetDeviceCount(&count) != cudaSuccess || count <= 0) {
-        (void) cudaGetLastError();
-        return "no CUDA device";
-    }
-    for (int d = 0; d < count; ++d) {
-        cudaDeviceProp p{};
-        if (cudaGetDeviceProperties(&p, d) != cudaSuccess) {
-            (void) cudaGetLastError();
-            return "cannot read CUDA" + std::to_string(d) + "'s properties";
-        }
-        if (p.major != 6 || p.minor != 0)
-            return "CUDA" + std::to_string(d) + " (" + p.name + ") is compute capability " + std::to_string(p.major) + "." +
-                   std::to_string(p.minor) + ": the 4-bit slots are for compute capability 6.0 (GP100) only";
-    }
-    if (std::string e = nib::env_conflicts(); !e.empty()) return e;
-    if (o.peer_device >= 1) return "--peer-device (its cache holds GGUF blobs)";
-    for (size_t r = 0; r < o.expert_cache_remote.size(); ++r)
-        if (o.expert_cache_remote[r] > 0 || o.expert_cache_remote_auto[r])
-            return "remote expert caches (--expert-cache-device1..3 hold GGUF blobs)";
-    if (o.kv_grow) return "--kv-grow (the elastic K/V moves slots at their GGUF size)";
-    if (o.vram_elastic) return "--vram-elastic (it refills slots with GGUF blobs)";
-    if (o.expert_profile.empty())
-        return "no --expert-profile (every expert must be VRAM-resident from the profile fill)";
-    if (o.expert_cache == 0) return "--expert-cache 0 (no VRAM slots to convert)";
-    return {};
-#endif
-}
-
 /// Prints the cards' free and total memory and the largest other programs that hold some, as a warning added to the
 /// message that says the engine cannot start for lack of GPU memory (#3797, base/gpu/gpu_report.hpp). Best effort: a
 /// card that cannot be asked, or a driver that does not list its programs, is left out or said so; it never changes the
@@ -6168,7 +5728,7 @@ void print_startup_gpu_report(const std::vector<int>& devices) {
         cudaDeviceProp prop{};
         if (cudaGetDeviceProperties(&prop, d) == cudaSuccess) c.name = prop.name;
         else (void) cudaGetLastError();
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && !defined(STRATA_GPU_METAL)
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906)
         char bus[64] = {};
         if (cudaDeviceGetPCIBusId(bus, (int) sizeof bus, d) == cudaSuccess) c.processes_known = gr::query_other_processes(bus, c.processes);
         else (void) cudaGetLastError();

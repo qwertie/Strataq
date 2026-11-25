@@ -9,10 +9,10 @@ test('RAM and every dedicated GPU contribute to the aggregate inventory',()=>{
  assert.deepEqual(memoryInventory(hardware),{ram:64,vram:40,total:104,shared:false});
 });
 test('unified GPU memory is counted once, even with multiple reported shared GPU pools',()=>{
- const hardware={memory:{totalGb:16},accelerator:{unified:true},gpus:[{unified:true,backend:'metal',vramGb:16},{unified:true,backend:'metal',vramGb:16}]};
+ const hardware={memory:{totalGb:16},accelerator:{unified:true},gpus:[{unified:true,backend:'vulkan',vramGb:16},{unified:true,backend:'vulkan',vramGb:16}]};
  assert.deepEqual(memoryInventory(hardware),{ram:16,vram:0,total:16,shared:true});
 });
 test('shared GPU memory is excluded when dedicated GPUs are also connected',()=>{
- const hardware={memory:{totalGb:32},accelerator:{unified:true},gpus:[{unified:true,backend:'metal',vramGb:32},{unified:false,backend:'cuda',vramGb:24},{unified:false,backend:'cuda',vramGb:16}]};
+ const hardware={memory:{totalGb:32},accelerator:{unified:true},gpus:[{unified:true,backend:'vulkan',vramGb:32},{unified:false,backend:'cuda',vramGb:24},{unified:false,backend:'cuda',vramGb:16}]};
  assert.deepEqual(memoryInventory(hardware),{ram:32,vram:40,total:72,shared:false});
 });

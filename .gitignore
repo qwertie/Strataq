@@ -48,7 +48,6 @@ build-vision-cuda12.bat
 
 # setup.py outputs (engine, downloads) and release builds
 /engine/
-/engine-sycl/
 /engine-cuda12/
 /engine-dsv41/
 /engine-feed/
@@ -76,7 +75,6 @@ dist-hip/
 .terminal-venv/
 .terminal-test-venv/
 node_modules/
-*.dmg
 /release/artifacts/
 /apps/host/dist/
 /apps/desktop/src-tauri/target/

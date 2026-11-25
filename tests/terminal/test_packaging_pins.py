@@ -29,11 +29,6 @@ class InterpreterPins(unittest.TestCase):
                 self.assertTrue(pin["url"].endswith("install_only.tar.gz"))
         self.assertEqual(len({p["sha256"] for p in pt.PYTHON_PINS.values()}), 4)
 
-    def test_the_mac_pin_is_the_one_setup_sh_downloads(self):
-        text = (ROOT / "setup.sh").read_text(encoding="utf-8")
-        self.assertIn(pt.PYTHON_PINS["darwin-arm64"]["sha256"], text)
-        self.assertIn(pt.PYTHON_PINS["darwin-arm64"]["url"].split("/")[-1], text)
-
     def test_fetch_refuses_a_download_that_does_not_match_its_pin(self):
         with tempfile.TemporaryDirectory() as d:
             cache = Path(d)

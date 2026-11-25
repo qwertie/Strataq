@@ -9,8 +9,7 @@ the `strata` launchers prefer them.
 What goes in
 ------------
 * a pinned **standalone CPython 3.12.15** (python-build-standalone 20261009, `install_only`), downloaded at BUILD
-  time and SHA-256-verified against the pin below (the digests are the ones in that release's SHA256SUMS, the Mac one
-  is also what `setup.sh` pins), so the terminal and the installer cannot drift apart;
+  time and SHA-256-verified against the pin below (the digests are the ones in that release's SHA256SUMS);
 * the runtime wheels from the target's lock, `packaging/locks/runtime-<target>-cp312.txt` (made by
   `packaging/lock_wheels.py`), installed into that interpreter with
   `pip install --require-hashes --no-deps --only-binary=:all:` at BUILD time only: every package, direct or
@@ -66,8 +65,7 @@ PBS_RELEASE = "20261009"
 PYTHON_VERSION = "3.12.15"
 PBS_BASE = f"https://github.com/astral-sh/python-build-standalone/releases/download/{PBS_RELEASE}/"
 
-#: The standalone CPython pins, one per target, from the release's SHA256SUMS. `darwin-arm64` is also what
-#: `setup.sh` pins: a terminal built from one and an installer built from the other are the same interpreter.
+#: The standalone CPython pins, one per target, from the release's SHA256SUMS.
 PYTHON_PINS = {
     "windows-x86_64": {
         "file": f"cpython-{PYTHON_VERSION}+{PBS_RELEASE}-x86_64-pc-windows-msvc-install_only.tar.gz",
@@ -92,9 +90,6 @@ PYTHON_PINS = {
 }
 for _pin in PYTHON_PINS.values():
     _pin["url"] = PBS_BASE + _pin["file"].replace("+", "%2B")
-
-#: Kept for callers of the Mac-only script: the macOS pin.
-PYTHON_PIN = {**PYTHON_PINS["darwin-arm64"], "target": "darwin-arm64"}
 
 #: The application, as paths relative to ROOT (copied to the same place in the archive).
 PAYLOAD = (
@@ -136,8 +131,6 @@ INSTALLER_TOOLS = ("strata_mcp", "iq_pack", "strata_pack", "pack_index", "mtp_fe
 #: tests/terminal/test_bundle_tools_paths.py reads the by-path references out of the source and fails when one is missing from the bundle.
 INSTALLER_SCRIPTS = ("dsv41/pack_gguf", "dsv41/smoke", "dsv41/tune", "nvfp4_local_pack", "strata_bench", "strata_inspect")
 INSTALLER_DATA = "data"           # draft vocabularies, expert profiles: 2 MB
-#: the Mac install's tools (setup.py's mac_control_setup runs them by path): Unsloth's many-shard sets become ONE GGUF for the Metal engine (stdlib only, 15 KB)
-INSTALLER_METAL_TOOLS = ("metal_repack", "stream_experts")
 
 #: packages the bundle must import after the install (the API server's and the CLI's).
 PROBE = "import jinja2, yaml, regex, psutil, requests, numpy, PIL, tqdm; print('deps ok')"
@@ -293,10 +286,6 @@ def add_installer(folder: Path, source: Path = ROOT) -> dict:
         (folder / "tools" / f"{name}.py").parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source / "tools" / f"{name}.py", folder / "tools" / f"{name}.py")
         copied.append(f"tools/{name}.py")
-    (folder / "metal" / "tools").mkdir(parents=True, exist_ok=True)
-    for name in INSTALLER_METAL_TOOLS:
-        shutil.copy2(source / "metal" / "tools" / f"{name}.py", folder / "metal" / "tools" / f"{name}.py")
-        copied.append(f"metal/tools/{name}.py")
     if (folder / INSTALLER_DATA).exists():
         shutil.rmtree(folder / INSTALLER_DATA)
     shutil.copytree(source / INSTALLER_DATA, folder / INSTALLER_DATA, ignore=shutil.ignore_patterns("__pycache__"))

@@ -56,7 +56,7 @@ class BuildEngineStamp(unittest.TestCase):
         self.root = Path(tmp.name)
         self.eng = self.root / "engine"
         self.eng.mkdir()
-        (self.eng / setup.EXE).write_bytes(binary("0.1.42"))
+        (self.eng / setup.Q38EXE).write_bytes(binary("0.1.42"))
         self.old_stamp = {"source": "local", "version": "0.1.42", "archs": [86], "vision": "none",
                           "cuda_dirs": [], "src": "oldhash", "vision_src": None}
         (self.eng / "BUILD.json").write_text(json.dumps(self.old_stamp))
@@ -84,7 +84,8 @@ class BuildEngineStamp(unittest.TestCase):
         self.compiles += 1
         self.defs = list(defs)
         bdir.mkdir(parents=True, exist_ok=True)
-        (bdir / setup.EXE).write_bytes(self.built)
+        for name in setup.QWEN_PROGRAMS:
+            (bdir / name).write_bytes(self.built)
 
     def stamp(self):
         return json.loads((self.eng / "BUILD.json").read_text())
@@ -94,7 +95,7 @@ class BuildEngineStamp(unittest.TestCase):
         self.assertEqual(self.compiles, 1)
         self.assertEqual(self.stamp()["src"], "newhash")
         self.assertEqual(self.stamp()["version"], "0.1.43")
-        self.assertEqual((self.eng / setup.EXE).read_bytes(), self.built)
+        self.assertEqual((self.eng / setup.Q38EXE).read_bytes(), self.built)
 
     def test_the_q6k_expert_kernels_are_pinned_on(self):
         """PR #2515: a build/ folder first configured while STRATA_Q6K_EXPERTS defaulted to OFF keeps it in CMakeCache.txt;
@@ -109,18 +110,20 @@ class BuildEngineStamp(unittest.TestCase):
         with self.assertRaises(SystemExit):
             setup.build_engine(GPU, "none", True, Path("llama"), toolkit=13)
         self.assertEqual(self.stamp(), self.old_stamp)     # still the old hash: the next update compiles again
-        self.assertEqual((self.eng / setup.EXE).read_bytes(), binary("0.1.42"))
+        self.assertEqual((self.eng / setup.Q38EXE).read_bytes(), binary("0.1.42"))
 
     def test_a_poisoned_stamp_is_compiled_again(self):
         """The state #2054 found: the new source hash and version in BUILD.json, the old binary beside it."""
         (self.eng / "BUILD.json").write_text(json.dumps({**self.old_stamp, "version": "0.1.43", "src": "newhash"}))
         setup.build_engine(GPU, "none", True, Path("llama"), toolkit=13)
         self.assertEqual(self.compiles, 1)
-        self.assertEqual((self.eng / setup.EXE).read_bytes(), self.built)
+        self.assertEqual((self.eng / setup.Q38EXE).read_bytes(), self.built)
 
     def test_a_healthy_install_is_left_alone(self):
-        (self.eng / setup.EXE).write_bytes(binary("0.1.43"))
-        (self.eng / "BUILD.json").write_text(json.dumps({**self.old_stamp, "version": "0.1.43", "src": "newhash"}))
+        for name in setup.QWEN_PROGRAMS:
+            (self.eng / name).write_bytes(binary("0.1.43"))
+        (self.eng / "BUILD.json").write_text(json.dumps({**self.old_stamp, "version": "0.1.43", "src": "newhash",
+                                                         "programs": list(setup.QWEN_PROGRAMS)}))
         setup.build_engine(GPU, "none", True, Path("llama"), toolkit=13)
         self.assertEqual(self.compiles, 0)
 
@@ -131,7 +134,7 @@ class UpdateInstalledEngine(unittest.TestCase):
             root = Path(d)
             eng = root / "engine"
             eng.mkdir()
-            (eng / setup.EXE).write_bytes(binary("0.1.42"))
+            (eng / setup.Q38EXE).write_bytes(binary("0.1.42"))
             (eng / "BUILD.json").write_text(json.dumps({"source": "local", "version": "0.1.43", "archs": [86],
                                                         "vision": "none", "src": "newhash"}))
             built = []
@@ -145,7 +148,7 @@ class UpdateInstalledEngine(unittest.TestCase):
                 setup.update_installed_engine("http://x", 13)
                 self.assertEqual(len(built), 1)
                 built.clear()
-                (eng / setup.EXE).write_bytes(binary("0.1.43"))
+                (eng / setup.Q38EXE).write_bytes(binary("0.1.43"))
                 setup.update_installed_engine("http://x", 13)
                 self.assertEqual(built, [])
 

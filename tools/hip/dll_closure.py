@@ -2,7 +2,7 @@
 
     python tools/hip/dll_closure.py DIR amdhip64_7.dll amd_comgr.dll      # prints the closure inside DIR
 
-Why: the Windows HIP engine puts amdhip64_7.dll and amd_comgr.dll next to strata.exe so that Windows binds THEM and not
+Why: the Windows HIP engine puts amdhip64_7.dll and amd_comgr.dll next to strata-q38.exe so that Windows binds THEM and not
 an AMD driver's copy in System32 (#468, #461).  But amdhip64_7.dll itself imports rocm_kpack.dll, which imports the
 MSVC runtime; with only the two DLLs beside the exe the full-path load fails (error 126, ERROR_MOD_NOT_FOUND), Windows
 falls back to System32's copy, and the first big prompt dies with hipErrorInvalidDeviceFunction (#461, maraa081).  So

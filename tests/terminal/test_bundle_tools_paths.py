@@ -75,7 +75,7 @@ class ByPathToolsAreBundled(unittest.TestCase):
     def test_the_scan_finds_the_deepseek_scripts(self):
         # (a scan that finds nothing would make the next test pass for the wrong reason)
         refs = referenced_tools()
-        for name in ("tools/dsv41/pack_gguf.py", "tools/dsv41/smoke.py", "tools/dsv41/tune.py", "tools/iq_pack.py", "tools/mtp_fetch.py"):
+        for name in ("tools/dsv41/pack_gguf.py", "tools/dsv41/tune.py", "tools/iq_pack.py", "tools/mtp_fetch.py"):
             self.assertIn(name, refs)
         self.assertGreaterEqual(len(refs), 12)
 

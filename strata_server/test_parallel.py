@@ -313,8 +313,8 @@ class ParallelArgs(unittest.TestCase):
 
 
 class DFlash2ChosenWithRequests(unittest.TestCase):
-    """Owner 2026-11-03: the person's own choice wins. DFlash2 chosen by name + a number of requests = `--draft dflash2 --draft-fallback none --batch N` (the engine runs a
-    drafter per request); DFlash2 alone = one request; Auto and the MTP are as they were. Nothing is started: the arguments the server builds."""
+    """Owner 2026-11-03: the person's own choice wins. The MTP chosen by name keeps the number of requests, and the all-cards split engine keeps its DFlash2 flags and
+    takes the person's number as its lanes. Nothing is started: the arguments the server builds."""
 
     BASE = ["--pack", "/d/packs/x", "--native", "/m/x.gguf", "--mtp", "/d/mtp/rt", "--spec", "4", "--spec-min-p", "0.5", "--batch-mtp"]
 
@@ -335,52 +335,19 @@ class DFlash2ChosenWithRequests(unittest.TestCase):
     def value(self, args, flag):
         return args[args.index(flag) + 1] if flag in args else None
 
-    def test_dflash2_by_name_with_a_number_of_requests_runs_dflash2_with_that_many(self):
-        for n in (2, 4, 8):
-            args, note = self.build(drafting="dflash2", parallel=n)
-            self.assertEqual((self.value(args, "--draft"), self.value(args, "--draft-fallback"), self.value(args, "--batch")), ("dflash2", "none", str(n)), n)
-            self.assertNotIn("--mtp", args)
-            self.assertNotIn("--batch-mtp", args)
-            self.assertEqual(note, "", "no 'isn't available in this mode' line where DFlash2 now runs")
-
-    def test_the_number_in_the_saved_arguments_is_the_same_word(self):
-        args, note = self.build(drafting="dflash2", args=[*self.BASE, "--batch", "4"])
-        self.assertEqual((self.value(args, "--draft"), self.value(args, "--batch"), args.count("--batch")), ("dflash2", "4", 1))
-        self.assertEqual(note, "")
-
-    def test_dflash2_by_name_without_a_number_is_one_request(self):
-        for extra in ({}, {"parallel": 1}):
-            args, note = self.build(drafting="dflash2", **extra)
-            self.assertEqual(self.value(args, "--draft"), "dflash2", extra)
-            self.assertNotIn("--batch", args)
-            self.assertEqual(note, "")
-
-    def test_auto_with_several_requests_keeps_the_mtp(self):
-        args, note = self.build(parallel=4)
-        self.assertNotIn("--draft", args)
-        self.assertEqual((self.value(args, "--mtp"), self.value(args, "--batch")), ("/d/mtp/rt", "4"))
-        self.assertEqual(note, "DFlash2 isn't available in this mode")
-        args, note = self.build(drafting="auto", parallel=4)
-        self.assertNotIn("--draft", args)
-
     def test_the_mtp_by_name_is_unchanged(self):
         args, note = self.build(drafting="mtp", parallel=4)
         self.assertNotIn("--draft", args)
         self.assertEqual((self.value(args, "--mtp"), self.value(args, "--batch"), note), ("/d/mtp/rt", "4", ""))
 
-    def test_a_layer_split_runs_it_too(self):
-        args, note = self.build(drafting="dflash2", parallel=4, gpu=[0, 1])
-        self.assertEqual((self.value(args, "--draft"), self.value(args, "--batch"), "--layer-split" in args, note), ("dflash2", "4", True, ""))
-        args, note = self.build(parallel=4, gpu=[0, 1])
-        self.assertNotIn("--draft", args)                    # Auto: still the MTP for several requests
-
     def test_the_all_cards_split_engine_run_config_keeps_its_dflash2_flags_and_the_persons_lanes(self):
         split = ["--native", "/m/x.gguf", "--draft", "dflash2", "--draft-model", "/d/p.pack", "--draft-vocab", "/e/draft_vocab_en.bin", "--max-context", "131072",
                  "--spec", "6", "--lookup", "15", "--conversation-cache-mib", "4096", "--batch", "6"]
-        args, note = self.build(args=list(split), drafting="dflash2", split_engine_note="Using the all-cards split engine on 2 cards.", gpu=[0, 1], parallel=3)
+        args, note = self.build(args=list(split), exe="/e/strata-split-2", drafting="dflash2", split_engine_note="Using the all-cards split engine on 2 cards.",
+                                gpu=[0, 1], parallel=3)
         self.assertEqual(args[:len(split) - 2], split[:-2], "nothing added or taken out")
         self.assertEqual((self.value(args, "--batch"), "--mtp" in args, "--draft-fallback" in args, note), ("3", False, False, ""))
-        args, _ = self.build(args=list(split), drafting="dflash2", split_engine_note="x", gpu=[0, 1])
+        args, _ = self.build(args=list(split), exe="/e/strata-split-2", drafting="dflash2", split_engine_note="x", gpu=[0, 1])
         self.assertEqual(self.value(args, "--batch"), "6")
 
 
@@ -1399,11 +1366,11 @@ class Preemption(FakeEngineCase):
 
 
 class EngineOwnedDefaults(unittest.TestCase):
-    """The parallel stack, the GDN speedups, the Q8_0 hyper-connection read and the Metal fp16 windows are the engine's own defaults
+    """The parallel stack, the GDN speedups and the Q8_0 hyper-connection read are the engine's own defaults
     (src/core/arch_defaults.cpp, generate.cpp): the server adds none of them, and a value the config or the shell sets still reaches the engine."""
     NAMES = ("STRATA_CKPT_POOL", "STRATA_CKPT_POOL_READY", "STRATA_SLOT_CKPT_MOVE", "STRATA_SLOT_COPY_DIRECT", "STRATA_SLOT_COPY_BATCHSYNC",
              "STRATA_BATCH_GDN_GROUPS", "STRATA_BATCH_ATTN_ROWS", "STRATA_BATCH_SELF_COMMIT", "STRATA_QSA_SLOTS",
-             "STRATA_GDN_TC", "STRATA_GDN_CONVL2", "STRATA_GDN_CHUNKED", "STRATA_HC_Q8", "STRATA_METAL_F16")
+             "STRATA_GDN_TC", "STRATA_GDN_CONVL2", "STRATA_GDN_CHUNKED", "STRATA_HC_Q8")
 
     def env_for(self, cfg, base=None):
         import os

@@ -33,8 +33,8 @@ test('dedicated VRAM budgets cannot be borrowed from an unselected GPU',()=>{
  assert.doesNotThrow(()=>load(['gpu-b']));assert.throws(()=>load(['missing']),/detected GPUs/);assert.throws(()=>load(['gpu-a','gpu-a']),/detected GPUs/);
 });
 test('unified memory is one RAM pool; pageable weights share space and fixed allocations cannot spill',()=>{
- const unified={memory:{totalGb:16},gpus:[{id:'metal',name:'Apple',vramGb:16,unified:true}]};
- const {service,load}=fixture(unified);load(['metal']);load([]);
+ const unified={memory:{totalGb:16},gpus:[{id:'apu',name:'Ryzen AI Max',vramGb:16,unified:true}]};
+ const {service,load}=fixture(unified);load(['apu']);load([]);
  const state=service.state();assert.equal(state.memory.totalGb,16);assert.equal(state.memory.budgetGb,12);assert.equal(state.memory.devices.length,0);assert.ok(state.memory.ramGb<=12.01);assert.ok(state.instances.every(i=>i.memory.spillGb>0));
  const rows=[{memory:{reserveGb:4,ramGb:10,minimumRamGb:10,pageable:true,devices:[]}} , {memory:{reserveGb:4,ramGb:10,minimumRamGb:10,pageable:true,devices:[]}}];
  assert.equal(rebalanceReservations(rows,unified),null);assert.equal(reservationBudget(rows,unified).fits,false);
@@ -90,10 +90,10 @@ test('single-mode validation and busy requests leave every existing model intact
  assert.throws(()=>service.load({...body,executionMode:'invalid'}),/execution/);
 });
 test('single-mode planning fits the selected model independently of siblings and explicit opt-in still adds models',()=>{
- const unified={memory:{totalGb:16},gpus:[{id:'metal',name:'Apple',vramGb:16,unified:true}]};
+ const unified={memory:{totalGb:16},gpus:[{id:'apu',name:'Ryzen AI Max',vramGb:16,unified:true}]};
  const {service}=fixture(unified);
  const large={...config,beginner:{contextLength:'256k'}};
- const body={variantId:model.id,config:large,gpuIds:['metal']};service.load(body);
+ const body={variantId:model.id,config:large,gpuIds:['apu']};service.load(body);
  assert.equal(service.plan({...body,gpuIds:[]}).allowed,true);assert.equal(service.plan({...body,gpuIds:[],executionMode:'multiple'}).allowed,false);
  assert.throws(()=>service.load({...body,gpuIds:[],executionMode:'multiple'}),/reserved this memory/);assert.equal(service.state().instances.length,1);
  service.load({...body,gpuIds:[]});assert.equal(service.state().instances.length,1);assert.deepEqual(service.state().instances[0].gpuIds,[]);

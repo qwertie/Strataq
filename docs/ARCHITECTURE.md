@@ -9,9 +9,8 @@ Folder names are chosen so that, in alphabetical order, shared code comes before
 
 ## Two stacks that meet at run time
 
-- **The engine** is C++ (with CUDA/HIP, SYCL and Metal for the GPU). Sources are in `src/`, headers in
-  `include/strata/`, and the two mirror each other: the headers of `src/common/state/` are in
-  `include/strata/common/state/`.
+- **The engine** is C++ (with CUDA or HIP for the GPU). Sources are in `src/`, headers in `include/strata/`, and the
+  two mirror each other: the headers of `src/common/state/` are in `include/strata/common/state/`.
 - **The programs around it** are Python packages at the top of the repository: the server, the `strata` command
   (the Terminal) and setup. They are at the top because they are import roots, and the release packages ship them
   under these names.
@@ -40,36 +39,26 @@ Folder names are chosen so that, in alphabetical order, shared code comes before
 
 Inside `src/common/`, the subfolders may use each other as long as they do not form a cycle.
 
-### Two command loops in the tree
+### The command loops
 
-An engine program is a command loop plus a model. There are two command loops today, and both speak the server's line
-protocol (`contracts/`), so the server does not have to know which one it started.
+An engine program is a command loop plus a model. Both loops speak the server's line protocol (`contracts/`), so the
+server does not have to know which one it started.
 
 - **The paged engine** — `src/common/serve/paged_engine.cpp`, with its start in `paged_start.cpp`. Conversations live
   in page pools (GPU, RAM, SSD): several decode in one step, and one that is not decoding is paused down a tier
   instead of dropped. `strata-q38` (`src/program/q38_main.cpp`) runs it for Qwen3.8 and `strata-ds41`
   (`src/program/ds41_main.cpp`) for DeepSeek V4.1, each through its own `PagedModel`. **New engine work goes here.**
-- **The older engine** — the `main()` of `src/program/generate.cpp` (`strata`), and the same shape inside Qwen3.6's
-  `Serve` (`src/models/qwen36/q36_engine.cu`) and DeepSeek V4.1's `serve` (`src/models/deepseekv41/ds4_main.cpp`).
-  Each conversation holds a session allocated for the whole context, so conversations at once counts sessions
-  (`--batch`); the paged engine counts rows instead, and its `slots` is that capacity, not an allocation. It is still
-  what the installers ship, and what most of [DETAILS.md](DETAILS.md) describes.
+- **Qwen3.6's `Serve`** (`src/models/qwen36/q36_engine.cu`, run by `strata-q36`) still has the older per-session
+  loop. Each conversation holds a session allocated for the whole context, so conversations at once counts sessions
+  (`--batch`); the paged engine counts rows instead, and its `slots` is that capacity, not an allocation.
 
 Both expose the same [request-ID protocol](../contracts/requests.md). The paged engine owns placement and creates
-conversation state when it is needed. Older engines retain their execution structures behind a shared adapter.
+conversation state when it is needed. Qwen3.6's loop keeps its execution structures behind a shared adapter.
 The Python client does not choose a solo path or an execution slot for an updated engine.
 
-`src/common/serve/README.md` lists which parts each one uses. When a doc says "session", "slot" or "`--batch`", check
-which loop it means.
-
-### Other engine backends
-
-- `metal/` is the Mac engine. Its host code compiles the shared `src/` sources unchanged through
-  `metal/include/metal_compat`; its kernels are `.metal` files.
-- `sycl/` is the Intel engine. It is mostly translated copies of `src/` files. It takes the same layout as
-  `src/`, and its copies become shared sources only where that can be tested ([REFACTOR_PLAN.md](REFACTOR_PLAN.md),
-  steps A6 and C1). Like Metal, it compiles a shared file unchanged where it can: `sycl/include/sycl_compat` goes
-  first on its include path and gives the CUDA names a shared header uses their SYCL types.
+`src/common/serve/README.md` lists which parts each one uses. Much of [DETAILS.md](DETAILS.md) was written for the
+per-session engines that came before the paged one: when a doc says "session", "slot" or "`--batch`", check which loop
+it means.
 
 ## The Python layers
 
@@ -100,19 +89,16 @@ family catalog. It depends on nothing.
 
 These replace practices that the old code has, and that new code must not copy:
 
-- **Do not copy a file to make a variant.** Not into `sycl/`, not into another engine's folder. Share it, and
-  put the difference behind an interface or a compat header (as `metal/include/metal_compat` does).
+- **Do not copy a file to make a variant.** Not into another engine's folder. Share it, and put the difference
+  behind an interface or a compat header.
 - **Code in `src/common/` and `src/models/` does not call the CUDA runtime (`cudaMalloc`, `cudaMemcpyAsync`, …)
   directly.** It uses `src/base/gpu/`, so that it can be built for every backend.
 - **No settings in file-wide global variables** (as `g_kv_int8` and the other `qsa_set_*` switches in
   `src/models/qwen38/layer.cpp`). Pass settings in a struct.
 - **One settings reader.** Engines do not each parse their own environment variables.
 - **Model-specific code does not go in a folder called `core` or `common`.**
-- **`main()` parses its arguments and calls a library.** It is not the engine itself (as the 9,500-line
-  `main()` in `src/program/generate.cpp` still is; its option parser, model loader and one-conversation step are
-  `strata::qwen38::parse_options`, `Model` and `Conversation`, in `src/models/qwen38/`, which `strata-q38`'s
-  `main()` calls too). That `main()` is the older command loop: see
-  [Two command loops in the tree](#two-command-loops-in-the-tree).
+- **`main()` calls a library.** It is not the engine itself: `strata-q38`'s `main()` is one call to
+  `strata::qwen38::run_paged_engine`, which parses the options with `parse_options` (`src/models/qwen38/`).
 - **No import or include cycles,** and no reaching up a layer, also not at run time (loading `setup.py` or a
   `tools/` script through `importlib` or `sys.path`). `tests/architecture/test_layering.py` checks the new folders;
   its `KNOWN_UPWARD_LOADS` lists the files that still do it.

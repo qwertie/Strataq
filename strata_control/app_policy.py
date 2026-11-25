@@ -62,7 +62,6 @@ _CARDS = {
     "rx7900": {"name": "AMD Radeon RX 7900 XTX", "vendor": "amd", "arch": "gfx1100", "vram_gb": 24.0},
     "rx9070": {"name": "AMD Radeon RX 9070 XT", "vendor": "amd", "vram_gb": 16.0},
     "strix": {"name": "AMD Radeon 8060S", "vendor": "amd", "arch": "gfx1151", "uma": True},
-    "arc": {"name": "Intel(R) Arc(TM) A750", "vendor": "intel", "vram_gb": 8.0},
     "nameonly3060": {"name": "GeForce RTX 3060", "vram_gb": 12.0},
 }
 _MODELS = {"qwen": {}, "qwen36": {"arch": "qwen35moe"}, "deepseek": {"arch": "deepseek41"}, "deepseek_exe": {"exe": "C:/x/strata-dsv41.exe"}}
@@ -73,7 +72,7 @@ _NAMES = ["qwen3.8-flash-next", "qwen3.8-flash-next-iq3_s", "qwen3.8-flash-next-
 def vectors() -> dict:
     switches = []
     for model, cfg in _MODELS.items():
-        for backend in ("cuda", "hip", "sycl", "metal", "cpu", None):
+        for backend in ("cuda", "hip", "cpu", None):
             for card, g in _CARDS.items():
                 row = {"model": model, "backend": backend, "card": card,
                        "shows": sorted(s.id for s in speed_switches.applicable(cfg, [g], backend) if not s.terminal_only)}

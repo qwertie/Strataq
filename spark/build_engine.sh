@@ -5,7 +5,7 @@
 #
 #   spark/build_engine.sh                    # engine + DeepSeek engine + picture reader -> ./out-spark/engine
 #   BUILD_VISION=0 spark/build_engine.sh     # text only (faster)
-#   BUILD_DSV41=0 spark/build_engine.sh      # without the DeepSeek-V4.1 engine (strata-dsv41)
+#   BUILD_DSV41=0 spark/build_engine.sh      # without the DeepSeek-V4.1 engine (strata-ds41)
 #   ARCHS="121" OUT=/tmp/eng JOBS=8 spark/build_engine.sh
 #
 # The result is the folder setup.py keeps a ready-made engine in: copy it to Strata/engine on the Spark and run
@@ -46,12 +46,7 @@ if [ ! -f "$llama/ggml/CMakeLists.txt" ]; then
   (cd "$repo" && "$py" -c "import setup; print(setup.get_llama_cpp())")
   [ -f "$llama/ggml/CMakeLists.txt" ] || { echo "build_engine.sh: no llama.cpp tree at $llama after fetching it (STRATA_GGML_DIR=<tree> names another)" >&2; exit 2; }
 fi
-# the commit the DeepSeek engine prints with --version: a checkout gives it to CMake itself; a tree copy without .git needs COMMIT=<hex>
 want_dsv41=OFF; [ "${BUILD_DSV41:-1}" = 1 ] && want_dsv41=ON
-if [ "$want_dsv41" = ON ] && [ ! -e "$repo/.git" ] && [ ! -f "$repo/BUILD_ID" ]; then
-  [ -n "${COMMIT:-}" ] || { echo "build_engine.sh: $repo has no .git and no BUILD_ID: set COMMIT=<hex> so the DeepSeek engine can print its commit" >&2; exit 2; }
-  printf '%s\n' "$(printf '%s' "$COMMIT" | cut -c1-9)" > "$repo/BUILD_ID"
-fi
 
 real=""; for a in $(echo "$archs" | tr ';,' '  '); do real="$real;${a}-real"; done; real=${real#;}
 last=$(echo "$archs" | tr ';,' '  ' | awk '{print $NF}')
@@ -60,11 +55,11 @@ cd "$repo"
     -DSTRATA_NATIVE_EXPERTS=ON -DSTRATA_PORTABLE=ON -DSTRATA_Q6K_EXPERTS=ON -DSTRATA_MMQ_KQUANTS=ON \
     -DSTRATA_BUILD_DSV41="$want_dsv41" -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_SKIP_BUILD_RPATH=OFF '-DCMAKE_INSTALL_RPATH=$ORIGIN' \
     "-DCMAKE_CUDA_ARCHITECTURES=${real};${last}-virtual" -DSTRATA_GGML_DIR="$llama"
-rm -f "$build/strata-dsv41"
+rm -f "$build/strata-ds41"
 if [ "$want_dsv41" = ON ]; then
-  "$cmake" --build "$build" --target strata strata_kq strata-dsv41 -j "$jobs"
+  "$cmake" --build "$build" --target strata-q38 strata-q36 strata_kq strata-ds41 -j "$jobs"
 else
-  "$cmake" --build "$build" --target strata strata_kq -j "$jobs"
+  "$cmake" --build "$build" --target strata-q38 strata-q36 strata_kq -j "$jobs"
 fi
 
 if [ "${BUILD_VISION:-1}" = 1 ]; then
@@ -77,18 +72,16 @@ fi
 ver=$(sed -n 's/^[[:space:]]*project([^)]*VERSION[[:space:]]*\([0-9][0-9.]*\).*/\1/p' CMakeLists.txt | head -1)
 rm -rf "$out"
 mkdir -p "$out"
-cp "$build/strata" "$out/"
+cp "$build/strata-q38" "$build/strata-q36" "$out/"
 [ -f "$build/libstrata_kq.so" ] && cp "$build/libstrata_kq.so" "$out/"
-# DeepSeek-V4.1's engine beside it: setup.py takes engine/strata-dsv41 (dsv41_exe)
-[ "$want_dsv41" = ON ] && [ -f "$build/strata-dsv41" ] && cp "$build/strata-dsv41" "$out/"
+# DeepSeek-V4.1's engine beside it: setup.py takes engine/strata-ds41 (dsv41_exe)
+[ "$want_dsv41" = ON ] && [ -f "$build/strata-ds41" ] && cp "$build/strata-ds41" "$out/"
 vision_json=""
 if [ "${BUILD_VISION:-1}" = 1 ] && [ -f "$vision_dir/bin/strata-vision" ]; then
   cp "$vision_dir/bin/strata-vision" "$out/"
   vision_json=", \"vision_archs\": \"$archs\""
 fi
 # the CUDA libraries the engine loads (cuBLAS, cuBLASLt, cudart) go beside it: the Spark needs only its driver
-"$py" packaging/collect_libs.py --binary "$build/strata" --search /usr/local/cuda/lib64 --out "$out" --also 'libcublasLt.so*'
+"$py" packaging/collect_libs.py --binary "$build/strata-q38" --search /usr/local/cuda/lib64 --out "$out" --also 'libcublasLt.so*'
 echo "{\"version\": \"$ver\", \"source\": \"spark/build_engine.sh\", \"platform\": \"linux-aarch64\", \"archs\": \"$archs\", \"ptx\": true, \"cuda\": \"$cudafull\", \"portable\": true$vision_json}" > "$out/BUILD.json"
-"$out/strata" --version 2>/dev/null || true
-[ "$want_dsv41" = ON ] && { "$out/strata-dsv41" --version 2>/dev/null || true; }
 echo "built: $out"

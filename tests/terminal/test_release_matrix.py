@@ -40,8 +40,6 @@ RELEASE = [
     pkg("linux-x86_64", "hip", "halo", ("gfx1151",)),
     pkg("linux-x86_64", "hip", "rx6000", ("gfx1030", "gfx1031")),
     pkg("linux-aarch64", "cuda", "cuda13", ("sm_121", "compute_121"), "580.65"),     # the NVIDIA DGX Spark (GB10), 0.2.7.1
-    pkg("linux-x86_64", "sycl", "", ("intel-arc",)),                 # the Intel Arc (A and B series) engine, GPU code JIT-compiled
-    pkg("macos-arm64", "metal", "", ("apple-gpu",)),
 ]
 
 
@@ -68,8 +66,6 @@ class ReleaseSelection(unittest.TestCase):
             self.pick(pc("linux-x86_64", "hip", gfx=["gfx1151"]))[0],             # Ryzen AI Max (Strix Halo)
             self.pick(pc("linux-x86_64", "hip", gfx=["gfx1031"]))[0],             # RX 6700 XT
             self.pick(pc("linux-aarch64", "cuda", "580.173", ["sm_121"]))[0],     # DGX Spark (GB10)
-            self.pick(pc("linux-x86_64", "sycl"))[0],                             # Arc A750 / B580 / Pro B70
-            self.pick(pc("macos-arm64", "metal"))[0],
         }
         self.assertEqual(chosen, {(p["platform"], p["backend"], p["variant"]) for p in RELEASE})
 
@@ -180,7 +176,7 @@ class ReleaseSelection(unittest.TestCase):
 
     def test_the_platform_decides_first(self):
         self.assertIsNone(self.pick(pc("macos-arm64", "cuda", "590.10", ["sm_86"]))[0])
-        self.assertEqual(self.pick(pc("macos-arm64", "metal"))[0], ("macos-arm64", "metal", ""))
+        self.assertEqual(self.pick(pc("linux-x86_64", "cuda", "615.71", ["sm_86"]))[0], ("linux-x86_64", "cuda", "cuda13"))
 
 
 class PackedOnWindows(unittest.TestCase):

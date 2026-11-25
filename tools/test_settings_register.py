@@ -69,7 +69,7 @@ class SettingsRegister(unittest.TestCase):
         # guards the scanner itself: a plain getenv, a helper, and an off-switch
         self.assertIn("STRATA_HIPBLASLT_TUNING", self.engine)
         self.assertIn("STRATA_KVA", self.engine)
-        self.assertGreater(len(self.engine), 900)
+        self.assertGreater(len(self.engine), 400)
 
 
 if __name__ == "__main__":

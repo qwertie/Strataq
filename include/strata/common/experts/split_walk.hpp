@@ -52,20 +52,6 @@ inline bool trim_needed(int64_t free_mib, const Model& m, bool carries_head_and_
 /// May this card take part in a layer split at all?
 inline bool card_usable(int64_t free_mib) { return free_mib >= kMinCardMib; }
 
-/// The single card's rule for dropping the draft layer, unchanged (generate.cpp, "SHORT OF VRAM: THE DRAFT LAYER IS THE LAST THING TO GO"): the layer, the head, a working
-/// cache beside the prompt buffers (214 slots, 543 MiB) and what is allocated after it.  Used for the card that holds the drafter in a layer split too.
-inline uint64_t draft_layer_need_bytes(uint64_t layer_bytes, uint64_t head_bytes) {
-    return layer_bytes + head_bytes + (220ull << 20) + (1550ull << 20);
-}
-inline bool draft_layer_short(uint64_t free_bytes, uint64_t layer_bytes, uint64_t head_bytes) {
-    return free_bytes > 0 && free_bytes < draft_layer_need_bytes(layer_bytes, head_bytes);
-}
-
-/// DFlash2 on a stage: its pack and its K/V ring and buffers (0.25 GiB), its draft head, and the same working cache and late allocations.
-inline uint64_t dflash2_need_bytes(uint64_t pack_bytes, uint64_t head_bytes) {
-    return pack_bytes + (250ull << 20) + head_bytes + (220ull << 20) + (1550ull << 20);
-}
-
 /// The next KV window down from `current` (0: the whole context in VRAM) for a context of `ctx` cells, or 0 when it is already the smallest (`min_cells`).
 inline int64_t next_kv_window(int64_t current, int64_t ctx, int64_t min_cells) {
     constexpr int64_t steps[] = {20480, 8192, 4096};

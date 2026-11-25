@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 #: Backend families, as the engine package manifest records them. Kept here so the argument parsers
 #: stay declarative without importing the tuning module on every CLI start.
-BACKENDS = ("metal", "cuda", "hip", "sycl", "cpu")
+BACKENDS = ("cuda", "hip", "cpu")
 from strata_control.doctor import inspect as inspect_components
 from strata_common.profiles import ProfileError
 from strata_control import launch_plan
@@ -1520,7 +1520,7 @@ def _tune(a: argparse.Namespace) -> int:
     `plan` is the review surface. It reports which dimensions the selected backend may search and
     *why* the rest were excluded, so a sweep can never measure a configuration the engine would
     refuse. Running a sweep is a separate, longer step and is deliberately not exposed here yet: it
-    needs a measurement harness for the selected engine, and this Mac has no workload to measure.
+    needs a measurement harness for the selected engine.
     """
     from strata_control import tuning
     machine = a.output == "json"

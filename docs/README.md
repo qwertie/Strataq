@@ -1,6 +1,6 @@
 # Strata guides
 
-**New here? Start with [Install Strata](INSTALL.md).** Download the one installer for your system (Windows, Linux or Mac), or install the Terminal with one line. Both use released engine packages. This documentation is for version 0.2.13.
+**New here? Start with [Install Strata](INSTALL.md).** Download the one installer for your system (Windows or Linux), or install the Terminal with one line. Both use released engine packages. This documentation is for version 0.2.13.
 
 ## Use Strata
 
@@ -17,15 +17,13 @@
 
 ## Hardware
 
-Use the guide for your GPU and operating system. Model and feature support can differ between backends.
+Strataq runs on NVIDIA and AMD graphics cards. Use the guide for your GPU and operating system. Model and feature support can differ between backends.
 
 | Hardware | Guide |
 | --- | --- |
 | NVIDIA RTX 20 / 30 / 40 / 50 | [Install](INSTALL.md#what-you-need) |
 | AMD Radeon (RX and AI PRO R9700) | [AMD / HIP](AMD_HIP.md) |
 | AMD Ryzen AI Max / Strix Halo | [Strix Halo](STRIX_HALO.md), [on Windows](STRIX_HALO_WINDOWS.md) |
-| Intel Arc on Linux | [Intel Arc](INTEL_ARC.md) |
-| Apple Silicon | [Mac / Metal](MAC.md) |
 | More than one GPU | [Multiple GPUs](MULTI_GPU.md) |
 | Two cards: one reads the prompt, one makes the answer (opt-in) | [Split serving](SPLIT_SERVE.md) |
 | Older GPUs | [Experimental hardware](OLDER_GPUS.md) |

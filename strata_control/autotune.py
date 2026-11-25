@@ -766,7 +766,7 @@ class Tuner:
         if not points:
             return []
         own = tune_knobs._current(self.ctx.base_args, "--spec-min-p")
-        control = ("control", float(own)) if own not in (None, "") and self.ctx.backend != "metal" else None
+        control = ("control", float(own)) if own not in (None, "") else None
         rounds = 3
         default: dict[int, list[float]] = {}
         vals: dict[tuple[str, Any], dict[int, float]] = {pt: {} for pt in points + ([control] if control else [])}
@@ -914,8 +914,6 @@ def recheck(session: Session, base_args: list[str], preset: dict[str, Any], *, c
     args = tune_knobs.apply_to_argv(base_args, s.get("args") or {})
     env = dict(s.get("env") or {})
     spec = RequestSet(warmups=1, decodes=3, decode_tokens=200, pp_tokens=4096 if ctx.context_tokens >= 6000 else 1024, long_tokens=0)
-    if ctx.backend == "sycl":
-        spec.pp_tokens = 0                         # the A750's 4K prompt takes a minute: decode only (8.3)
     out: dict[str, Any] = {"verdict": "inconclusive", "request_set": RECHECK_SET_NAME, "notes": []}
 
     def one(a: list[str], e: dict[str, str | None], label: str) -> RunResult:

@@ -15,12 +15,12 @@ GIB = 1 << 30
 class Machine:
     key: str                      # file name of the golden
     title: str
-    os: str                       # "windows" | "linux" | "macos"
-    machine: str                  # "x86_64" | "aarch64" | "arm64"
-    backend: str                  # engine family: cuda | hip | sycl | metal
+    os: str                       # "windows" | "linux"
+    machine: str                  # "x86_64" | "aarch64"
+    backend: str                  # engine family: cuda | hip
     archs: tuple[str, ...]        # what drafting.detect_hardware() answers for the cards
     card: str                     # the card's name as the hardware report gives it
-    vendor: str                   # nvidia | amd | intel | apple
+    vendor: str                   # nvidia | amd
     vram_gb: float                # the card's own memory (0 for a unified-memory chip)
     ram_gb: float
     arch_field: object = None     # the "arch" of the report's card (the app reads an integer for NVIDIA, "gfx..." for AMD)
@@ -43,12 +43,6 @@ MACHINES: tuple[Machine, ...] = (
             "AMD Radeon(TM) 8060S Graphics", "amd", 0.0, 128.0, arch_field="gfx1151", unified=True),
     Machine("r9700_linux", "Radeon AI PRO R9700 (gfx1201, Linux)", "linux", "x86_64", "hip", ("gfx1201",),
             "AMD Radeon AI PRO R9700", "amd", 32.0, 128.0, arch_field="gfx1201"),
-    Machine("arc_a750", "Intel Arc A750 (SYCL)", "linux", "x86_64", "sycl", ("arc_a",),
-            "Intel(R) Arc(TM) A750 Graphics", "intel", 8.0, 32.0),
-    Machine("mac_small", "Mac M-series, small memory (16 GB)", "macos", "arm64", "metal", (),
-            "Apple M4", "apple", 0.0, 16.0, unified=True),
-    Machine("mac_large", "Mac M-series, large memory (128 GB)", "macos", "arm64", "metal", (),
-            "Apple M4 Max", "apple", 0.0, 128.0, unified=True),
 )
 
 

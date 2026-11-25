@@ -15,7 +15,7 @@ import strata_server.server as S  # noqa: E402
 from strata_common import engine_client as EC  # noqa: E402
 
 
-NORMAL = os.path.abspath("/e/strata")
+NORMAL = os.path.abspath("/e/strata-q38")
 
 
 class FakeEngine:

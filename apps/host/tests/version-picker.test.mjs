@@ -85,9 +85,9 @@ test("one rule (owner 2026-11-08): the weight files without the lookup table aga
   assert.equal(versionFit({ ...nvfp4, on_this_pc: 'tight' }, { ram_gb: 128, vram_gb: 32 }), 'fits');
 });
 
-test("no card, little memory, a Mac with too little: the same two words, never 'Doesn't fit' (owner 11-08)", () => {
+test("no card, little memory: the same two words, never 'Doesn't fit' (owner 11-08)", () => {
   const v = { id: 'x', download_gb: 66, memory_gb: 35 };
-  for (const words of ['does not fit: it needs one or more graphics cards', 'does not fit', 'does not fit: this Mac has too little memory'])
+  for (const words of ['does not fit: it needs one or more graphics cards', 'does not fit'])
     assert.equal(versionFit({ ...v, on_this_pc: words }, { ram_gb: 8, vram_gb: 0 }), 'ssd', words);
   assert.equal(versionFit({ ...v, on_this_pc: 'does not fit' }, null), 'unknown', 'no hardware figures: no claim');
   assert.equal(versionFit({ ...v, on_this_pc: 'does not fit: about 120 GB of its experts would be read from the SSD' }, { ram_gb: 128, vram_gb: 24 }), 'fits', '35 GB fit 152 GB, whatever the old words said');

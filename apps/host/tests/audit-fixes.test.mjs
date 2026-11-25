@@ -20,7 +20,7 @@ test('memory readings never exceed capacity or become negative',()=>{
  assert.deepEqual(memoryReading(NaN,Infinity),{used:0,total:0,free:0,over:0});
 });
 test('fit distinguishes unified and dedicated budgets and only recommends a fast version',()=>{
- const hardware={memory:{totalGb:32},accelerator:{usableVramGb:32,unified:true,backend:'metal'}};
+ const hardware={memory:{totalGb:32},accelerator:{usableVramGb:32,unified:true,backend:'vulkan'}};
  const versions=[4,12,24,48].map((diskGb,i)=>({id:String(i),diskGb,contextMax:1048576,kvKbPerToken:24,experts:128}));
  assert.equal(versionFit(versions[0],null).zone,'unknown');
  assert.equal(recommendedVersion(versions,hardware).id,'1');

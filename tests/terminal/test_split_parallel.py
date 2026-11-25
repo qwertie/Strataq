@@ -57,10 +57,6 @@ class Base(unittest.TestCase):
         plat = mock.patch("sys.platform", "linux")
         plat.start()
         self.addCleanup(plat.stop)
-        # and NVIDIA: an Intel Arc in the box that runs the test would make the launch an Intel one (Runner.intel_chosen reads the real machine)
-        intel = mock.patch.object(Runner, "intel_chosen", lambda self: False)
-        intel.start()
-        self.addCleanup(intel.stop)
 
     def profile_for(self, cfg: dict, *, parallel=None, hw=None, four_card=None) -> dict:
         """What Runner.ensure_profile saves as the launch profile's overrides for this written run config."""

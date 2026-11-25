@@ -58,7 +58,7 @@ bool igpu_uma_arena_default(const char* gcn_arch, bool integrated, bool windows,
 /// The matrix-core prompt set an integrated GPU takes when `igpu_prompt_set_enabled()`: STRATA_HIP_WMMA, STRATA_PF_GEMM, STRATA_PA_FAST,
 /// STRATA_SELECT_WMMA, STRATA_HC_UPMIX, all "1".  Empty unless `integrated` (hipDeviceProp_t::integrated: the device
 /// shares the host's memory) AND the architecture is one of `igpu_prompt_defaults_arch`: a discrete card of the same
-/// architecture family (RX 7900 XTX gfx1100, R9700 gfx1201, ...) and every CUDA / SYCL build get nothing.  These change
+/// architecture family (RX 7900 XTX gfx1100, R9700 gfx1201, ...) and every CUDA build get nothing.  These change
 /// bits (KL-gated, notes-153-igpu.md); every switch keeps =0 as its off switch and STRATA_IGPU_DEFAULTS=0 turns the set off.
 std::vector<std::pair<std::string, std::string>> igpu_default_env(const char* gcn_arch, bool integrated);
 
@@ -71,7 +71,7 @@ std::vector<std::pair<std::string, std::string>> parallel_default_env(const char
 
 /// The same nine switches for Linux CUDA (the Qwen engine of generate.cpp) with 2 or more batch slots: what serve/server.py's
 /// PARALLEL_STACK_ENV set for a managed start, now the engine's own so a plain start is the same.  QUAL-PAR: bit-exact against the plain
-/// slots (greedy identity at c=1, first-token KL 0).  `linux_cuda` is false on HIP, Windows, Metal and SYCL builds (empty then).  Each
+/// slots (greedy identity at c=1, first-token KL 0).  `linux_cuda` is false on HIP and Windows builds (empty then).  Each
 /// switch keeps =0 as its off switch; a value the user set is kept.  Silent: the launcher printed nothing for these either.
 std::vector<std::pair<std::string, std::string>> parallel_default_env_cuda(bool linux_cuda, int batch_slots);
 
@@ -82,7 +82,7 @@ std::vector<std::string> apply_parallel_defaults_cuda(bool linux_cuda, int batch
 /// The tensor-core GDN prompt scan and the one-pass conv (QUAL-GDN, l620: prompt +4.4% at 4K, +5.5% at 16K, +5.7% at 32K; first-token KL mean
 /// 0.0019, max 0.0125; owner yes 2026-11-07): STRATA_GDN_TC=1 and STRATA_GDN_CONVL2=2 on Linux CUDA, what serve/server.py's GDN_STACK_CUDA set.
 /// The engine still gates the scan at run time (compute capability 8 or more, one SM per value head, shared memory) and falls back to the old
-/// kernels.  Empty when `linux_cuda` is false (HIP, Windows, Metal, SYCL).  =0 turns each off; a value the user set is kept.  Silent.
+/// kernels.  Empty when `linux_cuda` is false (HIP, Windows).  =0 turns each off; a value the user set is kept.  Silent.
 std::vector<std::pair<std::string, std::string>> gdn_default_env_cuda(bool linux_cuda);
 std::vector<std::string> apply_gdn_defaults_cuda(bool linux_cuda);
 

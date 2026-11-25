@@ -52,7 +52,7 @@ export async function detect({ force = false } = {}) {
   const freeGb = forced?.freeGb ?? (await availableMemoryGb(platform)) ?? os.freemem() / 1024 ** 3;
 
   const cpu = await detectCpu(platform);
-  const gpus = forced?.gpus ?? await detectGpus(platform, totalGb);
+  const gpus = forced?.gpus ?? await detectGpus(platform);
   const accelerator = pickAccelerator(gpus, cpu, totalGb);
 
   const hw = {
@@ -135,47 +135,8 @@ async function detectCpu(platform) {
   return {model:names.length===1?names[0]:names.length>1?names.join(' + '):model,cores:processors.length?processors.reduce((n,p)=>n+p.cores,0):threads,threads:processors.length?processors.reduce((n,p)=>n+p.threads,0):threads,arch:process.arch,ghz,processors,topologyKnown:!!processors.length};
 }
 
-async function detectGpus(platform, totalGb) {
+async function detectGpus(platform) {
   const gpus = [];
-
-  if (platform === 'darwin') {
-    const raw = await probe('system_profiler', ['SPDisplaysDataType', '-json'], 8000);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        const list = parsed?.SPDisplaysDataType ?? [];
-        list.forEach((g, i) => {
-          const name = g.sppci_model ?? g._name ?? 'Apple GPU';
-          if (!name || /display/i.test(name)) return;
-          const cores = Number(g.sppci_cores) || 0;
-          gpus.push({
-            id: `metal:${i}`,
-            index: i,
-            vendor: /apple/i.test(name) ? 'apple' : /amd|radeon/i.test(name) ? 'amd' : /intel/i.test(name) ? 'intel' : 'unknown',
-            name: cores ? `${name} (${cores}-core GPU)` : name,
-            // Apple silicon shares system memory; Metal's default wired limit is ~75%.
-            vramGb: /apple/i.test(name)&&process.arch==='arm64' ? round(totalGb * 0.75, 1) : (Number.parseFloat(String(g.sppci_vram??g.spdisplays_vram??'')) || 0) * (/MB/i.test(String(g.sppci_vram??g.spdisplays_vram??''))?1/1024:1),
-            unified: /apple/i.test(name)&&process.arch==='arm64',
-            backend: 'metal',
-          });
-        });
-      } catch {
-        /* fall through */
-      }
-    }
-    if (!gpus.length && process.arch === 'arm64') {
-      const chip = await probe('sysctl', ['-n', 'machdep.cpu.brand_string']);
-      gpus.push({
-        id: 'metal:0',
-        index: 0,
-        vendor: 'apple',
-        name: chip || 'Apple silicon GPU',
-        vramGb: round(totalGb * 0.75, 1),
-        unified: true,
-        backend: 'metal',
-      });
-    }
-  }
 
   const smi = await probe('nvidia-smi', ['--query-gpu=index,uuid,pci.bus_id,name,memory.total,driver_version','--format=csv,noheader,nounits']);
   gpus.push(...parseNvidiaDevices(smi));

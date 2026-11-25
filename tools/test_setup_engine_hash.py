@@ -305,7 +305,7 @@ class WhatARefusalDoesToTheCaller(unittest.TestCase):
     def fake_download(self, url, dst, what=None):
         with zipfile.ZipFile(dst, "w") as z:
             z.writestr("BUILD.json", json.dumps({"version": "0.1.40", "archs": [89]}))
-            z.writestr(setup.EXE, b"engine")
+            z.writestr(setup.Q38EXE, b"engine")
 
     def get_prebuilt(self, updating, digest):
         out = io.StringIO()

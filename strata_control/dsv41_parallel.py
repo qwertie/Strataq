@@ -74,7 +74,7 @@ def explain(n: int, context: int | None) -> list[str]:
 
 
 def warnings(n: int | None, *, cards: list[dict] | None, context: int | None = None, os_name: str | None = None, machine: str | None = None,
-             vendor: str | None = None, unified: bool = False) -> list[tuple[str, str]]:
+             vendor: str | None = None) -> list[tuple[str, str]]:
     """(what, what to do) for a pick that goes beyond what was run: a warning, never a refusal.  `cards` are the usable cards of the run;
     `os_name` is sys.platform, `machine` sysinfo.machine().  Nothing for an unset or one-at-a-time pick."""
     out: list[tuple[str, str]] = []
@@ -86,14 +86,10 @@ def warnings(n: int | None, *, cards: list[dict] | None, context: int | None = N
                     f"Pick a number from 2 to {MAX_CONVERSATIONS}."))
     os_name = (os_name or "").lower()
     machine = (machine or "").lower()
-    mac = os_name == "darwin" or vendor == "apple" or any(str(c.get("vendor")) == "apple" for c in cards or [])
     windows = os_name.startswith("win")
     uma_gpu = any(c.get("uma") or c.get("integrated") for c in cards or [])
     spark = os_name.startswith("linux") and machine in ("aarch64", "arm64")
-    if mac:
-        out.append(("--parallel was not run on a Mac (Metal). The code adds no Metal kernel of its own, but nothing here has started it there.",
-                    "If the engine stops at the start, launch without --parallel."))
-    elif windows:
+    if windows:
         out.append(("--parallel was run on Linux only. The Windows engine builds with it; a Windows run has not been done.",
                     "If the engine stops at the start or an answer looks wrong, launch without --parallel."))
     elif uma_gpu and not spark:
@@ -106,7 +102,7 @@ def warnings(n: int | None, *, cards: list[dict] | None, context: int | None = N
             out.append((f"--parallel was run on Radeon AI PRO R9700 cards (gfx1201); this PC has {', '.join(odd)}, which was not tried.",
                         "If the engine stops at the start, launch without --parallel."))
     small = [c for c in cards or [] if 0 < float(c.get("vram_gb") or 0) < 24 and not (c.get("uma") or c.get("integrated"))]
-    if small and not mac:
+    if small:
         c = small[0]
         gb = extra_gb(context)
         share = f" (about {gb:.2f} GB each at {_label(context)})" if gb is not None else ""

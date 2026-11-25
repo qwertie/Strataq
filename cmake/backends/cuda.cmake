@@ -19,7 +19,7 @@ macro(strata_cuda_toolchain)
   if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES AND NOT DEFINED ENV{CUDAARCHS})
     if(STRATA_BUILD_DSV41)
       # #3935: the DeepSeek engine's own release shape (sm_86, sm_89, sm_120 + PTX 120, as packaging/build_dsv41_cuda.sh), so a hand
-      # build of strata-dsv41 with no architecture runs on an RTX 30, 40 or 50 card; the Qwen engine's default below is unchanged
+      # build of strata-ds41 with no architecture runs on an RTX 30, 40 or 50 card; the Qwen engine's default below is unchanged
       set(CMAKE_CUDA_ARCHITECTURES "86-real;89-real;120" CACHE STRING "CUDA architectures")
     else()
       set(CMAKE_CUDA_ARCHITECTURES 120 CACHE STRING "CUDA architectures")

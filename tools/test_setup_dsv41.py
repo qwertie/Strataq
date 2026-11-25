@@ -165,7 +165,7 @@ class Install(unittest.TestCase):
         self.calls = []
         self.github_up = True
         self.cfg = {}
-        self.exe = self.root / "engine" / ("strata-dsv41.exe" if setup.WIN else "strata-dsv41")
+        self.exe = self.root / "engine" / setup.DS41EXE
         eng = self.root / "engine"
 
         def engine_step(a, gpu, hip, amd, cuda_tk, vision):
@@ -520,7 +520,7 @@ class EnginePackage(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, mock.patch.dict("os.environ", {"STRATA_DSV41_EXE": ""}):
             eng = Path(d) / "engine"
             eng.mkdir()
-            name = "strata-dsv41.exe" if setup.WIN else "strata-dsv41"
+            name = setup.DS41EXE
             self.assertIsNone(setup.dsv41_exe(eng))
             (eng / name).write_text("old")
             self.assertEqual(setup.dsv41_exe(eng), eng / name)                 # an all-in-one engine still works
@@ -658,15 +658,14 @@ class InstallOfficial(Install):
     """install_dsv41 for an official set, the engine and the tools mocked."""
 
     def install_ista(self, model=ISTA, ram=64.0, **kw):
-        self.packinfo_ok = True
-        self.smoke_ok = True
-        patches = [mock.patch.object(setup, "dsv41_pack_info", lambda exe, pack, libs: (self.packinfo_ok, "files: 6, all present and long enough")),
-                   mock.patch.object(setup, "dsv41_smoke", lambda *a, **k: (self.smoke_ok, "The capital of France is Paris.")
-                                     if self.smoke_ok else (False, "test question failed: the answer is empty"))]
-        for p in patches:
-            p.start()
-            self.addCleanup(p.stop)
+        self.check_pack([])
         return self.install(ram=ram, cards=[RTX5070], model=model, **kw)
+
+    def check_pack(self, problems):
+        """Makes setup's own pack check (dsv41_pack_problems) find `problems`: the mocked pack_gguf.py writes no pack."""
+        p = mock.patch.object(setup, "dsv41_pack_problems", lambda pack: problems)
+        p.start()
+        self.addCleanup(p.stop)
 
     def test_downloads_the_set_the_engram_once_and_the_drafter(self):
         rc, out = self.install_ista()
@@ -789,7 +788,7 @@ class InstallOfficial(Install):
         self.assertNotIn("building it again", out)
         self.assertEqual(len(self.pack_runs()), 0)
 
-    def test_pack_info_profile_smoke_and_the_launch_flags(self):
+    def test_pack_check_profile_and_the_launch_flags(self):
         rc, out = self.install_ista()
         self.assertEqual(rc, 0, out)
         a = self.cfg["args"]
@@ -800,32 +799,14 @@ class InstallOfficial(Install):
         self.assertNotIn("--ssd-cache", a)                                      # the store sizes itself
         self.assertEqual(a[a.index("--max-context") + 1], "131072")
         self.assertIn("checked: every file the engine needs is there", out)
-        self.assertIn("test question answered sensibly", out)
         self.assertTrue(Path(a[a.index("--pack") + 1]).match("*packs/deepseek-v4.1-flash-ist-das-2.00bpw"))
 
     def test_an_incomplete_pack_stops_with_the_missing_file(self):
-        self.packinfo_ok = False
-        patches = [mock.patch.object(setup, "dsv41_pack_info", lambda exe, pack, libs: (False, "  MISSING x.gguf (1.00 GB wanted)")),
-                   mock.patch.object(setup, "dsv41_smoke", lambda *a, **k: (True, "Paris"))]
-        for p in patches:
-            p.start()
-            self.addCleanup(p.stop)
+        self.check_pack([("x.gguf", "missing", 0, 10 ** 9)])
         rc, out = self.install(ram=64.0, cards=[RTX5070], model=ISTA)
         self.assertEqual(rc, 1, out)
         self.assertIn("pack is not complete", out)
-        self.assertIn("MISSING", out)
-
-    def test_a_failed_text_check_is_said_plainly_and_stops(self):
-        patches = [mock.patch.object(setup, "dsv41_pack_info", lambda exe, pack, libs: (True, "all present")),
-                   mock.patch.object(setup, "dsv41_smoke", lambda *a, **k: (False, "!!!!\ntest question failed: the answer is empty"))]
-        for p in patches:
-            p.start()
-            self.addCleanup(p.stop)
-        rc, out = self.install(ram=64.0, cards=[RTX5070], model=ISTA)
-        self.assertEqual(rc, 1, out)
-        self.assertIn("does not answer sensibly", out)
-        self.assertIn("run setup again", out)
-        self.assertFalse(self.cfg)                                              # no start script for a model that failed its check
+        self.assertIn("x.gguf (not there)", out)
 
     def test_a_disk_that_cannot_hold_the_set_stops(self):
         with mock.patch.object(setup, "free_gb", lambda p: 100.0):
@@ -899,34 +880,12 @@ class PicturesByDefault(Install):
 
 class PackCheck(Install):
     """0.2.9 (Hugging Face discussion 30): a user with the six-shard files ISTA's converter wrote, a pack deleted twice, and "the model's pack is
-    not complete ()" every time.  The engine's own file check is run for real here by a stand-in that behaves like src/dsv41/ds4_packinfo.cpp, or
-    dies without a word; the pack tool is a stand-in that writes the pack description it would write."""
-
-    ENGINE_SILENT = "silent"            # the engine prints nothing and dies with a signal
-    ENGINE_OK = "ok"                    # the engine reports like ds4_packinfo.cpp
+    not complete ()" every time.  Setup's own file check (dsv41_pack_problems) runs for real here; the pack tool is a stand-in that writes the
+    pack description it would write."""
 
     def setUp(self):
         super().setUp()
-        self.engine = self.ENGINE_OK
         self.pack_need = 4              # bytes the stand-in pack wants from each file (the stand-in model files are 4 bytes long)
-        self.smoke_ok = True
-        self.infos = 0
-        real_run = subprocess.run
-
-        def fake_run(cmd, *a, **k):
-            if isinstance(cmd, (list, tuple)) and len(cmd) > 1 and cmd[1] == "--pack-info":
-                self.infos += 1
-                if self.engine == self.ENGINE_SILENT:
-                    return subprocess.CompletedProcess(cmd, -11, "", "")
-                problems = setup.dsv41_pack_problems(Path(cmd[3]))
-                if problems is None:
-                    return subprocess.CompletedProcess(cmd, 1, f"pack-info: {cmd[3]}/ds4.txt: not found\n", "")
-                lines = [f"  MISSING {p} ({w / 1e9:.2f} GB wanted)" if kind == "missing" else f"  SHORT {p}: {h / 1e9:.2f} GB there, {w / 1e9:.2f} GB wanted"
-                         for p, kind, h, w in problems]
-                if problems:
-                    return subprocess.CompletedProcess(cmd, 2, "\n".join(lines) + f"\n  {len(problems)} of 7 files missing or short: this pack cannot load\n", "")
-                return subprocess.CompletedProcess(cmd, 0, "pack-info x\n  files: 7, all present and long enough\n", "")
-            return real_run(cmd, *a, **k)
 
         def fake_build(cmd, **k):
             self.calls.append(("run", cmd))
@@ -940,10 +899,9 @@ class PackCheck(Install):
                 (out / "tensors.txt").write_text("".join(f"file {i} {n}\n" for i, n in enumerate(files))
                                                  + "".join(f"t w{i} BF16 {i} 0 {self.pack_need} 1\n" for i in range(len(files))))
 
-        for p in (mock.patch.object(setup.subprocess, "run", fake_run), mock.patch.object(setup, "run", fake_build),
-                  mock.patch.object(setup, "dsv41_smoke", lambda *a, **k: (self.smoke_ok, "Paris") if self.smoke_ok else (False, "!!\ntest question failed"))):
-            p.start()
-            self.addCleanup(p.stop)
+        p = mock.patch.object(setup, "run", fake_build)
+        p.start()
+        self.addCleanup(p.stop)
 
     def six_files(self, with_old_four=True):
         """The folder of the user: ISTA's six-shard files and the converted Engram, the old four-shard files beside them (stand-ins)."""
@@ -973,34 +931,17 @@ class PackCheck(Install):
 
     # ---- the reason is never empty
 
-    def test_an_engine_that_dies_without_a_word_is_named_by_how_it_ended(self):
-        with mock.patch.object(setup.subprocess, "run", lambda cmd, *a, **k: subprocess.CompletedProcess(cmd, -11, "", "")):
-            good, why = setup.dsv41_pack_info(Path("/e/strata-dsv41"), Path("/p"), [])
-        self.assertFalse(good)
-        self.assertTrue(why.strip())
-        self.assertIn("printed nothing", why)
-        self.assertIn("signal 11", why)
-        with mock.patch.object(setup.subprocess, "run", lambda cmd, *a, **k: subprocess.CompletedProcess(cmd, 3, "", "")):
-            self.assertIn("exit code 3", setup.dsv41_pack_info(Path("/e/x"), Path("/p"), [])[1])
-        with mock.patch.object(setup.subprocess, "run", lambda cmd, *a, **k: subprocess.CompletedProcess(cmd, 139, "", "libx.so: cannot open")):
-            self.assertIn("cannot open", setup.dsv41_pack_info(Path("/e/x"), Path("/p"), [])[1])
-
-    def test_the_users_case_the_engine_dies_silently_but_the_files_are_all_there(self):
-        # six-shard files from the converter beside the old ones, no --pack-info answer at all: setup checks the pack's files itself and goes on
+    def test_the_users_case_six_shard_files_beside_the_old_ones_make_a_complete_pack(self):
         own, names, old, tiny = self.six_files()
-        self.engine = self.ENGINE_SILENT
         rc, out = self.go(own, tiny)
         self.assertEqual(rc, 0, out)
         self.assertNotIn("is not complete ()", out)
-        self.assertIn("no usable answer", out)
-        self.assertIn("signal 11", out)
-        self.assertIn("all of them are there and long enough", out)
+        self.assertIn("checked: every file the engine needs is there", out)
         self.assertEqual(len(self.pack_runs()), 1)
 
-    def test_silent_engine_and_a_file_missing_gives_the_real_reason_on_one_line(self):
+    def test_a_file_missing_gives_the_real_reason_on_one_line(self):
         own, names, old, tiny = self.six_files(with_old_four=False)
         self.pack_need = 4
-        self.engine = self.ENGINE_SILENT
         orig = setup.dsv41_write_pack_source
 
         def vanish(pack):                # a file goes between the pack being made and the check
@@ -1085,7 +1026,7 @@ class PackCheck(Install):
         short = setup.dsv41_problems_line([("/m/a.gguf", "short", 11_200_000_000, 39_100_000_000)])
         self.assertIn("a.gguf (11.2 GB there, 39.1 GB wanted)", short)
 
-    def test_the_pack_check_done_here_agrees_with_the_engines(self):
+    def test_the_pack_check_finds_missing_and_short_files(self):
         with tempfile.TemporaryDirectory() as t:
             t = Path(t)
             (t / "m").mkdir()

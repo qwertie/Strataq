@@ -290,8 +290,8 @@ std::optional<HostMemoryReading> sample_host_memory() {
 #elif defined(__linux__)
     return sample_host_memory(MemoryProbePaths{}, memory_limit_bytes());
 #elif defined(__APPLE__)
-    // The rule of metal/src/engine/arena_budget.h's arena_avail(): free + purgeable pages, plus the inactive and speculative
-    // ones only up to the file-backed page count (other programs' inactive anonymous memory is what compresses or swaps).
+    // Free + purgeable pages, plus the inactive and speculative ones only up to the file-backed page count (other
+    // programs' inactive anonymous memory is what compresses or swaps).
     vm_statistics64_data_t vs{};
     mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
     if (host_statistics64(mach_host_self(), HOST_VM_INFO64, (host_info64_t) &vs, &count) != KERN_SUCCESS) return {};

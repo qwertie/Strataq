@@ -10,7 +10,7 @@ const engineState = {
   startedAt: null,
   uptimeSec: 0,
   version: 'strata-engine 0.1.0',
-  backend: 'metal',
+  backend: 'cuda',
   timer: null,
 };
 

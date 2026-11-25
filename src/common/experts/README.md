@@ -30,9 +30,6 @@ What is here so far is the model-neutral host code, which needs no GPU:
   (`src/base/gpu/links.cu`): a layer's experts on another card computed there in one hop when that costs less than
   the CPU, refills paced by a card's link, copying an evicted expert back to RAM, and which card holds which experts.
 
-The SYCL build compiles `expert_profile` and `ram_tier` too, without copies of them; `expert_pages` and `ram_experts`
-are for strata-q38, which the SYCL build does not make.
-
 Still in `src/core/`: the GPU cache (`expert_cache`) and the expert sources with their prefetch and the adaptive tier's
 copies (`expert_source`, `foresight_swap.hpp`). They call the CUDA runtime directly (streams, events, page-locked and
 mapped host memory, the driver's virtual memory functions), which code in `src/common/` must not, and

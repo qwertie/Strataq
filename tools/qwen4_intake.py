@@ -11,7 +11,7 @@ For each set of files (a split model is one set) it prints, and writes as JSON:
   * the architecture and every geometry key, against both families Strata runs (qwen4exp = include/strata/core/geometry.hpp's
     kCompiledGeometry; qwen35moe = the run-time shapes of src/qwen35 with its fixed limits);
   * the tensor layout against the layout tables of include/strata/core/family_layout.hpp: missing, reshaped and unknown tensors;
-  * every quant type against what each backend (CUDA, HIP, SYCL, Metal) has kernels for, by tensor role;
+  * every quant type against what each backend (CUDA, HIP) has kernels for, by tensor role;
   * the tokenizer (model, pre-tokenizer, vocabulary, special tokens, BOS/EOS) against Flash-Next's, and whether
     tools/strata_tokenizer.py can build it; the chat template's hash, tool-call form and thinking tags;
   * the MTP block, the vision projector, split shards, sizes, sha256 where known, the general.* names and licence;
@@ -108,9 +108,8 @@ COMPILED = Geometry()
 # include/strata/artifact/model_family.hpp
 FAMILY_ARCH = {"qwen4exp": "qwen4exp", "qwen35moe": "qwen35moe"}
 FAMILY_TITLE = {"qwen4exp": "Qwen3.8-Flash-Next", "qwen35moe": "Qwen3.6-35B-A3B"}
-# model_family_runs() is true for qwen4exp only; qwen35moe has the src/qwen35 path the CUDA and HIP builds switch to.  The SYCL
-# build refuses it (model_family_not_supported); Metal has no such path (docs: "Metal and Intel Arc have no such path").
-FAMILY_BACKENDS = {"qwen4exp": ["cuda", "hip", "sycl", "metal"], "qwen35moe": ["cuda", "hip"]}
+# model_family_runs() is true for qwen4exp only; qwen35moe has the src/qwen35 path the CUDA and HIP builds switch to.
+FAMILY_BACKENDS = {"qwen4exp": ["cuda", "hip"], "qwen35moe": ["cuda", "hip"]}
 # Other architectures Strata runs with an engine of its own: never a Qwen4 path.
 OTHER_ENGINES = {"deepseek41": "strata-dsv41 (setup.py MULTI_FILE_FAMILIES): a separate engine, not the Qwen3.8 / Qwen3.6 paths"}
 
@@ -369,7 +368,7 @@ def check_layout(tensors: dict[str, list[int]], g: Geometry, complete: bool) -> 
 
 TYPE_NAME = G.GGML_TYPES
 SMALL_OK = {0, 1, 30}            # F32, F16, BF16: norms, router, biases, the SSM vectors (q36_engine.cu f32(): F32 / BF16 / F16 / Q8_0)
-MMVQ = {2, 6, 7, 8, 11, 12, 13, 14, 20, 23, 42, 16, 17, 18, 21, 22, 29}        # native_mmvq_supported(): CUDA, SYCL and Metal host copy
+MMVQ = {2, 6, 7, 8, 11, 12, 13, 14, 20, 23, 42, 16, 17, 18, 21, 22, 29}        # native_mmvq_supported()
 BACKEND_LISTS = {
     # src/kernels/cuda/iq_kernels.cu: STRATA_GU_FMTS / STRATA_D_FMTS (STRATA_Q6K_EXPERTS=ON, the default) and is_iq().  The HIP
     # build compiles this same file: AMD gfx11 / gfx12 / gfx1151 differ in kernel modes and speed, not in this list.
@@ -377,23 +376,11 @@ BACKEND_LISTS = {
              "down": {20, 23, 42, 7, 6, 2, 3, 8, 13, 14, 40, 144, 146, 147, 148, 149},
              "is_iq": {16, 17, 18, 20, 21, 22, 23, 29, 42, 11, 12, 13, 14, 7, 6, 2, 3, 8, 40, 144, 145, 146, 147, 148, 149},
              "mmvq": MMVQ, "embed_extra": {30, 14}},
-    # sycl/src/kernels/cuda/iq_kernels.dp.cpp (the SYCL port; it has no NVFP4 or the Gyro-L pair-trellis types)
-    "sycl": {"gu": {16, 17, 18, 21, 22, 23, 29, 42, 12, 13, 14, 6, 2, 3, 8, 144, 145},
-             "down": {20, 23, 42, 7, 6, 2, 3, 8, 13, 14, 144, 146},
-             "is_iq": {144, 145, 146, 16, 17, 18, 20, 21, 22, 23, 29, 42, 11, 12, 13, 14, 7, 6, 2, 3, 8},
-             "mmvq": MMVQ, "embed_extra": {30}},
-    # metal/src/engine/iq_host.cpp (host helpers; the kernels are mac-kern's, metal/src/engine/window.cpp: not audited)
-    "metal": {"gu": {16, 17, 18, 21, 22, 23, 29, 12, 13, 14, 42, 144, 145, 8},
-              "down": {23, 42, 144, 146, 20, 7, 6, 8, 11, 12, 13, 14, 21},
-              "is_iq": {16, 17, 18, 20, 21, 22, 23, 29, 42, 11, 12, 13, 14, 7, 6, 2, 3, 8, 144, 145, 146},
-              "mmvq": MMVQ, "embed_extra": {30}},
 }
 BACKEND_LISTS["hip"] = BACKEND_LISTS["cuda"]
 BACKEND_SOURCES = {
     "cuda": "src/kernels/cuda/iq_kernels.cu (native_expert_supported), src/kernels/cuda/native_mmvq.cu (native_mmvq_supported)",
     "hip": "the same two files as cuda (the HIP build compiles them)",
-    "sycl": "sycl/src/kernels/cuda/iq_kernels.dp.cpp, sycl/src/kernels/cuda/native_mmvq.dp.cpp",
-    "metal": "metal/src/engine/iq_host.cpp, metal/src/engine/mmvq_host.cpp (host helpers; Metal GEMV kernels not audited)",
 }
 
 
@@ -447,7 +434,7 @@ def analyse_quants(tensors: list[tuple[str, list[int], int]], g: Geometry | None
         m = re.match(r"blk\.(\d+)\.ffn_(gate|up|down)_exps\.weight$", name)
         if m:
             per_layer.setdefault(int(m.group(1)), {})[m.group(2)] = ty
-    backends = ["cuda", "hip", "sycl", "metal"]
+    backends = ["cuda", "hip"]
     result = {"types": dict(sorted(by_type.items(), key=lambda kv: -kv[1])), "roles": roles, "backends": {}, "unknown_types": [],
               "expert_combinations": []}
     combos: dict[tuple, list[int]] = {}

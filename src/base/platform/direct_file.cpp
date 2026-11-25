@@ -69,7 +69,7 @@ int io_threads(int dflt) {
 }
 }  // namespace
 
-#if !defined(STRATA_DIRECT_FILE_PREAD_THREADS)   // the SYCL build sets 64 (sycl/CMakeLists.txt)
+#if !defined(STRATA_DIRECT_FILE_PREAD_THREADS)
 #define STRATA_DIRECT_FILE_PREAD_THREADS 16
 #endif
 

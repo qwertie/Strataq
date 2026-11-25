@@ -75,15 +75,6 @@ def run_cli(argv: list[str]) -> tuple[int, str, str]:
     return code, out.getvalue(), err.getvalue()
 
 
-def not_intel(testcase) -> None:
-    """These fixtures describe an NVIDIA PC (catalog(HW_12)). Runner.intel_chosen asks the machine that runs the test, so on a box with an
-    Intel Arc (p1006) the launch became an Intel one and the plan words changed. Patched for the length of the test."""
-    from strata_cli.launch.runner import Runner
-    p = mock.patch.object(Runner, "intel_chosen", lambda self: False)
-    p.start()
-    testcase.addCleanup(p.stop)
-
-
 def with_current_imports(source: bytes) -> bytes:
     """Points an earlier Control file's `from strata_control import ...` lines at the packages those modules live in in this
     checkout (docs/REFACTOR_PLAN.md step A2 moved some to strata_base and strata_common), so the old file runs here.  Used by

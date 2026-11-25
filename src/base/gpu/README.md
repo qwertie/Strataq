@@ -14,8 +14,7 @@ hardware traits (`emulate`, `sm75_series`, `sm120_series`, `tc_sm75`, `gfx12_pla
 
 `runtime.hpp` is the runtime interface that shared code calls instead of the CUDA runtime. So far it has what
 `src/common/state` needs: device memory, 2D copies and memsets; **A5** adds the rest (streams, events) as shared code
-needs them. The Metal build compiles `runtime.cu` as C++ over `metal/include/metal_compat`, as it does `device.cu` and
-`pinned.cu`. `links` measures a card's links at start (to the host and to another card, each way, and a small copy's
+needs them. `links` measures a card's links at start (to the host and to another card, each way, and a small copy's
 round trip), for the rules in `src/common/experts/card_rules.cpp` (docs/MEMORY_MANAGER_PLAN.md, step M8).
 
 See [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) for the layers and

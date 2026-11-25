@@ -8,9 +8,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cuda_runtime.h>
-#if defined(STRATA_METAL)
-#include <vector_types.h>   // uint4
-#endif
 
 #include "ds4_launch.h"   // strata_ds4_launch
 
@@ -46,7 +43,7 @@ struct Mats {
 // the device's clock in ns (NVIDIA's globaltimer; HIP's wall clock, 100 MHz on gfx11/gfx12); 0 on other AMD GPUs,
 // whose wall clock may tick at another rate - the host then times the pull itself
 __device__ __forceinline__ unsigned long long pull_clock() {
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_METAL)   // (NVIDIA only; Metal and other AMD take the host-timed path)
+#if !defined(STRATA_USE_HIP)   // (NVIDIA only; other AMD takes the host-timed path)
     unsigned long long t;
     asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(t));
     return t;

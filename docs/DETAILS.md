@@ -9,6 +9,10 @@ New here? Start with the [README](../README.md). Installing is in [INSTALL.md](I
 [MODELS.md](MODELS.md), common problems are in [TROUBLESHOOTING.md](TROUBLESHOOTING.md). DeepSeek V4.1-Flash has its own
 engine and is covered in [MODELS.md](MODELS.md); nothing below applies to it unless stated.
 
+> **Strataq note:** much of this page was written for the original Qwen3.8 engine (`strata`), which Strataq has
+> deleted. Qwen3.8 now runs on the page-pool engine `strata-q38`; where the two differ, this page may still describe the
+> original. The Mac (Metal) and Intel Arc (SYCL) engines are deleted too.
+
 > **On this page:** [Quick start](#quick-start) · [Speed](#speed-measured) · [Which model?](#which-model) ·
 > [Windows](#windows) · [Linux](#linux) · [Memory modes](#memory-modes) · [Sharing the GPU](#sharing-the-gpu-with-other-programs-optional) ·
 > [API](#using-it) · [MCP tools](#tools-from-mcp-servers) · [MCP server](#manage-strata-from-your-ai-assistant-mcp-server) ·
@@ -541,7 +545,7 @@ in the Memory panel of the page-pool engines ([below](#the-memory-panel)).
 
 Engines built from `src/` accept both names below wherever they support the setting. Use the first name;
 the older name is deprecated. Aliases do not add settings to engines that lack them. Installed older engines
-and the separate SYCL engine may accept only their original names. Launchers keep those spellings for compatibility.
+may accept only their original names. Launchers keep those spellings for compatibility.
 
 | Option | Older name, still taken |
 | --- | --- |
@@ -549,7 +553,7 @@ and the separate SYCL engine may accept only their original names. Launchers kee
 | `--vram-reserve-mib N` | `--reserve-mib` (the DeepSeek engines) |
 | `--eos-ids LIST` | `--eos` (the DeepSeek engines) |
 | `--batch N` | `--slots` |
-| `--max-new N` | `--n` (strata-dsv41, strata-q36) |
+| `--max-new N` | `--n` (strata-q36) |
 | `--max-context N` | `--ctx` (strata-q36) |
 | `--prefill N` | `--chunk` (strata-q36) |
 
@@ -557,7 +561,7 @@ Some options look alike but are different settings. Qwen's `--gpu` hides the oth
 `--gpus` picks cards among all of them. Qwen's `--pool-workers` counts the threads beside the engine's own; DeepSeek's
 `--cpu-threads` counts that one too. Qwen3.8's `--prefill` takes `auto` and `auto:N`; Qwen3.6 takes `auto` or a number.
 EOS lists use comma-separated token IDs. DeepSeek's `--prefill-chunk 0` means
-windows of 16 tokens. strata-dsv41 takes its conversations at once as `--parallel`.
+windows of 16 tokens.
 
 ### Streaming and tool calls
 
@@ -607,7 +611,7 @@ windows of 16 tokens. strata-dsv41 takes its conversations at once as `--paralle
   only after the strict parse failed, the server doubles the backslashes that are not valid escapes and checks the answer again.
   Valid output is never touched. `\b`, `\f`, `\n`, `\r`, `\t` and `\uXXXX` are valid JSON, so they stay: a `\beta` beside a `\alpha`
   comes back with a backspace. Off by default.
-- `logit_bias` and token/bias pair lists work on CUDA, HIP and Metal engines, also with continuous batching (`--batch` / `--parallel`: each slot keeps its own bias) ([LOGIT_BIAS.md](LOGIT_BIAS.md)).
+- `logit_bias` and token/bias pair lists work on CUDA and HIP engines, also with continuous batching (`--batch` / `--parallel`: each slot keeps its own bias) ([LOGIT_BIAS.md](LOGIT_BIAS.md)).
 - Stop strings (`stop`, `stop_sequences`), `temperature`, `top_p`, `top_k`, `min_p` and `seed` are honored per request.
   `top_k` keeps at most 64 candidates. Penalties (`presence_penalty`, `frequency_penalty`, `repetition_penalty`,
   `penalty_last_n`; llama.cpp's `repeat_penalty` and `repeat_last_n` work too) apply to every token the speculative check
@@ -615,8 +619,7 @@ windows of 16 tokens. strata-dsv41 takes its conversations at once as `--paralle
   `penalty_last_n` (64 when a penalty is set and the request gives none) is a window over the tokens of the current answer: the
   prompt, including earlier assistant turns in it, is not counted, so the numbers or a quoted earlier answer in a new task are not
   penalised. `STRATA_PENALTY_PROMPT=1` counts the last `penalty_last_n` tokens of prompt and answer together, the old window.
-  This holds for Qwen3.8's original engine and the Qwen3.6-35B-A3B engine on CUDA, HIP, Metal and SYCL; strata-q38
-  still counts the prompt too.
+  This holds for the Qwen3.6-35B-A3B engine; strata-q38 still counts the prompt too.
 - `priority` (a whole number, default 0; OpenAI and Anthropic bodies alike) orders the requests strata-q38 runs at once
   ("parallel"): a higher one gets a step's extra draft rows first, and a request that finds every slot busy takes the
   slot of the running request of the lowest priority below its own. That request is paused (its conversation goes to
@@ -667,8 +670,8 @@ windows of 16 tokens. strata-dsv41 takes its conversations at once as `--paralle
   window emits no tokens, the request ends, and the next request drops the live session, checkpoints and parked
   conversations and reads its prompt from token 0. The server retries a request that had sent nothing once, transparently.
   A started reply ends as `"length"`, and a second hit on the retry returns an error. `STRATA_NAN_GUARD=0` turns the check off;
-  `STRATA_NAN_INJECT=<n>[,<n>...]` flags the n-th checked window to test the path. The one-shot command line and the
-  Intel (SYCL) port do not check.
+  `STRATA_NAN_INJECT=<n>[,<n>...]` flags the n-th checked window to test the path. The one-shot command line does not
+  check.
 
 ### Context and limits
 
@@ -984,8 +987,8 @@ size and how its first user message begins. A session's size is the tokens it ho
 tokens and its snapshot in RAM or on disk. Pick one, and its tokens are read from the engine then. The
 panel opens on the session a request used last.
 
-The words below — session, slot, parked — are the **original engine's**
-([ARCHITECTURE.md](ARCHITECTURE.md#two-command-loops-in-the-tree)); the paged engines (`strata-q38`, `strata-ds41`)
+The words below — session, slot, parked — are the **per-session engines'**
+([ARCHITECTURE.md](ARCHITECTURE.md#the-command-loops)); the paged engines (`strata-q38`, `strata-ds41`)
 hold conversations in page pools instead, and list them as paused.
 
 - **Session** (or **Solo session** with `"parallel"`, `--batch`): the engine's own session. A request that is alone
@@ -1393,12 +1396,11 @@ them. The app, `strata launch` and setup use one rule for the reader:
 | Graphics memory | Default reader | Cost |
 | --- | --- | --- |
 | Under 24 GB (NVIDIA and AMD) | CPU reader | Nothing from the card, so the experts keep their room. About 3 s for a 300-token picture on 8 cores; more tokens take longer in proportion. |
-| 24 GB or more | The card's reader, started by the first picture and stopped after 120 s without one (NVIDIA, one GPU) | 0.1-0.5 s per picture (up to 1,024 image tokens) once it runs, 1.2-1.4 s more for the first picture after a stop. It holds about 1.3 GB of VRAM only while pictures are being read; a start with no room is read on the CPU. On AMD, Intel and a Mac the reader stays on the card as before. |
-| Mac | The GPU (Metal) | Whatever its memory. |
+| 24 GB or more | The card's reader, started by the first picture and stopped after 120 s without one (NVIDIA, one GPU) | 0.1-0.5 s per picture (up to 1,024 image tokens) once it runs, 1.2-1.4 s more for the first picture after a stop. It holds about 1.3 GB of VRAM only while pictures are being read; a start with no room is read on the CPU. On AMD the reader stays on the card as before. |
 
 Switch pictures off with `--vision no` (or "No" in the app and `strata launch`), or pick the reader with `--vision gpu` or
 `--vision cpu`. Setup downloads the encoder and puts a small helper (`strata-vision`, from llama.cpp's `mtmd` library) beside
-the engine. Where no reader exists, pictures stay off and the screen says so (the Intel Arc engine has none yet). On AMD the
+the engine. Where no reader exists, pictures stay off and the screen says so. On AMD the
 card's reader is `strata-vision-hip`; if it cannot start, the server starts the CPU reader and prints one line ([AMD_HIP.md](AMD_HIP.md)).
 
 A picture becomes up to 1,024 tokens of the context (a 640x480 photo: 300). The same picture sent again, as chat apps do on
@@ -1763,7 +1765,7 @@ never changed. `STRATA_ROUTE_PRIOR` raises KL and is an opt-in again in 0.2.8 (0
 | `no progress for 60 s ... reading the prompt` on Linux with `threads waiting on the disk (state D)` in the stall report | The engine waits for the drive: the n-gram table is read at random (`--ple-io direct`), which a rotational disk cannot keep up with. `--ple-io ram` (needs RAM for the table) or the model on an SSD fixes it. Setup adds `--ple-io ram` itself on a rotational disk when the RAM holds the table. |
 | `the engine said nothing for ... s during the request` | The engine and the server lost step. The server ends the engine after `engine_silence_s` (300 by default), the request ends with an error and the next request starts the engine again. If it repeats, add the end of the engine log to issue #481. |
 | `the engine said nothing for ... s and used no CPU or disk in that time (frozen ...)` | A quicker version of the check above for an engine that stopped, not slowed: after 90 s the server ends it. `STRATA_ENGINE_STALL_S=180` sets the time, `0` turns it off (needs `psutil`, which setup installs). |
-| The desktop app or the Terminal could not find an engine, or a Mac says an app is "damaged" | [TROUBLESHOOTING.md](TROUBLESHOOTING.md#the-desktop-app-and-the-terminal). |
+| The desktop app or the Terminal could not find an engine | [TROUBLESHOOTING.md](TROUBLESHOOTING.md#the-desktop-app-and-the-terminal). |
 | Anything else | The engine log is `strata-<model>.log` in this folder. In the app: Settings, Engine, Diagnostics, View logs, Save logs. In the Terminal: `strata doctor`. |
 
 ---
@@ -2164,32 +2166,23 @@ saved sessions keep each picture's place and hash; Qwen also keeps rotary coordi
 The DeepSeek tower's allocated memory is counted as scratch. An external encoder is included in system use
 (the panel's Other), rather than the language engine's weights.
 
-### Try the page-pool engine
+### The page-pool engines
 
-The original engine stays the default. To try `strata-ds41`, set `exe` in the server's JSON config to its full
-path. In the app, open the model's settings and set **Engine program** to that path. In the Terminal, use:
+Qwen3.8 runs on `strata-q38` and DeepSeek on `strata-ds41`. The engines they replaced (`strata` and `strata-dsv41`)
+are gone from Strataq.
 
-```sh
-strata launch --family deepseek41 --model ist-das-2.00bpw --set exe=C:/engines/strata-ds41.exe --yes --no-tui
-```
-
-Use `strata-q38` the same way for Qwen3.8. The binary and its matching runtime libraries must already be installed.
-No new engine-choice flag is needed. Restore the original `exe` path to return to the original engine.
-
-These engines add live memory settings in the Memory panel, several conversations at once, pausing conversations
+These engines have live memory settings in the Memory panel, several conversations at once, pausing conversations
 in RAM or on disk, saved sessions, and layer splitting. DeepSeek's layer split is still under test; separate-card
 validation remains open in D9. `--tp` is unavailable; DeepSeek uses the shared group scheduler described below.
 The server keeps context, GPU selection and `parallel` (starting conversations at once). It logs options it leaves
 out. Use `--set gpu-mib=18432 --set ram-mib=8192` to set the pools; `tokens-min` and `tokens-max` bound the token
 pages kept in the pools. These are engine options in the config's `args`, also available through `--set`.
 
-The original Qwen3.8 engine (`strata`) implements `--batch-groups G`: groups of slots move through separate
-GPU stages, allowing different cards to work on different groups at once. `G` must divide `--batch`; `1` uses
-one group. `auto` selects the largest divisor no greater than the stage count, subject to the original engine's
-feature gates. Original DeepSeek (`strata-dsv41`) and Qwen3.6 (`strata-q36`) do not implement this option.
-See [BATCHING.md](BATCHING.md) for the original engine's settings and measurements.
+`--batch-groups G` moves groups of conversations through separate GPU stages, so that different cards work on
+different groups at once. Qwen3.6 (`strata-q36`) does not implement this option. [BATCHING.md](BATCHING.md) has the
+settings and measurements of the original engine, which had it first.
 
-`strata-q38` now runs pipeline groups through the shared paged step. `--batch-groups 1` keeps its synchronous
+`strata-q38` runs pipeline groups through the shared paged step. `--batch-groups 1` keeps its synchronous
 path, which remains the default when the option is omitted. `auto` selects the largest divisor of the live
 Conversations at once value up to the number of stages. An explicit number must divide that live value, otherwise
 it runs one group. `--batch` sets only the initial concurrency. Rows per step and lookahead apply within each group;

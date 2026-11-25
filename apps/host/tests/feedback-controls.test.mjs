@@ -14,7 +14,7 @@ test('circular dial follows an arc, clamps its gap, and accepts approximate entr
   assert.equal(closestStop(30000,[4096,8192,16384,32768]),32768);
 });
 test('memory inventory counts shared memory once and includes each dedicated GPU',()=>{
-  assert.deepEqual(memoryInventory({memory:{totalGb:16},accelerator:{unified:true},gpus:[{vramGb:16,unified:true,backend:'metal'}]}),{ram:16,vram:0,total:16,shared:true});
+  assert.deepEqual(memoryInventory({memory:{totalGb:16},accelerator:{unified:true},gpus:[{vramGb:16,unified:true,backend:'vulkan'}]}),{ram:16,vram:0,total:16,shared:true});
   assert.deepEqual(memoryInventory({memory:{totalGb:32},accelerator:{unified:false},gpus:[{vramGb:24,unified:false,backend:'cuda'},{vramGb:12,unified:false,backend:'cuda'}]}),{ram:32,vram:36,total:68,shared:false});
   assert.equal(memoryInventory({memory:{totalGb:32},accelerator:{unified:false},gpus:[]}).total,32);
 });

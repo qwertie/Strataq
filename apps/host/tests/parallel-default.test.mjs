@@ -209,7 +209,7 @@ test('DFlash2 named with a number of requests the person chose: that many, no no
   assert.equal(chooseParallel({ config: cfg(32768, { drafting: 'dflash2', parallel: 4 }), drafter: 'dflash2', hardware: big }).slots, 4);
   const withBatch = chooseParallel({ config: { ...cfg(32768, { drafting: 'dflash2' }), args: ['--max-context', '32768', '--mtp', '/m', '--batch', '3'] }, drafter: 'dflash2', hardware: big });
   assert.deepEqual([withBatch.explicit, withBatch.note], [true, null]);
-  // Expert mode's batch-mtp wish is passed on exactly as in 0.2.10 for every drafter: the server drops --batch-mtp when DFlash2 runs and keeps it when the MTP runs (Metal)
+  // Expert mode's batch-mtp wish is passed on exactly as in 0.2.10 for every drafter: the server drops --batch-mtp when DFlash2 runs and keeps it when the MTP runs
   const wish = (extra, drafter) => chooseParallel({ config: cfg(32768), values: { parallel: 4, batchMtp: true, ...extra }, drafter, hardware: big }).batchMtp;
   assert.equal(wish({ drafting: 'dflash2' }, 'dflash2'), true);
   assert.equal(wish({ drafting: 'mtp' }, 'mtp'), true);

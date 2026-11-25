@@ -240,7 +240,7 @@ class Engine(unittest.TestCase):
                 wrote.append(Path(dst))
             with zipfile.ZipFile(dst, "w") as z:
                 z.writestr("BUILD.json", json.dumps({"version": ".".join(map(str, setup.MIN_ENGINE)), "archs": [89]}))
-                z.writestr(setup.EXE, b"engine")
+                z.writestr(setup.Q38EXE, b"engine")
         return download
 
     def fake_digest(self, wrote):
@@ -301,7 +301,7 @@ class Engine(unittest.TestCase):
                     wrote.append(Path(dst))
                     with zipfile.ZipFile(dst, "w") as z:
                         z.writestr("BUILD.json", json.dumps(meta))
-                        z.writestr(setup.EXE, b"engine")
+                        z.writestr(setup.Q38EXE, b"engine")
                     setup.mark(dst)
 
                 with mock.patch.object(setup.urllib.request, "urlopen", lambda req, timeout=None: Response()), \
@@ -323,15 +323,15 @@ class Engine(unittest.TestCase):
                 quiet(setup.get_prebuilt, folder, {"arch": 89}, "gpu")
             with zipfile.ZipFile(asset, "w") as z:
                 z.writestr("BUILD.json", json.dumps({"version": ".".join(map(str, setup.MIN_ENGINE)), "archs": [89]}))
-                z.writestr(setup.EXE, b"engine")
+                z.writestr(setup.Q38EXE, b"engine")
             eng, _ = quiet(setup.get_prebuilt, folder, {"arch": 89}, "gpu")
         self.assertEqual(eng, self.root / "engine")
-        self.assertEqual((self.root / "engine" / setup.EXE).read_bytes(), b"engine")
+        self.assertEqual((self.root / "engine" / setup.Q38EXE).read_bytes(), b"engine")
 
     def test_an_installed_engine_is_kept(self):
         (self.root / "engine" / "BUILD.json").write_text(json.dumps(
             {"version": ".".join(map(str, setup.MIN_ENGINE)), "archs": [89]}))
-        (self.root / "engine" / setup.EXE).write_bytes(b"old")
+        (self.root / "engine" / setup.Q38EXE).write_bytes(b"old")
 
         def urlopen(req, timeout=None):
             raise AssertionError("asked the network for an installed engine")
@@ -339,7 +339,7 @@ class Engine(unittest.TestCase):
         with mock.patch.object(setup.urllib.request, "urlopen", urlopen):
             eng, out = quiet(setup.get_prebuilt, setup.PREBUILT_URL, {"arch": 89}, "gpu")
         self.assertEqual(eng, self.root / "engine")
-        self.assertEqual((self.root / "engine" / setup.EXE).read_bytes(), b"old")
+        self.assertEqual((self.root / "engine" / setup.Q38EXE).read_bytes(), b"old")
 
 
 class Requirements(unittest.TestCase):

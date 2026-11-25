@@ -99,7 +99,7 @@ exec "$here/%s" "$@"
 
 
 def dedupe_python(folder: Path) -> list[str]:
-    """Make every other name of the interpreter in `python/bin` a small launcher of the real binary (Linux and macOS; Windows has one
+    """Make every other name of the interpreter in `python/bin` a small launcher of the real binary (Linux; Windows has one
     python.exe). A symlink would not survive the bundling, and a plain copy is what costs the space. Returns the names changed."""
     bindir = folder / "python" / "bin"
     if not bindir.is_dir():

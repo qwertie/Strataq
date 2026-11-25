@@ -100,7 +100,7 @@ def verdict(fp: dict, table: dict) -> tuple[str, str]:
     known = {k: v for k, v in table.items() if not k.startswith("_")}
     if fp["arch"] in PREVIEW_ARCHS:
         return "family", (f"{PREVIEW_ARCHS[fp['arch']]} (architecture {fp['arch']!r}): Strata runs it on its own "
-                          "engine path in the NVIDIA (CUDA) and AMD (HIP) builds, not yet on Intel Arc (SYCL); setup "
+                          "engine path in the NVIDIA (CUDA) and AMD (HIP) builds; setup "
                           "installs it with --family qwen36")
     if fp["arch"] != ARCH:
         return "no", f"not Qwen3.8-Flash-Next (architecture {fp['arch']!r}): Strata runs only that model"

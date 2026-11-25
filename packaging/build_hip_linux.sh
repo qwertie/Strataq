@@ -1,5 +1,5 @@
 #!/bin/bash
-# Linux AMD (HIP) engine package: strata (+ strata-dsv41 for rx9070) + the CPU picture reader (strata-vision) + the GPU picture reader (strata-vision-hip),
+# Linux AMD (HIP) engine package: strata-q38 and strata-q36 (+ strata-ds41 for rx9070) + the CPU picture reader (strata-vision) + the GPU picture reader (strata-vision-hip),
 # the ROCm libraries both load, and the rocBLAS / hipBLASLt kernel data for the listed archs, packaged as an engine component.
 # Run on a Linux box that has ROCm (TheRock Python wheels are enough); the tester packages were built in an Ubuntu 22.04 chroot
 # (glibc 2.35) so they run on every distribution since.  All settings are environment variables:
@@ -11,9 +11,9 @@
 #   HP=<ROCm devel root>  CORE=<ROCm core root>  LIBW=<ROCm libraries root>   (TheRock: _rocm_sdk_devel, _rocm_sdk_core, _rocm_sdk_libraries_*)
 #   OUT=<work folder>  PKGVER=0.1.59  COMMIT=<source commit for the build id>  JOBS=16
 #   VISION_ONLY=1                    build only the two readers (no engine, no package)
-#   DSV41=1|0                        also build strata-dsv41 (the DeepSeek-V4.1 engine, tools/dsv41/build_hip_linux.sh's flags) and ship it beside
-#                                    strata: default 1 for the rx9070 variant (gfx1200 gfx1201; built and run on an R9700), 0 for the others
-#   SPLIT_DIR=<folder>               ship the strata-split-N-amd binaries of that folder (made by packaging/build_split_hip.sh) beside strata
+#   DSV41=1|0                        also build strata-ds41 (the DeepSeek-V4.1 engine, tools/dsv41/build_hip_linux.sh's flags) and ship it beside
+#                                    strata-q38: default 1 for the rx9070 variant (gfx1200 gfx1201; built and run on an R9700), 0 for the others
+#   SPLIT_DIR=<folder>               ship the strata-split-N-amd binaries of that folder (made by packaging/build_split_hip.sh) beside strata-q38
 #   NO_PACKAGE=1                     stop after the stage folder
 #   VISION_HIP_DEFS="-DGGML_CUDA_FA=OFF"   extra cmake definitions for the GPU reader only
 #
@@ -46,9 +46,6 @@ mkdir -p "$OUT"; S=$OUT/build.status
 st() { echo "$* $(date +%T)" >> "$S"; }
 # a step that failed stops the build with its non-zero exit (a lost exit code let stale binaries through before): chk $? "what"
 chk() { local rc=$1; shift; st "$* rc=$rc"; [ "$rc" = 0 ] || { st "ABORT $* failed (rc=$rc)"; exit 1; }; }
-# a tree without .git (a tarball) has no commit for the build id: the packer writes it to BUILD_ID (CMakeLists.txt reads it), first 9 characters
-ID9=${COMMIT:0:9}
-if [ "$COMMIT" != unknown ] && [ ! -e "$SRC/.git" ] && [ ! -f "$SRC/BUILD_ID" ]; then printf '%s\n' "$ID9" > "$SRC/BUILD_ID"; fi
 : > "$S"
 export HIP_PLATFORM=amd HIP_COMPILER=clang HIP_RUNTIME=rocclr ROCM_PATH=$HP HIP_PATH=$HP
 # TheRock 7.14.x dists (the Strix Halo / gfx1151 package) keep libnuma, libz, libdrm ... in lib/rocm_sysdeps; older wheels have no such folder
@@ -64,19 +61,17 @@ if [ -z "${VISION_ONLY:-}" ]; then
     -DSTRATA_PREFILL_MMQ=ON "-DCMAKE_HIP_ARCHITECTURES=$ARCHS" "${HIPDEFS[@]}" -DSTRATA_GGML_DIR="$LLAMA" -DSTRATA_PORTABLE=ON \
     "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath,'\$ORIGIN' -Wl,--enable-new-dtags" ${STRATA_CMAKE_EXTRA:-} > "$OUT/cfg.log" 2>&1
   chk $? "engine configured"
-  nice -n 10 cmake --build "$OUT/b" --target strata strata-q38 -j "$JOBS" > "$OUT/build.log" 2>&1
+  nice -n 10 cmake --build "$OUT/b" --target strata-q38 strata-q36 -j "$JOBS" > "$OUT/build.log" 2>&1
   chk $? "engine built"
-  [ -x "$OUT/b/strata" ] || { st "ABORT no strata"; exit 1; }
   [ -x "$OUT/b/strata-q38" ] || { st "ABORT no strata-q38"; exit 1; }
+  [ -x "$OUT/b/strata-q36" ] || { st "ABORT no strata-q36"; exit 1; }
   if [ "$DSV41" = 1 ]; then      # own build tree: the engine's flags stay as they were; STRATA_NATIVE_EXPERTS=ON is what the DeepSeek path was built with
-    rm -f "$OUT/bd/CMakeCache.txt" "$OUT/bd/strata-dsv41" "$OUT/bd/strata-ds41"      # (the build id is baked in at configure time: always configure again)
+    rm -f "$OUT/bd/CMakeCache.txt" "$OUT/bd/strata-ds41"      # (always configure again; a stale binary must not pass for this build)
     cmake -G Ninja -S . -B "$OUT/bd" -DCMAKE_BUILD_TYPE=Release -DSTRATA_ENABLE_HIP=ON -DSTRATA_ENABLE_CUDA=OFF -DSTRATA_BUILD_TESTS=OFF       -DSTRATA_BUILD_DSV41=ON -DSTRATA_NATIVE_EXPERTS=ON "-DCMAKE_HIP_ARCHITECTURES=$ARCHS" "${HIPDEFS[@]}" -DSTRATA_GGML_DIR="$LLAMA" -DSTRATA_PORTABLE=ON       "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath,'\$ORIGIN' -Wl,--enable-new-dtags" > "$OUT/cfg-dsv41.log" 2>&1
     chk $? "dsv41 configured"
-    nice -n 10 cmake --build "$OUT/bd" --target strata-dsv41 strata-ds41 -j "$JOBS" > "$OUT/build-dsv41.log" 2>&1
+    nice -n 10 cmake --build "$OUT/bd" --target strata-ds41 -j "$JOBS" > "$OUT/build-dsv41.log" 2>&1
     chk $? "dsv41 built"
-    if [ "$COMMIT" != unknown ]; then grep -aq "$ID9" "$OUT/bd/strata-dsv41" || { st "ABORT strata-dsv41 does not carry the build id $ID9"; exit 1; }; st "dsv41 build id $ID9 present"; fi
-    [ -x "$OUT/bd/strata-dsv41" ] || { st "ABORT no strata-dsv41 (DSV41=0 leaves it out)"; tail -20 "$OUT/build-dsv41.log" >> "$S"; exit 1; }
-    [ -x "$OUT/bd/strata-ds41" ] || { st "ABORT no strata-ds41"; tail -20 "$OUT/build-dsv41.log" >> "$S"; exit 1; }
+    [ -x "$OUT/bd/strata-ds41" ] || { st "ABORT no strata-ds41 (DSV41=0 leaves it out)"; tail -20 "$OUT/build-dsv41.log" >> "$S"; exit 1; }
   fi
 fi
 # the CPU reader: portable (AVX2), the fallback that runs on any PC
@@ -100,7 +95,7 @@ cat > "$STAGE/BUILD.json" <<EOJ
 EOJ
 # the libraries the engine and the GPU reader load (the CPU reader needs only the system's), collected from the build outputs
 DATA=(--data "$LIBW/lib/rocblas/library=rocblas/library" --data "$LIBW/lib/hipblaslt/library=hipblaslt/library" --data-arch "$DATAARCH")
-BINS=("$OUT/b/strata" "$OUT/b/strata-q38" "$OUT/bh/bin/strata-vision-hip"); [ "$DSV41" = 1 ] && BINS+=("$OUT/bd/strata-dsv41" "$OUT/bd/strata-ds41")
+BINS=("$OUT/b/strata-q38" "$OUT/b/strata-q36" "$OUT/bh/bin/strata-vision-hip"); [ "$DSV41" = 1 ] && BINS+=("$OUT/bd/strata-ds41")
 for b in "${BINS[@]}"; do
   python3 packaging/collect_libs.py --binary "$b" --search "$LIBW/lib" --search "$HP/lib" --search "$CORE/lib" --search "$CORE/lib/llvm/lib" ${SYSDEPS:+--search "$HP/lib/rocm_sysdeps/lib"} \
     --also 'libamd_comgr.so*' --also 'libhiprtc*.so*' --out "$STAGE" \
@@ -108,12 +103,12 @@ for b in "${BINS[@]}"; do
   chk $? "collected for $(basename "$b")"
   DATA=()                                              # the kernel data once
 done
-cp "$OUT/b/strata" "$OUT/b/strata-q38" "$OUT/bv/bin/strata-vision" "$OUT/bh/bin/strata-vision-hip" "$STAGE/"
-[ "$DSV41" = 1 ] && cp "$OUT/bd/strata-dsv41" "$OUT/bd/strata-ds41" "$STAGE/"
+cp "$OUT/b/strata-q38" "$OUT/b/strata-q36" "$OUT/bv/bin/strata-vision" "$OUT/bh/bin/strata-vision-hip" "$STAGE/"
+[ "$DSV41" = 1 ] && cp "$OUT/bd/strata-ds41" "$STAGE/"
 # the all-cards split engines (packaging/build_split_hip.sh: strata-split-2/3/4-amd, RUNPATH $ORIGIN) ride in the package when SPLIT_DIR names the folder holding them (--tree takes them)
 [ -n "${SPLIT_DIR:-}" ] && cp "$SPLIT_DIR"/strata-split-*-amd "$STAGE/"
 for f in "$STAGE"/*.so "$STAGE"/*.so.*; do [ -f "$f" ] && [ ! -L "$f" ] && patchelf --set-rpath '$ORIGIN' "$f"; done
-for f in "$STAGE/strata" "$STAGE/strata-q38" "$STAGE/strata-vision" "$STAGE/strata-vision-hip" $([ "$DSV41" = 1 ] && echo "$STAGE/strata-dsv41 $STAGE/strata-ds41"); do
+for f in "$STAGE/strata-q38" "$STAGE/strata-q36" "$STAGE/strata-vision" "$STAGE/strata-vision-hip" $([ "$DSV41" = 1 ] && echo "$STAGE/strata-ds41"); do
   st "RUNPATH $(basename "$f"): $(readelf -d "$f" | grep -E 'RPATH|RUNPATH' | cut -d'[' -f2 | tr -d ']' | paste -sd' ')"
 done
 # the hipBLASLt version of this ROCm into BUILD.json, and the tuning tables of tools/hip that match it (architecture and version) into tuning/

@@ -7,8 +7,8 @@
 What it covers (standard library only, no network):
   * the manifest against the code: app/Terminal version (strata_cli/__init__.py, apps/host and apps/desktop package
     files, Cargo.toml) and Control version (VERSION) and engine version (the CMake project version);
-  * the three installer file names in the manifest's asset list;
-  * every installer file name (Strata-<version>-windows-x64-setup.exe, ...-linux-x86_64.AppImage, ...-macos-arm64.dmg)
+  * the two installer file names in the manifest's asset list;
+  * every installer file name (Strata-<version>-windows-x64-setup.exe, ...-linux-x86_64.AppImage)
     in a current page: the version must be the manifest's, and the file must be in the release's asset list;
   * the version lines of the pages listed in LINES below.
 Release notes, measurement logs and history/ keep the versions they were written with; tools/doc_pages.py says which
@@ -26,9 +26,9 @@ import doc_pages  # noqa: E402
 ROOT = doc_pages.ROOT
 MANIFEST = os.path.join(ROOT, "docs", "data", "release.json")
 
-INSTALLER_NAMES = ("Strata-{v}-windows-x64-setup.exe", "Strata-{v}-linux-x86_64.AppImage", "Strata-{v}-macos-arm64.dmg")
+INSTALLER_NAMES = ("Strata-{v}-windows-x64-setup.exe", "Strata-{v}-linux-x86_64.AppImage")
 # Any installer-looking file name in a current page.  Group 1 is the version.
-INSTALLER_RE = re.compile(r"Strata-(\d+\.\d+(?:\.\d+)*)-(?:windows-x64-setup\.exe|linux-x86_64\.AppImage|macos-arm64\.dmg)")
+INSTALLER_RE = re.compile(r"Strata-(\d+\.\d+(?:\.\d+)*)-(?:windows-x64-setup\.exe|linux-x86_64\.AppImage)")
 
 V = r"(\d+\.\d+(?:\.\d+)*)"
 # (page, regex, manifest keys): the regex has one group per key, each holding a version.  A rule that matches nothing is

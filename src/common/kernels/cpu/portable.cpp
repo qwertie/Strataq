@@ -217,6 +217,6 @@ void nvfp4_512_rows(const uint8_t* w, size_t row_bytes, int n, const void* const
 void q2_0_gguf_rows_multi_avx1_legacy(const uint8_t* w, size_t row_bytes, int nblocks, const ActQ* const* a, int nt, float* const* out, int r0, int r1) { cpu_kernel_unreachable("q2_0_gguf_rows_multi_avx1_legacy"); }
 void q2_0_gguf_rows_multi_avx1(const uint8_t* w, size_t row_bytes, int nblocks, const ActQ* const* a, int nt, float* const* out, int r0, int r1) { cpu_kernel_unreachable("q2_0_gguf_rows_multi_avx1"); }
 void q8k_quant_avx1(const float* x, void* y, int64_t n) { cpu_kernel_unreachable("q8k_quant_avx1"); }
-// (the trellis rows are tq_cpu.cpp's: its scalar kernel runs here, as in the Metal build)
+// (the trellis rows are tq_cpu.cpp's: its scalar kernel runs here)
 
 }  // namespace strata::kernels::cpu

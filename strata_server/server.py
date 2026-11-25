@@ -849,13 +849,13 @@ class Vision:
 
 def card_roles_lines(cfg: dict) -> list[str]:
     """The plain lines printed at start: the roles (cards numbered as nvidia-smi numbers them), a hand-edited "gpu" that beat them, and the
-    all-Off case.  SystemExit when every card is Off and the engine cannot start without one (the CUDA, HIP and SYCL engines)."""
+    all-Off case.  SystemExit when every card is Off and the engine cannot start without one (the CUDA and HIP engines)."""
     roles, problem = gpu_roles.saved_roles(cfg)
     out = [f"[strata] {problem}"] if problem else []
     if roles is None:
         return out
     if engine_client.gpu_all_off(cfg):
-        if cfg.get("backend") in ("cpu", "metal") or sys.platform == "darwin":
+        if cfg.get("backend") == "cpu":
             out.append("[strata] every graphics card is Off: " + gpu_roles.CPU_ONLY_LINE)
             return out
         raise SystemExit("[strata] every graphics card is set to Off, and this engine cannot start without one. Turn a card on "
@@ -864,20 +864,6 @@ def card_roles_lines(cfg: dict) -> list[str]:
     out.append("[strata] card roles: " + ", ".join(f"{word[r]} GPU {i}" for r in ("main", "helper", "off")
                                                     for i in sorted(roles) if roles[i] == r) + " (numbers as nvidia-smi gives them)")
     return out
-
-
-def engine_binary(exe: str, cfg: dict | None = None) -> str:
-    """The file that holds the engine's own option strings, for a feature check that reads it.  The Intel launcher
-    (sycl/serve/strata-sycl.sh) is a shell script that runs its repo's STRATA_SYCL_BIN (default build-sycl-aot/strata)
-    in a container, so the check reads that binary, not the script.  Any other `exe` is the engine itself."""
-    p = Path(exe)
-    if p.name == "strata-sycl.sh":
-        rel = ((cfg or {}).get("env") or {}).get("STRATA_SYCL_BIN") or os.environ.get("STRATA_SYCL_BIN") \
-            or "build-sycl-aot/strata"
-        b = p.resolve().parents[2] / rel
-        if b.is_file():
-            return str(b)
-    return exe
 
 
 def effort_end_args(cfg: dict, exe: str, tok) -> list[str] | None:
@@ -891,7 +877,7 @@ def effort_end_args(cfg: dict, exe: str, tok) -> list[str] | None:
     if pos == "start":
         return None
     try:
-        with open(engine_binary(exe, cfg), "rb") as f:
+        with open(exe, "rb") as f:
             known = b"--tail-role-token" in f.read()
     except OSError:
         known = False
@@ -1740,8 +1726,8 @@ class Service:
         threading.Thread(target=loop, daemon=True).start()
 
     def free_vram_mib(self) -> int | None:
-        """Free VRAM on the engine's (first) GPU, from the backend's reader - NVML, the amdgpu sysfs files (#301) or
-        IOKit on macOS (Metal backend); None when it can't be read (then nothing is refused)."""
+        """Free VRAM on the engine's (first) GPU, from the backend's reader - NVML or the amdgpu sysfs files (#301);
+        None when it can't be read (then nothing is refused)."""
         try:
             from strata_common.telemetry import gpu_reader
             g = gpu_reader(int(getattr(self, "gpu_index", 0) or 0), amd=getattr(self, "backend", None) == "hip")
@@ -2516,8 +2502,6 @@ class Service:
         live["error"] = last_error
         if hasattr(self.engine, "replica_view"):        # opt-in replicas: each one's state and requests routed to it
             live["replicas"] = self.engine.replica_view()
-        if hasattr(self.engine, "split_view"):          # opt-in split serving: the hand-overs so far (strata_server/split.py)
-            live["split_serve"] = self.engine.split_view()
         engine = {"model": self.model, "max_context": self.reported_ctx(), "images": self.vision is not None,
                   **dict(getattr(self.engine, "info", {}) or {}), "model_details": self.model_details}
         tel = self.telemetry.snapshot() if getattr(self, "telemetry", None) else {"now": {}, "history": {}, "static": {}}
@@ -6432,10 +6416,7 @@ def start_engine_or_fallback(cfg: dict, exe: str, effort_end: list[str] | None, 
     cfg2 = {k: v for k, v in cfg.items() if k not in SPLIT_KEYS + ("exe", "args", "env", "layer_split", "replicas", "user_args", "drafting")}
     cfg2.update(fb)
     cfg2 = with_component_engine(cfg2)
-    if engine_component.is_reference(cfg2["exe"]):
-        exe2 = _component_exe(cfg2["exe"], cfg2)
-    else:
-        exe2 = cfg2["exe"] if os.path.isabs(cfg2["exe"]) else os.path.abspath(os.path.join(cfg2.get("cwd") or ".", cfg2["exe"]))
+    exe2 = find_engine_exe(cfg2)
     env2 = engine_client.child_env(cfg2, offline=offline)
     configure_batch_telemetry_env(env2, cfg2, batch_telemetry)
     effort2 = effort_end_args(cfg2, exe2, tok)
@@ -6517,42 +6498,6 @@ def start_replicas(cfg: dict, groups: list[list[int]], exe: str, effort_end: lis
         import atexit
         atexit.register(rp.remove_arena, arena)             # (a killed server leaves the file: the next start sweeps it)
     return eng
-
-
-def start_split(cfg: dict, spec: dict, exe: str, effort_end: list[str], lazy: bool, *, offline: bool = False):
-    """Opt-in split serving (strata_server/split.py): a prefill engine and a decode engine, one card each, the same model and the
-    same session settings.  Started one after the other, so a shared expert arena is filled once; the SplitEngine in
-    front hands a long prompt from the first to the second."""
-    from strata_server import split as sp
-    sp.check_cfg(cfg, spec)
-    arena, arena_note = sp.arena_path(cfg, spec)
-    work = sp.session_dir(spec)
-    print(f"[strata] split serving: the prompt is read on card {spec['prefill_gpu']}, the answer is made on card "
-          f"{spec['decode_gpu']} (prompts with {spec['min_prompt_tokens']}+ new tokens are handed over); {arena_note}",
-          flush=True)
-    engines = {}
-    try:
-        for role in ("prefill", "decode"):
-            rc = sp.role_cfg(cfg, spec, role)
-            if arena:
-                rc["args"] = list(rc["args"]) + ["--shared-expert-arena", arena]
-            if role == "prefill":
-                warn_budget_over_ram(engine_client.engine_args(rc, announce=False) if "args" in rc else [])
-            engines[role] = engine_client.StrataEngine(
-                exe, engine_client.engine_args(rc, exe) + effort_end, cwd=rc.get("cwd"), log=rc.get("log"),
-                env=engine_client.child_env(rc, offline=offline), lazy=lazy,
-                retry_args=engine_client.mtp_retry_args(rc, exe, effort_end),
-                retry_vram_args=engine_client.nodraft_retry_args(rc, exe, effort_end))
-    except BaseException:
-        for e in engines.values():
-            try:
-                e.close()
-            except Exception:        # noqa: BLE001
-                pass
-        shutil.rmtree(work, ignore_errors=True)
-        raise
-    return sp.SplitEngine(engines["prefill"], engines["decode"], min_tokens=spec["min_prompt_tokens"], work_dir=work,
-                          arena_file=arena)
 
 
 def check_request_sampling(req) -> None:
@@ -6679,11 +6624,11 @@ _ON_DEMAND_NOT_WITH = ("--kv-grow", "--batch", "--slots", "--peer-device", "--ex
 def vision_on_demand_by_default(cfg: dict) -> bool:
     """True when this config's GPU reader should start on demand without the config saying so: a GPU reader (vision.gpu) of the NVIDIA
     kind (or AMD's, with its CPU reader) on one GPU, no batch slots, no --kv-grow, no helper caches, and nothing in the vision section that says otherwise.  Not DeepSeek
-    (its own tower), not Intel or a Mac (not measured there), not a reader pinned to another card (vision.cuda_device)."""
+    (its own tower), not a reader pinned to another card (vision.cuda_device)."""
     vis = cfg.get("vision")
     if not VISION_ON_DEMAND_BY_DEFAULT or not isinstance(vis, dict) or vis.get("gpu") is not True or "elastic" in vis:
         return False
-    if vis.get("cuda_device") is not None or sys.platform == "darwin":
+    if vis.get("cuda_device") is not None:
         return False
     backend = cfg.get("backend")
     if (cfg.get("arch") or "") == "deepseek41" or backend not in (None, "cuda", "hip"):
@@ -6770,6 +6715,22 @@ def with_history_tools(tools, req) -> list:
         return [*tools, *extra] if extra else tools
     except Exception:
         return tools
+
+
+def find_engine_exe(cfg: dict) -> str:
+    """Gets the absolute path of the engine program that run config `cfg` starts, after
+    paged_launch.get_current_engine_path has replaced a program that is no longer shipped."""
+    if engine_component.is_reference(cfg["exe"]):      # "component:strata-engine": the engine package for this PC
+        exe = _component_exe(cfg["exe"], cfg)
+    else:
+        # a relative "exe" is the config's cwd's: Windows' CreateProcess resolves "engine/strata.exe" against nothing
+        # it is told about (WinError 2)
+        exe = cfg["exe"] if os.path.isabs(cfg["exe"]) else os.path.abspath(os.path.join(cfg.get("cwd") or ".", cfg["exe"]))
+    current = paged_launch.get_current_engine_path(exe, cfg)
+    if current != exe:
+        print(f"[strata] the run config names {Path(exe).name}, which Strata no longer ships: starting {Path(current).name}",
+              flush=True)
+    return current
 
 
 def _component_exe(reference: str, cfg: dict) -> str:
@@ -6923,10 +6884,6 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
                     help="data-parallel replicas (opt-in): cut the \"gpu\" list into N equal groups and run one engine on "
                          "each, requests spread over them (also \"replicas\" in the config: a number, or "
                          "[{\"gpus\": [0, 1]}, {\"gpus\": [2, 3]}])")
-    ap.add_argument("--split-serve", default=None, metavar="PREFILL,DECODE",
-                    help="split serving (opt-in): one engine on card PREFILL reads the prompt, a second on card DECODE makes "
-                         "the answer, the session handed over in RAM (also \"split_serve\" in the config: "
-                         "{\"prefill_gpu\": 0, \"decode_gpu\": 1}; docs/SPLIT_SERVE.md)")
     launch_args = list(sys.argv[1:] if argv is None else argv)
     a = ap.parse_args(launch_args)
     # #3238: say it before the first unexplained -9
@@ -7000,12 +6957,6 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
     lift_reasoning_effort_arg(cfg)
     if a.replicas is not None:
         cfg["replicas"] = a.replicas
-    if a.split_serve is not None:
-        pair = [x.strip() for x in a.split_serve.split(",")]
-        if len(pair) != 2 or not all(x.isdecimal() for x in pair):
-            ap.error("--split-serve takes two card numbers: PREFILL,DECODE (for example 0,1)")
-        cfg["split_serve"] = {**(cfg.get("split_serve") if isinstance(cfg.get("split_serve"), dict) else {}),
-                              "prefill_gpu": int(pair[0]), "decode_gpu": int(pair[1])}
     if a.gpu is not None:
         cfg["gpu"] = int(a.gpu) if a.gpu.strip().isdigit() else a.gpu
     a.host = a.host or cfg.get("host") or "127.0.0.1"   # issue #26: the run scripts pass no --host, the config can
@@ -7126,12 +7077,7 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
         elif len(engine_client.gpu_list(cfg)) > 1:
             print(f"[strata] GPUs {engine_client.gpu_list(cfg)}: the later card(s) serve as the peer expert tier "
                   "(--peer-device)", flush=True)
-        # a relative "exe" is the config's cwd's: Windows' CreateProcess resolves "engine/strata.exe" against nothing
-        # it is told about (WinError 2), so it is made absolute here
-        if engine_component.is_reference(cfg["exe"]):      # "component:strata-engine": the engine package for this PC
-            exe = _component_exe(cfg["exe"], cfg)
-        else:
-            exe = cfg["exe"] if os.path.isabs(cfg["exe"]) else os.path.abspath(os.path.join(cfg.get("cwd") or ".", cfg["exe"]))
+        exe = find_engine_exe(cfg)
         try:
             silence = engine_silence_s(cfg)             # #481: checked before the (minutes-long) start
             apply_ready_timeout(cfg)
@@ -7146,23 +7092,14 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
             groups = rp.gpu_groups(cfg)
         except rp.ReplicaConfigError as e:
             raise SystemExit(f"[strata] config {e}")
-        from strata_server import split as split_mod
-        try:
-            split = split_mod.split_spec(cfg)
-            if split:
-                split_mod.check_cfg(cfg, split)
-        except split_mod.SplitConfigError as e:
-            raise SystemExit(f"[strata] config {e}")
         if groups:
             engine = start_replicas(cfg, groups, exe, effort_end or [], lazy, offline=a.offline)
-        elif split:
-            engine = start_split(cfg, split, exe, effort_end or [], lazy, offline=a.offline)
         else:
             engine = start_engine_or_fallback(cfg, exe, effort_end, env, lazy, tok, offline=a.offline, batch_telemetry=a.batch_telemetry)
         engine.silence_s = silence                      # an attribute of its own: restart() keeps it
         warn_tight_ram(engine.info.get("arena_mib"))
         note = desktop_vram_note(cfg.get("backend"), engine.info.get("vram_free_mib"), engine.spawn[1],
-                                 linux_desktop()) if not groups and not split else None
+                                 linux_desktop()) if not groups else None
         if note:                                        # #560 #516: before --open starts a browser on that card
             print(note, flush=True)
     else:
@@ -7336,13 +7273,9 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
         svc.gpu_indices = [c for g in groups for c in g]
         svc.gpu_index = svc.gpu_indices[0]
         svc.replica_gpu_groups = groups
-    if a.engine == "strata" and split:                  # split serving: the two cards (the prefill card first)
-        svc.gpu_indices = [split["prefill_gpu"], split["decode_gpu"]]
-        svc.gpu_index = split["decode_gpu"]
     svc.terminal_visibility_order = visible_device_order(env, cfg.get("backend")) if a.engine == "strata" else []
     has_layer_split = a.engine == "strata" and engine_client.layer_split_of(cfg)
     svc.terminal_topology_mode = ("replicas (configured)" if a.engine == "strata" and groups
-                                  else "split serve (configured)" if a.engine == "strata" and split
                                   else "layer split (configured)" if has_layer_split
                                   else "single GPU or CPU" if a.engine == "strata" else "mock")
     svc.terminal_configured_split = engine_client.layer_split_value(cfg) if has_layer_split else None

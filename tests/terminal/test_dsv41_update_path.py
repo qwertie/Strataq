@@ -221,6 +221,36 @@ class UpdatePath(_up.Upgrade):
         self.assertEqual(dsv41_paths.repair_missing([c, self.root / "run" / "missing.json"]), [])
 
 
+class StartCheck(unittest.TestCase):
+    """dsv41_paths.test_start: strata-ds41 has no --version; started with no arguments it loads its libraries and
+    refuses to go on without --pack, which is the sign it runs."""
+
+    def start(self, returncode, stdout="", stderr=""):
+        done = mock.Mock(returncode=returncode, stdout=stdout, stderr=stderr)
+        with mock.patch("subprocess.run", return_value=done) as run:
+            result = dsv41_paths.test_start(Path("/x/engine-dsv41/0.2.14-a") / EXE)
+        self.assertEqual(run.call_args.args[0], [str(Path("/x/engine-dsv41/0.2.14-a") / EXE)])
+        return result
+
+    def test_the_refusal_without_a_pack_means_it_starts(self):
+        self.assertEqual(self.start(2, stderr="strata-ds41: --pack <model>/maya-ds4 is needed\n"),
+                         (True, "strata-ds41: --pack <model>/maya-ds4 is needed"))
+
+    def test_anything_else_is_a_failed_start_with_its_last_line(self):
+        ok, why = self.start(-1073741515, stderr="")                     # a Windows DLL that is not found: nothing printed
+        self.assertFalse(ok)
+        self.assertIn("did not start correctly", why)
+        ok, why = self.start(127, stderr="error while loading shared libraries: libhipblas.so.3\n")
+        self.assertFalse(ok)
+        self.assertIn("libhipblas.so.3", why)
+
+    def test_a_config_saved_before_strata_ds41_is_still_in_its_package_folder(self):
+        for name in (EXE, "strata-dsv41.exe" if os.name == "nt" else "strata-dsv41"):
+            exe = str(Path("/x") / dsv41_paths.DIR / "0.2.13-a" / name)
+            with mock.patch.dict(os.environ, {"STRATA_DSV41_EXE": ""}):
+                self.assertEqual(dsv41_paths.engine_root(exe), Path("/x") / dsv41_paths.DIR)
+
+
 for _name in dir(_up.Upgrade):                       # (the parent's own tests are not repeated here)
     if _name.startswith("test_") and _name not in UpdatePath.__dict__:
         setattr(UpdatePath, _name, None)

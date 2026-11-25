@@ -31,7 +31,7 @@ body:
     attributes:
       label: Desktop app, Terminal or source?
       options:
-        - Desktop app (Windows, Linux or Mac)
+        - Desktop app (Windows or Linux)
         - Terminal (the `strata` command)
         - Source (START-HERE.bat, setup.sh or a build)
         - Docker

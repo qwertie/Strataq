@@ -44,12 +44,11 @@ class PlatformName(unittest.TestCase):
 
     def test_cuda_is_committed_to_on_linux_aarch64_and_no_other_backend_is(self):
         self.assertTrue(targets.backend_supported("cuda", "linux-aarch64")[0])
-        for backend in ("hip", "sycl", "metal", "cpu"):
+        for backend in ("hip", "cpu"):
             self.assertFalse(targets.backend_supported(backend, "linux-aarch64")[0], backend)
         # the rows that were there are still there
         self.assertTrue(targets.backend_supported("cuda", "linux-x86_64")[0])
         self.assertTrue(targets.backend_supported("hip", "linux-x86_64")[0])
-        self.assertTrue(targets.backend_supported("metal", "macos-arm64")[0])
 
     def test_the_feed_knows_the_platform(self):
         self.assertIn("linux-aarch64", feedmod.PLATFORMS)

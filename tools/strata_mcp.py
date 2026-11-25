@@ -881,8 +881,6 @@ class Strata:
             hw["cpu"] = {"name": name, "cores": physical_cores(), "threads": os.cpu_count(), "avx2": avx2, "avx512": avx512}
         except Exception:                               # noqa: BLE001
             hw["cpu"] = {"name": platform.processor(), "cores": physical_cores(), "threads": os.cpu_count()}
-        if sys.platform == "darwin":                    # a Mac: one pool of unified memory, the Metal engine (strata_control/mac_fit.py)
-            return self._mac_hardware(hw)
         nv = []
         try:
             nv = S.gpus() if S else own_nvidia_gpus()
@@ -928,16 +926,7 @@ class Strata:
             mark_display(nv + amd, nvidia_display_active() if nv else {}, windows_desktop_adapters() if WIN and amd else [])
         except Exception:                               # noqa: BLE001 - unknown stays unknown: the app then keeps its safety default
             pass
-        arc = []
-        if not WIN:                                     # an Intel Arc (Linux, the SYCL engine): only a PC with no usable NVIDIA or AMD card gets one (strata_control/intel_app.py)
-            try:
-                if str(self.src) not in sys.path:
-                    sys.path.insert(0, str(self.src))
-                from strata_control import intel_app
-                arc = intel_app.cards_to_add(nv, amd)
-            except Exception:                           # noqa: BLE001 - an older Control folder without it: the report is what it was
-                arc = []
-        hw["gpus"] = nv + amd + arc
+        hw["gpus"] = nv + amd
         for g in hw["gpus"]:                            # each make numbers its cards from 0 (the engine drives one make): a stable id tells two cards apart
             g.setdefault("id", f"{g.get('vendor') or 'gpu'}:{g.get('index')}")
         try:                                            # how fast each card is (SMs x clock): the app and the Terminal pick the Main card by it
@@ -1002,102 +991,6 @@ class Strata:
         vendor = hw.get("engine_vendor")
         return [g for g in hw.get("gpus", []) if g.get("usable") and (not vendor or not g.get("vendor") or g.get("vendor") == vendor)]
 
-    # ---- a Mac (Apple Silicon): unified memory, the Metal engine.  The rules are strata_control/mac_fit.py's (the same module
-    # metal/setup_mac.py uses), so the app, the Terminal and a Mac that builds the engine itself judge a model the same way.
-    def mac(self):
-        """strata_control/mac_fit.py, or None when this Strata folder does not carry it."""
-        try:
-            if str(self.src) not in sys.path:
-                sys.path.insert(0, str(self.src))
-            from strata_control import mac_fit
-            return mac_fit
-        except Exception as e:                          # noqa: BLE001
-            log(f"strata_control/mac_fit.py could not be imported ({e})")
-            return None
-
-    def _mac_hardware(self, hw: dict) -> dict:
-        mf = self.mac()
-        info = mf.mac_info() if mf else {"chip": platform.processor() or "Apple silicon", "ram_gb": hw.get("ram_gb") or 0.0,
-                                         "macos": platform.mac_ver()[0], "arm64": platform.machine() == "arm64", "clt": "x"}
-        problems = mf.mac_problems(info, need_compiler=False) if mf else []
-        ram = round(float(info.get("ram_gb") or hw.get("ram_gb") or 0.0), 1)
-        hw["ram_gb"] = ram
-        hw["cpu"] = {"name": info["chip"], "cores": os.cpu_count(), "avx2": None, "avx512": None}
-        # The graphics memory IS the RAM here: vram_gb stays 0 so nothing is counted twice (the pages that fit RAM + VRAM add them up).
-        hw["gpus"] = [{"index": 0, "name": info["chip"], "vendor": "apple", "vram_gb": 0.0, "unified_gb": ram, "arch": "apple-gpu",
-                       "problem": problems[0] if problems else None, "usable": not problems}]
-        hw["mac"] = {"chip": info["chip"], "macos": info.get("macos"), "unified_gb": ram}
-        hw["nvidia_smi"] = False
-        return hw
-
-    def _mac_sizes(self, models: dict, family: str = "qwen") -> list:
-        """The sizes the app offers on a Mac: the GSQ-RCO files of the Qwen family (two shards, no repack), agentionai's Gyro files (one
-        file, no repack) and, since round 0214, Unsloth's sets (many shards: setup.py's Mac install repacks them with
-        metal/tools/metal_repack.py, as the Terminal's setup does); a set the Metal engine cannot run yet is left out (mac_fit.MAC_MODELS "missing")."""
-        mf = self.mac()
-        return [m for m in mf.app_sizes(family) if m in models] if mf else []
-
-    def _mac_verdict(self, model: str, ram: float) -> str:
-        mf = self.mac()
-        from strata_control import fit_label
-        if ram < mf.MIN_STREAM_RAM_GB:
-            return fit_label.SLOWER                          # too little memory for the Metal engine's streaming: the same two words, said not refused
-        return fit_label.SLOWER if mf.streams(model, ram) else fit_label.FITS          # the Mac's own count of what stays in memory (strata_control/mac_fit.py)
-
-    def _mac_recommend(self, hw: dict, models: dict, families: dict) -> dict:
-        mf = self.mac()
-        ram = float(hw.get("ram_gb") or 0)
-        usable = [g for g in hw.get("gpus", []) if g.get("usable")]
-        if not mf or not usable:
-            why = (hw.get("gpus") or [{}])[0].get("problem") or "this Mac cannot run the Metal engine"
-            return {"family": None, "model": None, "why": why}
-        if ram < mf.MIN_STREAM_RAM_GB:
-            return {"family": None, "model": None,
-                    "why": f"{ram:.0f} GB of unified memory: Strata needs {mf.MIN_STREAM_RAM_GB:.0f} GB or more on a Mac (32 GB or more is what it was tested on)"}
-        model, notes = mf.recommend_model(ram)
-        notes = [n for n in notes if "UD-Q4_K_XL" not in n]          # the app does not offer the Unsloth files yet
-        if model not in self._mac_sizes(models):
-            model = "Q2_0"
-        if mf.streams(model, ram):
-            speed = mf.STREAM_MEASURED.get(model)
-            why = (f"{ram:.0f} GB of unified memory: no size fits whole, so {model}'s experts are read from the SSD as it answers"
-                   + (f" ({speed} measured on a 32 GB Mac mini)" if speed else ""))
-        else:
-            why = f"{ram:.0f} GB of unified memory: {model} stays in memory (the best size that does)"
-        ctx = mf.recommend_context(ram)
-        return {"family": "qwen", "model": model, "title": families["qwen"]["title"] + " " + model, "context": ctx,
-                "backend": "metal", "gpu": {k: usable[0].get(k) for k in ("index", "name", "vram_gb")},
-                "download_gb": models[model]["download_gb"], "why": why, "notes": notes,
-                "setup_command": f"./setup.sh --setup --yes --family qwen --model {model} --context {ctx}"}
-
-    def _mac_model_table(self, hw: dict) -> list:
-        models, families, _ctx, _src = self.tables()
-        from strata_control import fit_label
-        ram = float(hw.get("ram_gb") or 0)
-        have = {c.stem[len("strata-"):] for c in self.configs()}
-        out = []
-        for family in (self.mac().all_families() if self.mac() else ("qwen", "gyro")):      # Qwen, Unsloth's sets, then Gyro: never the default
-            fd = families.get(family)
-            if fd is None:
-                continue
-            sizes = []
-            for m in self._mac_sizes(models, family):
-                d = models[m]
-                tag = (fd.get("tag", "") + m).lower()
-                sizes.append({"model": m, "about": d["about"], "download_gb": d["download_gb"], "experimental": False,
-                              "images": d.get("vision", fd.get("vision", True)) is not False,   # the Mac engine carries the picture reader (Metal)
-                              "ram_needed_gb": d["ram_gb"], "experts_gb": d.get("arena_gb"), "mem_total": False,
-                              "memory_gb": round(float(d.get("arena_gb") or d["ram_gb"]) + 1.0, 1),
-                              "fit_gb": fit_label.files_gb(family, m, d),
-                              "on_this_pc": self._mac_verdict(m, ram) if ram else None, "installed": tag in have, "id": tag})
-            if sizes:
-                out.append({"family": family, "title": fd["title"], "about": fd.get("about"), "experimental": False,
-                            "images": any(x["images"] for x in sizes), "sizes": sizes})
-        ds = self._mac_deepseek(hw, have)                # DeepSeek-V4.1-Flash on the Mac (0.2.7.1): after Qwen, never the default
-        if ds is not None:
-            out.append(ds)
-        return self._feed_rows(out, self.setup_module())
-
     def dsv41_engine_exe(self) -> Path | None:
         """The installed strata-dsv41 (STRATA_DSV41_EXE, else the newest package in the engine-dsv41 folders of this install), None when there is none; only looked at, never started."""
         from strata_control import dsv41_engine
@@ -1116,49 +1009,11 @@ class Strata:
                 return found
         return None
 
-    def mac_deepseek_pictures(self) -> bool:
-        """DeepSeek reads pictures on a Mac when the installed engine has the Metal picture tower, or when no engine is installed yet (the first start fetches the newest and setup
-        looks again); False for an engine without it."""
-        from strata_control import dsv41_engine
-        return dsv41_engine.mac_vision_state(self.dsv41_engine_exe()) != "no"
-
-    def _mac_deepseek(self, hw: dict, have: set) -> dict | None:
-        """DeepSeek-V4.1-Flash for a Mac: the official sets that were run on one (strata_control/dsv41_fit.MAC_SET_PACK), with the Mac fit words.
-        None when setup.py has no DeepSeek family (an older Terminal)."""
-        big = self.multi_family("deepseek41")
-        if not big:
-            return None
-        from strata_control import dsv41_fit
-        mf, ram = self.mac(), float(hw.get("ram_gb") or 0)
-        mac_pics = self.mac_deepseek_pictures()
-        sizes = []
-        for m in big["models"]:
-            if m not in dsv41_fit.MAC_SET_PACK:
-                continue
-            d = self.own_size("deepseek41", m)
-            if d is None:
-                continue
-            tag = (big.get("tag", "") + m).lower()
-            sizes.append({"model": m, "about": d["about"], "download_gb": d["download_gb"], "experimental": False,
-                          "images": mac_pics, "images_reader": "gpu" if mac_pics else "none",       # the engine's own picture tower, when the installed engine has it (dsv41_engine.MARK_MAC_VISION): docs/DEEPSEEK_MAC.md
-                          "ram_needed_gb": d["ram_gb"], "experts_gb": d.get("arena_gb"), "mem_total": True, "multi_file": True,
-                          "disk_gb": self.dsv41_disk_gb(d), "engine_min": None,
-                          "memory_gb": round(float(d["ram_gb"]), 1), "fit_gb": self.dsv41_files_gb(hw, m, d),
-                          "on_this_pc": ("may run slower" if ram and ram < mf.MIN_STREAM_RAM_GB
-                                         else self.dsv41_words(hw, m, installed=tag in have)),
-                          "installed": tag in have, "id": tag, "gpu_options": None})
-        if not sizes:
-            return None
-        return {"family": "deepseek41", "title": big["title"], "about": big.get("about"), "experimental": False,
-                "images": False, "sizes": sizes}
-
     def recommend(self, hw: dict) -> dict:
         """setup.py's own rules: the size it preselects (IQ3_XXS from 60 GB of RAM, else the first, Q2_0), the
         Coder below the full model's RAM (setup's RAM table), the low-RAM mode when the GPU makes up for the RAM, and
         the context it preselects for the card's VRAM (32K under 14 GB, 64K under 20 GB, else 128K)."""
         models, families, _ctx, _src = self.tables()
-        if hw.get("mac"):
-            return self._mac_recommend(hw, models, families)
         S = self.setup_module()
         usable = self.engine_gpus(hw)
         ram = hw.get("ram_gb") or 0
@@ -1170,7 +1025,7 @@ class Strata:
             return {"family": None, "model": None, "why": why}
         best = max(usable, key=lambda g: (round(g["vram_gb"]), -g.get("index", 0)))
         vram = best["vram_gb"]
-        backend = "hip" if best.get("vendor") == "amd" else "sycl" if best.get("vendor") == "intel" else "cuda"
+        backend = "hip" if best.get("vendor") == "amd" else "cuda"
 
         def low_fits(m):
             try:
@@ -1188,7 +1043,7 @@ class Strata:
             if model == "IQ2_XS":
                 why = (f"{total}, the 40 GB tier: Swift 1.5's IQ2_XS (thinks for a shorter time)"
                        + ("; Gyro-M (35 GB) is the other choice there, close to IQ3_XXS in quality but 16-21% slower at "
-                          "writing answers than Q2_0" if "Gyro-M" in models and best.get("vendor") in ("nvidia", "amd", "intel") else ""))
+                          "writing answers than Q2_0" if "Gyro-M" in models and best.get("vendor") in ("nvidia", "amd") else ""))
             elif model == "IQ3_XXS":
                 why = f"{total}, the 48 GB tier: IQ3_XXS (better quality, slower)"
             else:
@@ -1233,18 +1088,13 @@ class Strata:
                          "older CPU (10-20 minutes), and the CPU's share of the experts runs a few times slower")
         if backend == "hip":
             notes.append("AMD (experimental): pictures are on; the reader runs on the CPU under 24 GB of VRAM and on the GPU from 24 GB")
-        if backend == "sycl":
-            from strata_control import intel_app
-            notes.append(intel_app.NO_DOWNLOAD)
         cmd = (("START-HERE.bat --setup" if WIN else "./setup.sh --setup") +
-               f" --yes --family {fam} --model {model} --context {ctx}" + (f" --backend {backend}" if backend in ("hip", "sycl") else ""))
+               f" --yes --family {fam} --model {model} --context {ctx}" + (f" --backend {backend}" if backend == "hip" else ""))
         return {"family": fam, "model": model, "title": families[fam]["title"] + " " + model, "context": ctx,
                 "backend": backend, "gpu": {k: best.get(k) for k in ("index", "name", "vram_gb")},
                 "download_gb": models[model]["download_gb"], "why": why, "notes": notes, "setup_command": cmd}
 
     def model_table(self, hw: dict | None) -> list:
-        if (hw or {}).get("mac"):
-            return self._mac_model_table(hw)
         models, families, _ctx, _src = self.tables()
         S = self.setup_module()
         ram = (hw or {}).get("ram_gb")
@@ -1320,21 +1170,10 @@ class Strata:
         return out
 
     @staticmethod
-    def dsv41_not_on_mac() -> tuple:
-        """The DeepSeek sets the Metal engine cannot run yet (IQ1_S experts): strata_control/dsv41_fit.MAC_NOT_YET."""
-        from strata_control import dsv41_fit
-        return dsv41_fit.MAC_NOT_YET
-
-    @staticmethod
     def dsv41_not_here(model: str) -> str | None:
-        """The plain line when this computer (a Mac, a DGX Spark) is not offered `model`, else None: strata_control/dsv41_fit.not_here."""
+        """The plain line when this computer (a DGX Spark) is not offered `model`, else None: strata_control/dsv41_fit.not_here."""
         from strata_control import dsv41_fit
         return dsv41_fit.not_here(model)
-
-    @staticmethod
-    def dsv41_not_on_mac_line() -> str:
-        from strata_control import dsv41_fit
-        return dsv41_fit.MAC_NOT_YET_LINE
 
     @staticmethod
     def dsv41_disk_gb(d: dict) -> float:
@@ -1398,15 +1237,13 @@ class Strata:
 
     def _dsv41_memory_words(self, hw, model=None) -> str:
         """The memory part of DeepSeek-V4.1-Flash's `on_this_pc`: "fits" or "may run slower" (strata_control/fit_label.py: the set's files without its Engram table
-        against every card's memory plus the RAM; a Mac or a chip that shares the RAM: the plan's own count of what is read from the SSD).  No card gets the same two
+        against every card's memory plus the RAM; a chip that shares the RAM: the plan's own count of what is read from the SSD).  No card gets the same two
         words.  The plan's lines say the rest."""
         from strata_control import fit_label
         pl = self.dsv41_plan(hw, model=model)
         v = pl["verdict"]
         if v == "unknown" or pl.get("ram_gb") is None:
             return "not checked (this computer's memory could not be read)"
-        if pl.get("mac"):                       # an Apple Silicon Mac: one pool of unified memory, the rest of the experts streams from the SSD
-            return fit_label.FITS if pl["mac_verdict"] == "fits" else fit_label.SLOWER
         if pl.get("uma"):                       # Ryzen AI Max (Strix Halo, Windows): the graphics memory is the RAM, counted once
             return fit_label.FITS if float(pl.get("streamed_gb") or 0.0) <= 0.0 else fit_label.SLOWER
         size = float(pl["download_gb"]) - float(pl["engram_gb"])
@@ -1804,7 +1641,7 @@ def windows_desktop_adapters() -> list:
 
 def mark_display(gpus: list, nvidia_active: dict, desktop_pnp: list) -> None:
     """Sets g["drives_display"] (True / False) on the cards that can be told, from nvidia-smi (NVIDIA) and the Windows adapters that have a desktop
-    resolution (AMD and Intel, matched by PCI device id; two cards of one model are not told apart: left unknown).  A card left without the key is
+    resolution (AMD, matched by PCI device id; two cards of one model are not told apart: left unknown).  A card left without the key is
     unknown, and the app treats an unknown card as one that drives a display."""
     desk = [str(p).upper() for p in desktop_pnp]
     for g in gpus:
@@ -1945,7 +1782,7 @@ def tool_defs(models: dict, families: dict, contexts: list) -> list:
                                         f"{', '.join(str(c) for c in contexts)}"},
              "vision": {"type": "string", "enum": ["no", "yes", "gpu", "cpu"],
                         "description": "let the model read images (~0.9 GB more download). Default yes where the model can "
-                                       "read them (not on a Mac): yes = the best reader for this card (the CPU "
+                                       "read them: yes = the best reader for this card (the CPU "
                                        "under 24 GB of VRAM, the GPU from 24 GB, any make), gpu / cpu = that "
                                        "reader, no = text only"},
              "kv": {"type": "string", "enum": ["int8", "q4_0", "k8v4"],
@@ -1954,9 +1791,8 @@ def tool_defs(models: dict, families: dict, contexts: list) -> list:
                      "description": "one GPU, as nvidia-smi numbers them (default: the one with the most VRAM)"},
              "gpus": {"type": "string", "pattern": GPUS_PATTERN, "maxLength": 40,
                       "description": "several GPUs sharing the model: '0,2' or 'all' (experimental)"},
-             "backend": {"type": "string", "enum": ["auto", "cuda", "hip", "sycl"],
-                         "description": "auto (default), cuda = NVIDIA, hip = AMD on Linux (experimental), sycl = Intel Arc on Linux "
-                                        "(experimental; the model's files must already be on this computer: gguf_dir)"},
+             "backend": {"type": "string", "enum": ["auto", "cuda", "hip"],
+                         "description": "auto (default), cuda = NVIDIA, hip = AMD on Linux (experimental)"},
              "low_ram": {"type": "string", "enum": ["auto", "on", "off", "resident", "mmap"],
                          "description": "setup's low-RAM mode (default auto)"},
              "port": {**port, "description": "the port the model will listen on (default 8080)"},
@@ -2257,24 +2093,6 @@ class Tools:
         if model not in sizes:
             raise ToolError(f"{families[family]['title']} has no {model}; its sizes: {', '.join(sizes)}")
         md = s.own_size(family, model) or models[model]   # Qwen3.6-35B-A3B: its sizes are not in setup's MODELS
-        mac = bool(hw.get("mac"))
-        if mac:                                         # a Mac: no card to pick, no KV choice, no RAM mode: unified memory decides
-            if rec.get("model") is None and model is not None and s.mac() and hw.get("ram_gb", 0) < s.mac().MIN_STREAM_RAM_GB:
-                raise ToolError(f"{model} does not fit this Mac: {rec['why']}")
-            gpu = gpus = kv = low_ram = None
-            if md.get("multi_file"):                    # DeepSeek on a Mac (0.2.7.1): the sets that were run there, 8K like everywhere, text only
-                from strata_control import dsv41_fit
-                if model in dsv41_fit.MAC_NOT_YET:
-                    raise ToolError(dsv41_fit.MAC_NOT_YET_LINE)
-                if model not in dsv41_fit.MAC_SET_PACK:
-                    raise ToolError(f"{model} is not offered on a Mac: DeepSeek runs there as " + " or ".join(dsv41_fit.MAC_SET_PACK))
-                if not s.mac_deepseek_pictures():
-                    if vision in ("yes", "gpu", "cpu"):
-                        from strata_control import dsv41_engine
-                        raise ToolError(dsv41_engine.MAC_TEXT_LINE + " Use vision=no.")
-                    vision = "no"
-                context = context or catalog.DSV41_MAC_CONTEXT
-            context = context or (s.mac().recommend_context(hw.get("ram_gb") or 0) if s.mac() else 32768)
         if context is None and md.get("multi_file"):
             context = catalog.DSV41_CONTEXT
         if md.get("multi_file"):                          # DeepSeek-V4.1-Flash reads up to 1,048,576 positions (Project Maya #442): a size past that cannot run
@@ -2289,27 +2107,14 @@ class Tools:
             raise ToolError(f"images are not available with {families[family]['title']} {model} yet: use vision=no")
         if vision is None:
             # owner rule (2026-10-18): pictures are on by default wherever the model can read them and the engine has a reader; setup picks
-            # the reader (strata_common/vision_reader.py: the CPU under 24 GB, the GPU from 24 GB, every make of card; a Mac reads on its GPU).
+            # the reader (strata_common/vision_reader.py: the CPU under 24 GB, the GPU from 24 GB, every make of card).
             can_read = md.get("vision", families[family].get("vision")) is not False
             vision = "yes" if can_read else "no"
         target = self.check_data_dir(data_dir) if data_dir else s.data_dir()
         tag = (families[family].get("tag", "") + model)
         have_dir = target / "models" / tag
-        # An Intel Arc (Linux, the SYCL engine): setup.py's `--backend sycl` in its CONTROL mode prepares the model's files and writes the run config, as the
-        # Terminal does (strata_control/intel_app.py); it downloads nothing. NVIDIA and AMD never come here.
-        arc = backend == "sycl" or (backend in (None, "auto") and any(g.get("vendor") == "intel" for g in hw.get("gpus", [])))
-        if arc:
-            from strata_control import intel_app
-            if mac or not intel_app.supported_here() or not any(g.get("vendor") == "intel" for g in hw.get("gpus", [])):
-                raise ToolError("no Intel Arc card Strata can use was found in this computer (the Intel Arc engine runs on Linux)")
-            if md.get("multi_file") or family not in intel_app.families():
-                raise ToolError(f"{families[family]['title']} {model} can't be set up for an Intel Arc card yet; "
-                                "the Qwen3.8-Flash-Next, Swift, Coder, Gyro and Unsloth sizes can")
-            backend, vision = "sycl", "no"                  # pictures stay off on an Arc (strata_cli/launch/adopt.py)
-            if not gguf_dir and not intel_app.model_files_in(have_dir, family):
-                raise ToolError(intel_app.NO_DOWNLOAD)
         partly = (have_dir.is_dir() and any(have_dir.glob("*.gguf*"))) or bool(gguf_dir)   # a local folder: nothing to download
-        need = (8 if partly else md["download_gb"] + 8) + (1 if vision in ("yes", "gpu", "cpu") else 0)             + (s.mac().repacked_gb(model) if mac and s.mac() else 0)       # a Mac repacks Unsloth's shards into one file for the GPU (mac_fit.repacked_gb)
+        need = (8 if partly else md["download_gb"] + 8) + (1 if vision in ("yes", "gpu", "cpu") else 0)
         free = s.disk_free(target)
         short = None
         if free is not None and free < need:
@@ -2331,9 +2136,9 @@ class Tools:
             if not local.is_absolute() or not local.is_dir() or ".." in local.parts:
                 raise ToolError("gguf_dir must be an existing absolute folder")
             args += ["--gguf-dir", str(local)]
-        if backend in ("cuda", "hip", "sycl"):
+        if backend in ("cuda", "hip"):
             args += ["--backend", backend]
-        if drafter in ("mtp", "dflash2") and backend != "sycl":      # an Arc runs with no drafter the installer sets up (the Terminal's adopted config has none either)
+        if drafter in ("mtp", "dflash2"):
             args += ["--drafter", drafter]
         fit = None
         ram = hw.get("ram_gb")

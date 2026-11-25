@@ -277,7 +277,7 @@ MODELS = {
                          "revision": UNSLOTH_V31_REVISION, "engine": UNSLOTH_V31_ENGINE, "vision": True, "uma_pool_auto": True},
     # MODEL-UPDATE Phase 4: NVFP4 experts, ready-made packs (NVFP4_REPOS).  63.3 GiB (68.0 GB) of experts in the
     # pack's experts.bin; the low-RAM mode reads them from there on a PC whose RAM does not hold them.  NVIDIA only
-    # (the HIP and SYCL engines have no NVFP4 kernels).  Images: both packs keep Qwen's vision tower unquantized, so the
+    # (the HIP engine has no NVFP4 kernels).  Images: both packs keep Qwen's vision tower unquantized, so the
     # original's image encoder (ISTA's mmproj, the same file as for every Flash-Next model) reads pictures for them;
     # checked end to end on an RTX 5070 and an RTX 3060 against IQ3_XXS's answers on the same picture.
     # Gyro (agentionai): "ram_gb" is the memory the weights need in total, VRAM and RAM together ("mem_total"): Gyro-S
@@ -513,8 +513,7 @@ MMPROJ = "mmproj-Qwen3.8-Flash-Next-BF16.gguf"
 # own (src/models/qwen36; `strata` switches to it from the file's architecture).  No pack, no expert profile, no separate MTP
 # draft layer: the engine reads the GGUF as it is, keeps every expert it can in VRAM and computes the rest on the CPU
 # (the hybrid mode), and drafts with the file's own MTP block.  Not in FAMILIES (whose entries are Flash-Next files with
-# packs): OWN_PATH_FAMILIES, offered in the same menu and installed by install_own_path.  NVIDIA (CUDA) and AMD (HIP)
-# only: the Intel Arc (SYCL) engine refuses it.
+# packs): OWN_PATH_FAMILIES, offered in the same menu and installed by install_own_path.
 QWEN36_FILES = {
     "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf": (22853663008, "55983c5a75a1ab969824077b3bb3de4146e82a9234072b48ad4e8f92ad3fe9f1"),
     "Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf": (32611711264, "35fce994cd36104a7dc1bd8a4bdf13778145664c00fdef6773aebc9246e5019c"),
@@ -547,7 +546,7 @@ OWN_PATH_FAMILIES = {
 PREVIEW_FAMILIES = OWN_PATH_FAMILIES             # the earlier name (tools and tests that import it)
 
 # DeepSeek-V4.1-Flash (GGUF architecture deepseek41), Unsloth's UD-Q8_K_XL at the revision the port was checked against: a
-# family with an engine of its own (strata-dsv41, src/models/deepseekv41, ported from Project Maya's maya-ds4, MIT) that is not a
+# family with an engine of its own (strata-ds41, src/models/deepseekv41, ported from Project Maya's maya-ds4, MIT) that is not a
 # Flash-Next pack and not a single GGUF: nine shards (508.4 GB, the routed experts as MXFP4, the dense weights in BF16, and
 # in shard 8 the 202.8 GB n-gram table that stays on the SSD), the engine's pack folder (tools/dsv41/pack_gguf.py: hash
 # tables, tensor map, the tokenizer and the GGUF's own chat template, a few MB) beside them.  MULTI_FILE_FAMILIES, offered
@@ -717,10 +716,7 @@ def dsv41_also(name: str) -> tuple:
 
 
 _UD_SHARDS = [DSV41_SHARD.format(i=i) for i in range(1, 10)]
-DSV41_MAC_CONTEXT = 8192      # DeepSeek on a Mac keeps the 8K it was run at (nothing was run on a Mac at 128K)
 DSV41_CONTEXT = 131072        # 128K like every model (owner, 2026-11-01; strata_control/default_context.py)
-# DeepSeek's pictures on a Mac are decided by the installed engine (strata_control/dsv41_engine.mac_vision_state: the
-# marker STRATA_DS4_METAL_VISION_V1), not by a switch here
 MULTI_FILE_FAMILIES = {
     "deepseek41": {"title": "DeepSeek-V4.1-Flash", "by": "DeepSeek; the 2-bit GGUFs by ISTA-DAS, UD-Q8_K_XL by Unsloth", "arch": "deepseek41",
                    "about": "a big model that runs on a PC with a 12 GB card and 64 GB of RAM (the two official 2-bit versions: 257 or "
@@ -801,7 +797,7 @@ MULTI_FILE_FAMILIES["deepseek41"]["models"] = {
     **({DSV41_CODER_MODEL: {
         "label": DSV41_CODER.get("label", "ISTA-DAS Coder"),
         "about": "ISTA-DAS's coding version of DeepSeek-V4.1-Flash: %d of the model's 384 experts in every layer are kept, the rest removed, with the 2.00 version's file layout and "
-                 "tensor types: %.0f GB of model + 111 GB n-gram table + 8 GB drafter (about %.0f GB of disk). Run on a Mac (M5 Max) and a Ryzen AI Max at about 20 tokens a second. Against the original model (our test, 4,995 positions): "
+                 "tensor types: %.0f GB of model + 111 GB n-gram table + 8 GB drafter (about %.0f GB of disk). Run on a Ryzen AI Max at about 20 tokens a second. Against the original model (our test, 4,995 positions): "
                  "perplexity +48%%, KL 0.40 (2.00 bpw: +16%%, 0.17; 2.25 bpw: +8%%, 0.11)" % (DSV41_CODER["experts_per_layer"], sum(DSV41_CODER_FILES[n][0] for n in DSV41_CODER["shards"]) / 1e9,
                                                       (sum(DSV41_CODER_FILES[n][0] for n in DSV41_CODER["shards"]) + 110_595_290_816 + 7_976_914_240) / 1e9 + 6),
         "ram_gb": 24, "profile": DSV41_CODER.get("profile", "profile-coder.bin"), **make_coder_set()}} if DSV41_CODER_REPO else {}),

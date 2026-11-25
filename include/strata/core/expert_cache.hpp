@@ -95,11 +95,10 @@ public:
     void set_segment_bytes(int64_t seg_bytes) { seg_req_ = seg_bytes > 0 ? seg_bytes : 0; }
     /// STRATA_MMQ_DIRECT: `open_sized` leaves at least `g` bytes of room after each slot's blob (the prompt MMQ
     /// reads a little past a down matrix when it reads an expert in its slot).  Set before opening, like
-    /// `set_segment_bytes`; `close` keeps it.  0 (the default): no guard.  The uniform `open` ignores it, and so does
-    /// the SYCL engine's open_sized (its slots then have no guard, and `slot_tail` finds no room).
+    /// `set_segment_bytes`; `close` keeps it.  0 (the default): no guard.  The uniform `open` ignores it.
     void set_slot_guard(int64_t g) { guard_req_ = g > 0 ? g : 0; }
-    /// The guard the open slots were laid out with: what `open_sized` applied (0 for uniform slots, when closed, and
-    /// on SYCL, whose open_sized applies none).
+    /// The guard the open slots were laid out with: what `open_sized` applied (0 for uniform slots and when closed).
+
     int64_t slot_guard() const { return guard_; }
     /// strata-q38: sets the most bytes one expert takes from its slot on, when uniform slots are smaller than the
     /// largest expert (an admitter's pages, of which an expert takes several).  Call before `open`, like

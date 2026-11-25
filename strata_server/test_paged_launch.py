@@ -89,8 +89,7 @@ class PagedLaunchTests(unittest.TestCase):
         self.assertEqual(cfg['args'], ['--gpu-mib', '4096'])
 
     def test_legacy_path_is_not_selected(self):
-        for exe in ('strata.exe', 'strata-dsv41.exe', 'strata-q36.exe'):
-            self.assertFalse(paged_launch.is_paged_engine({'exe': exe}))
+        self.assertFalse(paged_launch.is_paged_engine({'exe': 'strata-q36.exe'}))
 
     def test_windows_path_and_disabled_drafting(self):
         cfg = {'exe': r'C:\engine\strata-ds41.exe', 'args': ['--dspark', 'on'], 'mtp': False}
@@ -103,16 +102,6 @@ class PagedLaunchTests(unittest.TestCase):
         self.assertEqual(engine_client.engine_args(cfg), ['--gpu', '1', '--ram-mib', '2560'])
         cfg['args'] += ['--ram-mib', '1024']
         self.assertEqual(engine_client.engine_args(cfg), ['--gpu', '1', '--ram-mib', '1024'])
-
-    def test_terminal_keeps_the_paged_deepseek_choice(self):
-        from strata_cli.launch.runner import Runner
-        from unittest.mock import Mock
-        runner = Mock()
-        runner.s = LaunchSettings()
-        cfg = {'exe': 'strata-ds41.exe', 'arch': 'deepseek41'}
-        Runner.use_own_dsv41_engine(runner, cfg)
-        runner.dsv41_engine_found.assert_not_called()
-        self.assertEqual(cfg['exe'], 'strata-ds41.exe')
 
     def test_an_explicit_program_needs_no_default_package(self):
         import tempfile

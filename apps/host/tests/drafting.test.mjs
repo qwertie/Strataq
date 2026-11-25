@@ -114,7 +114,7 @@ test('the Drafting dropdown exists only where there is something to choose: Qwen
   const code = (await transform(read('../src/lib/drafting.ts'), { loader: 'ts', format: 'esm' })).code;
   const { draftingChoices } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
   const all = ['auto', 'mtp', 'dflash2', 'off'];
-  // the engine here cannot run it (Metal, Intel, no card), or Control has not answered yet: no dropdown for anyone
+  // the engine here cannot run it (no supported card), or Control has not answered yet: no dropdown for anyone
   for (const family of ['qwen', 'gyro', 'unsloth', 'coder', 'swift', 'deepseek41', undefined]) {
     assert.equal(draftingChoices(family, false), null, `${family}, not served`);
     assert.equal(draftingChoices(family, undefined), null, `${family}, Control has not answered`);

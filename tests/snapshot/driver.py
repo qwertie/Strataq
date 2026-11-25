@@ -8,7 +8,6 @@ A record has the same shape for every entry point:
   setup_args       what the entry point hands to setup.py (Terminal launch only)
   config_file      the run config the entry point leaves on disk (normalized)
   engine           {exe, argv, env_set, notes}: what serve/server.py would start: engine_args(cfg, exe) and the variables child_env(cfg) adds
-  not_driven       (setup only) present instead of the above for a class whose setup is another script (Intel Arc, Mac), with the reason
 """
 
 from __future__ import annotations

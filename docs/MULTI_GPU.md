@@ -59,8 +59,8 @@ The Main card is the last card in the engine's order. The first card runs the fi
 - A role is one click (app), one key (`strata launch`: M, H, O; R restores the recommendation) or one line (above).
 
 Only a few things are warned about, one short line each: built-in graphics as Main, a card the engine cannot run, and too
-little memory for the chosen setup. All cards Off is allowed. The CUDA, HIP and SYCL engines cannot start without a card and
-say so; the Mac engine says "Performance is degraded on CPU only." and goes on.
+little memory for the chosen setup. All cards Off is allowed. The CUDA and HIP engines cannot start without a card and
+say so.
 
 **In the run config** (what the app writes). Merge these fields into the existing config:
 
@@ -88,7 +88,7 @@ estimated 2 GB of its own buffers.
 - A card with less than 8 GB of VRAM together with others, because each card holds its own session state and prompt
   buffers beside the dense weights of its layers. If you name it with `--gpus`, setup states the risk and asks
   (`--yes` goes ahead).
-- Intel GPUs in a split, and a mix of NVIDIA and AMD cards. An engine drives one make of card. The app, `strata launch` and setup
+- A mix of NVIDIA and AMD cards. An engine drives one make of card. The app, `strata launch` and setup
   offer only the cards the engine can drive, and say so when the other make has the bigger card. AMD cards share a model among
   themselves: `./setup.sh --backend hip --gpus 1,0` ([AMD_HIP.md](AMD_HIP.md)).
   A prompt read on one card and an answer made on another, with the session handed over in RAM, is a different opt-in: [SPLIT_SERVE.md](SPLIT_SERVE.md).
@@ -109,9 +109,6 @@ share is probed on its own link. A `--pcie-frac` you give applies to every card 
   window, its prompt-path buffers, and an expert cache for its layers filled from the expert profile.
 - The last card: also the output head and the draft layer (about 0.8 GB).
 - Host RAM: the expert arena once, shared by all cards. The CPU pool computes whatever no card holds.
-
-The Intel SYCL engine still keeps all layers' dense weights on the first card under `--layer-split auto`.
-An explicit split loads only each card's own layers.
 
 Prompts are read in chunks that flow through the cards in turn: while a later card reads chunk c, the first card reads chunk c+1.
 Conversation checkpoints save and restore every card's state.
@@ -184,9 +181,6 @@ tokens. The tokens are the serial loop's, up to CPU rounding.
 - **Default:** on for AMD RDNA4 (gfx1200 / gfx1201) with `--serve`, the draft layer, and a split of two or more stages when the
   drafter can sit on the first card, otherwise three or more. The log says "is on by default for a layer split of N stages".
   `--pipeline-windows 0` or `STRATA_PIPELINE_AUTO=0` turns it off. NVIDIA builds keep it opt-in (`--pipeline-windows 2`).
-  The Intel Arc engine turns it on for exactly two Arc B-series (Battlemage) cards, with `--serve` and the draft layer (`--spec 2`
-  or more): on 2x Arc Pro B65 decode is 17% to 23% faster, and setup writes `--spec 2` for those cards ([INTEL_ARC.md](INTEL_ARC.md)).
-  It runs exactly two cards, so one card, Arc A-series cards and three or more cards stay serial.
 - **Draft layer placement:** with the pipeline on, the draft layer loads on the first card, whose window has finished when the
   chain starts. `STRATA_MTP_STAGE0=0` keeps the old place.
 - **Off, with one log line saying why:** `--batch` slots, `--peer-device`, the helper caches (`--expert-cache-device1..3`, which

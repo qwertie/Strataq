@@ -52,14 +52,7 @@ int main() {
     check(card_usable(4250), "a 6 GB card (4.15 GiB free) stays: the other steps make it fit");
     check(card_usable(7635), "an 8 GB card stays");
     check(card_usable(kMinCardMib) && !card_usable(kMinCardMib - 1), "the edge");
-    // 3. the draft layer: the single card's arithmetic, unchanged
-    const uint64_t layer = 835ull << 20, head = 410ull << 20;
-    check(draft_layer_need_bytes(layer, head) == layer + head + (220ull << 20) + (1550ull << 20), "the single card's need");
-    check(draft_layer_short(1830ull << 20, layer, head), "1.8 GiB free: the layer goes");
-    check(!draft_layer_short(3640ull << 20, layer, head), "3.6 GiB free (trimmed 8 GB card): the layer stays");
-    check(!draft_layer_short(0, layer, head), "0 free is an unreadable figure");
-    check(dflash2_need_bytes(715ull << 20, 213ull << 20) < draft_layer_need_bytes(layer, head), "DFlash2 needs less than the draft layer");
-    // 4. the KV window walks 32768 -> 20480 -> 8192 -> 4096 -> stop, and never goes past the context or the engine's minimum
+    // 3. the KV window walks 32768 -> 20480 -> 8192 -> 4096 -> stop, and never goes past the context or the engine's minimum
     check(next_kv_window(32768, 131072, 4096) == 20480, "32768 -> 20480");
     check(next_kv_window(20480, 131072, 4096) == 8192, "20480 -> 8192");
     check(next_kv_window(8192, 131072, 4096) == 4096, "8192 -> 4096");

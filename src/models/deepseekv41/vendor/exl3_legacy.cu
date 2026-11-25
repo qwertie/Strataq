@@ -20,7 +20,7 @@
 //     blocks: the partial sums go to a per-stream scratch and the LAST block of an output block adds them up in
 //     split order (deterministic) and runs the output rotation.
 #if !defined(STRATA_USE_HIP)   // (AMD runs exl3.cu's kernels; EXL3 does not run there anyway)
-#include "../ds4_launch.h"   // strata_ds4_launch: <<<>>> on CUDA and HIP, a dispatch on Metal
+#include "../ds4_launch.h"   // strata_ds4_launch
 #include "strata/models/deepseekv41/exl3.hpp"
 
 #include <cuda_fp16.h>

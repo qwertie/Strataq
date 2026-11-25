@@ -34,14 +34,18 @@ class Tune(unittest.TestCase):
     def run_tune(self, speed):
         calls = []
 
-        def fake(exe, args, f, n, timeout, env):
+        def fake(exe, args, ids, n, timeout, env):
             calls.append(list(args))
             return speed(args)
         return tune.tune(self.cfg, "quick", measure_fn=fake), calls
 
-    def test_parse(self):
-        self.assertEqual(tune.parse_speed("x\ndecode: 48 tokens in 9000 ms (5.33 tok/s); CPU lane: 1"), 5.33)
-        self.assertIsNone(tune.parse_speed("nothing"))
+    def test_measure_reads_the_done_figures(self):
+        import smoke
+        done = ([7] * 48, {"generated": 48, "decode_ms": 9000.0})
+        with mock.patch.object(smoke, "run_engine", lambda *a: done):
+            self.assertAlmostEqual(tune.measure("e", [], [1], 48, 60, {}), 48 / 9.0)
+        with mock.patch.object(smoke, "run_engine", mock.Mock(side_effect=RuntimeError("died"))):
+            self.assertIsNone(tune.measure("e", [], [1], 48, 60, {}))
 
     def test_a_clear_gain_is_written(self):
         res, calls = self.run_tune(lambda a: 6.0 if "on" in a[a.index("--dspark") + 1:a.index("--dspark") + 2] else 4.5)

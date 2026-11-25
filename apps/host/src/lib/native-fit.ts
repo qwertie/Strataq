@@ -129,7 +129,7 @@ export function versionGroups<V extends { id: string; download_gb: number }>(ver
 /**
  * What a version is on this computer (owner's one rule, 2026-11-08): its files, WITHOUT the n-gram / PLE / Engram lookup table's file (the download size minus
  * that file: `fit_gb`, else `memory_gb`), against the graphics memory plus the RAM, nothing taken off either side. They fit: 'fits', and the list says nothing.
- * They do not: 'ssd', and the list says "may run slower" (part is read from the SSD while it answers). Nothing here refuses anything: no card, or a Mac with
+ * They do not: 'ssd', and the list says "may run slower" (part is read from the SSD while it answers). Nothing here refuses anything: no card, or a PC with
  * little memory, gets the same two words. (Not enough free disk is a different question; the download says it.)
  *
  * `fitOn` (above) still places the experts for the This computer card; `on_this_pc` no longer decides anything here.

@@ -858,7 +858,7 @@ inline std::string check_architecture(const GgufFile& f) {
 }
 
 /// The engine's guard: `check_architecture`, then a family this engine has a path for.  A recognised family
-/// it does not run yet (Qwen3.6 on SYCL) is refused with a message that says so.
+/// it does not run yet (Qwen3.6 on Flash-Next's path) is refused with a message that says so.
 inline std::string check_engine_architecture(const GgufFile& g) {
     std::string err = check_architecture(g);
     if (!err.empty()) return err;

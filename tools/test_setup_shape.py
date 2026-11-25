@@ -59,26 +59,6 @@ class Registered(base.Base):
         feed_models.apply(self.setup, base.parsed(base.flash_next(id="plain-one", title="Plain One")), {"qwen4exp"})
         self.assertNotIn("shape", self.setup.FAMILIES["plain-one"])
 
-    def test_it_is_offered_on_a_mac_like_the_two_file_sizes(self):
-        from strata_control import mac_fit
-        self.assertIn("q4lite-test", mac_fit.FEED_FAMILIES)
-        rows = {k: v for k, v in mac_fit.MAC_MODELS.items() if v.get("family") == "q4lite-test"}
-        self.assertEqual(len(rows), 1)
-        (key, row), = rows.items()
-        self.assertTrue(row["no_mtp"], "its entry says drafter none")
-        self.assertEqual(mac_fit.app_sizes("q4lite-test"), [key])
-
-    def test_the_mac_arguments_for_a_one_file_model_without_a_draft_layer(self):
-        from strata_control import mac_fit
-        (key,) = [k for k, v in mac_fit.MAC_MODELS.items() if v.get("family") == "q4lite-test"]
-        shard = Path("model.gguf")
-        args = mac_fit.engine_args(Path("pack"), [shard], Path("rt"), 8192, False, 128.0, "profile.bin", key)
-        self.assertEqual(args[args.index("--ple-gguf") + 1], "model.gguf", "one file: its own PLE table")
-        self.assertNotIn("--mtp", args)
-        plain = mac_fit.engine_args(Path("pack"), [Path("a-1.gguf"), Path("a-2.gguf")], Path("rt"), 8192, False, 128.0, "profile.bin", "IQ3_S")
-        self.assertEqual(plain[plain.index("--ple-gguf") + 1], "a-2.gguf")
-        self.assertIn("--mtp", plain, "a built-in model is exactly what it was")
-
     def test_the_same_list_without_an_engine_to_ask_gives_the_same_registration(self):
         other = base.fresh_setup("setup_other")
         feed_models.apply(other, base.parsed(clean(shaped())), None)
@@ -98,7 +78,7 @@ class EngineStep(base.Base):
         self.addCleanup(self.setup.SHAPE_ENGINE.clear)
 
     def test_the_run_config_names_the_shape_engine_only_for_a_model_of_that_shape(self):
-        self.assertEqual(self.setup.engine_exe(Path("engine")), "component:strata-engine" if self.setup.CONTROL else str(Path("engine") / self.setup.EXE))
+        self.assertEqual(self.setup.engine_exe(Path("engine")), "component:strata-engine" if self.setup.CONTROL else str(Path("engine") / self.setup.Q38EXE))
         self.setup.SHAPE_ENGINE["shape"] = "q4_lite"
         self.assertEqual(self.setup.engine_exe(Path("engine")), "component:strata-q4-lite")
         self.setup.SHAPE_ENGINE.clear()

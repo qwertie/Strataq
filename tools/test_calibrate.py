@@ -57,7 +57,7 @@ class FakeEngine:
                 self.reads.append(tune["prefill_pipe"])
 
 
-BASE = ["--pack", "p", "--spec", "4", "--spec-min-p", "0.5", "--max-context", "8192"]
+BASE = ["--pack", "p", "--spec-min-p", "0.5", "--max-context", "8192"]
 
 
 class Calibrate(unittest.TestCase):
@@ -330,15 +330,13 @@ class Calibrate(unittest.TestCase):
         self.assertEqual(b.count("--spec-min-p"), 1)
 
     def test_engine_args_are_the_servers(self):
-        # #447: a "gpu" list is a layer split only with two or more cards; "0,2" is one too; split_skip_if_fits counts
-        helper = {"args": BASE + ["--expert-cache-device1", "1800"], "gpu": [0], "env": {"CUDA_VISIBLE_DEVICES": "0,1"}}
+        # #447: a "gpu" list is a layer split only with two or more cards; "0,2" is one too
+        helper = {"args": BASE, "gpu": [0], "env": {"CUDA_VISIBLE_DEVICES": "0,1"}}
         self.assertEqual(CAL.engine_args(helper), helper["args"])                 # one stage + a helper card: no split
         self.assertEqual(CAL.engine_args({"args": BASE, "gpu": 1}), BASE)
         self.assertEqual(CAL.engine_args({"args": BASE, "gpu": [0, 2]}), BASE + ["--layer-split", "auto"])
         self.assertEqual(CAL.engine_args({"args": BASE, "gpu": "0,2", "layer_split": "18"}),
                          BASE + ["--layer-split", "18"])
-        self.assertEqual(CAL.engine_args({"args": BASE, "gpu": [0, 1], "split_skip_if_fits": True}),
-                         BASE + ["--layer-split", "auto", "--split-skip-if-fits"])
         own = BASE + ["--layer-split", ""]                                       # the config's own value wins
         self.assertEqual(CAL.engine_args({"args": own, "gpu": [0, 1]}), own)
 

@@ -493,15 +493,15 @@ def split_backend(value) -> tuple[str, str]:
     return name, ""
 
 
-BACKEND_ALIASES = {"nvidia": "cuda", "amd": "hip", "intel": "sycl", "arc": "sycl"}
+BACKEND_ALIASES = {"nvidia": "cuda", "amd": "hip"}
 SAVED_KEY = "engine_backend"
 
 
 def clean_backend_name(value) -> str:
-    """What the person typed for --backend, as an engine family name: 'intel' -> 'sycl', 'NVIDIA' -> 'cuda'; '' when it names none."""
+    """What the person typed for --backend, as an engine family name: 'NVIDIA' -> 'cuda'; '' when it names none."""
     name = str(value or "").strip().lower()
     name = BACKEND_ALIASES.get(name, name)
-    return name if name in ("cuda", "hip", "sycl") else ""
+    return name if name in ("cuda", "hip") else ""
 
 
 def saved_backend(environ=None) -> str | None:
@@ -535,7 +535,8 @@ def save_backend(value, environ=None) -> Path | None:
 
 def detect_backend(environ=None) -> tuple[str | None, str]:
     """(backend, how) for this machine: the engine family its GPU needs. Bounded, read-only probes of tools that are
-    already installed; ``STRATA_ENGINE_BACKEND`` overrides (the tests and the support desk use it)."""
+    already installed; ``STRATA_ENGINE_BACKEND`` overrides (the tests and the support desk use it). Raises ComponentProblem
+    with a plain sentence on a Mac, or when the only graphics found are Intel's: Strata has no engine for them."""
     environ = os.environ if environ is None else environ
     forced = split_backend(environ.get(ENV_BACKEND, ""))[0]      # "hip-rdna2" starts the hip family (the package choice reads the variant)
     if forced:
@@ -546,7 +547,7 @@ def detect_backend(environ=None) -> tuple[str | None, str]:
     if chosen:
         return chosen, "saved choice"
     if host_platform().startswith("macos"):
-        return "metal", "platform"
+        raise ComponentProblem(unsupported_gpu_notice("A Mac is"))
     # Windows: the display adapters are the machine's own statement about which cards it has, so they decide first. A leftover
     # nvidia-smi from a card that was taken out, or a toolkit installed for another card, must never outvote them: that is how an
     # AMD PC was given a CUDA engine (#3688). A tool is only asked about a make that has an adapter here.
@@ -555,10 +556,9 @@ def detect_backend(environ=None) -> tuple[str | None, str]:
     if present:
         return _first_make(present), "display adapters"
     probes = (("cuda", ("nvidia-smi", "--query-gpu=name", "--format=csv,noheader")),
-              ("hip", ("rocminfo",) if os.name != "nt" else ("hipInfo",)),
-              ("sycl", ("sycl-ls",)))
+              ("hip", ("rocminfo",) if os.name != "nt" else ("hipInfo",)))
     vendors_here = {a.get("vendor") for a in adapters}
-    vendor_of = {"cuda": "10de", "hip": "1002", "sycl": "8086"}
+    vendor_of = {"cuda": "10de", "hip": "1002"}
     for backend, command in probes:
         if vendors_here and vendor_of[backend] not in vendors_here:
             continue                                  # the adapters list no card of this make: a tool that answers is a leftover
@@ -573,30 +573,33 @@ def detect_backend(environ=None) -> tuple[str | None, str]:
         if done.returncode == 0 and (done.stdout or "").strip():
             if backend == "hip" and "gfx" not in done.stdout:
                 continue
-            if backend == "sycl" and "level_zero" not in done.stdout.lower() and "gpu" not in done.stdout.lower():
-                continue
             return backend, command[0]
     found = _drm_vendor_backend() if os.name != "nt" else _windows_vendor_backend()
+    if found == "intel" or not found and "8086" in vendors_here:
+        raise ComponentProblem(unsupported_gpu_notice("Intel graphics are"))
     if found:
         return found, "sysfs pci vendor" if os.name != "nt" else "display adapters"
     return None, "no GPU tool answered"
 
 
+def unsupported_gpu_notice(subject: str) -> str:
+    """Gets the plain sentence for graphics Strata has no engine for; `subject` names them ("A Mac is")."""
+    return f"Strata runs on NVIDIA and AMD graphics cards. {subject} not supported."
+
+
 def _first_make(makes) -> str:
-    """The make Strata uses when a PC has cards of several: NVIDIA, then AMD, then Intel (the order of every probe)."""
-    return next(m for m in ("cuda", "hip", "sycl") if m in makes)
+    """The make Strata uses when a PC has cards of several: NVIDIA, then AMD (the order of every probe)."""
+    return next(m for m in ("cuda", "hip") if m in makes)
 
 
 def adapter_makes(adapters: list[dict] | None) -> set[str]:
     """The engine families the Windows display adapters call for: cuda (an NVIDIA adapter), hip (an AMD card, not an integrated
-    Radeon), sycl (an Intel adapter). Empty when the list is empty. Read-only, nothing is run."""
+    Radeon). Empty when the list is empty. Read-only, nothing is run."""
     makes = set()
     for adapter in adapters or []:
         vendor = adapter.get("vendor")
         if vendor == "10de":
             makes.add("cuda")
-        elif vendor == "8086":
-            makes.add("sycl")
     if windows_amd_cards(adapters or []):
         makes.add("hip")
     return makes
@@ -621,7 +624,7 @@ def _drm_vendor_makes(root: str = "/sys/class/drm") -> set[str]:
                     continue
     except OSError:
         return set()
-    return {backend for vendor, backend in (("0x10de", "cuda"), ("0x1002", "hip"), ("0x8086", "sycl")) if vendor in vendors}
+    return {backend for vendor, backend in (("0x10de", "cuda"), ("0x1002", "hip")) if vendor in vendors}
 
 
 def wsl_amd_note(backend: str | None, dev_root: str = "/dev", wsl: bool | None = None) -> str | None:
@@ -657,10 +660,10 @@ def _own_vram(card: Path) -> bool | None:
 
 def _drm_vendor_backend(root: str = "/sys/class/drm") -> str | None:
     """Linux without the vendor tools on PATH (a HIP box that runs ROCm from Python wheels has no rocminfo): the PCI
-    vendor of the display adapters decides. NVIDIA 0x10de -> cuda, AMD 0x1002 -> hip, Intel 0x8086 -> sycl, in that
-    order. An integrated GPU does not decide while another make has a card that is not integrated (#4971: a 512 MiB
-    Radeon APU made the whole PC an AMD machine beside the user's Intel Arc); when every card is integrated the old
-    order stands. Read-only sysfs, nothing is run."""
+    vendor of the display adapters decides. NVIDIA 0x10de -> cuda, AMD 0x1002 -> hip, Intel 0x8086 -> "intel" (no engine:
+    the caller reports it), in that order. An integrated GPU does not decide while another make has a card that is not
+    integrated (#4971: a 512 MiB Radeon APU beside an Intel Arc card); when every card is integrated the order stands.
+    Read-only sysfs, nothing is run."""
     if not os.path.isdir(root):
         return None
     cards: dict[str, list[bool | None]] = {}
@@ -675,7 +678,7 @@ def _drm_vendor_backend(root: str = "/sys/class/drm") -> str | None:
             cards.setdefault(vendor, []).append(_own_vram(card))
     except OSError:
         return None
-    order = (("0x10de", "cuda"), ("0x1002", "hip"), ("0x8086", "sycl"))
+    order = (("0x10de", "cuda"), ("0x1002", "hip"), ("0x8086", "intel"))
     if not any(v in cards for v, _ in order):
         return None
     # a make whose every card is positively integrated (a small own-memory reading) is skipped while another make has a card that is not
@@ -1100,7 +1103,7 @@ def arch_notice(built: tuple[str, ...], here: list[str]) -> str:
 
 
 RELEASES_URL = "https://github.com/qwertie/Strataq/releases"
-MAKE_NAMES = {"cuda": "NVIDIA", "hip": "AMD", "sycl": "Intel"}
+MAKE_NAMES = {"cuda": "NVIDIA", "hip": "AMD"}
 
 
 def wrong_make_notice(built: str, archs: tuple[str, ...], here: str) -> str:

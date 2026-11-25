@@ -13,7 +13,6 @@ acquire or build an engine. Check [model requirements](MODELS.md) before downloa
 | --- | --- |
 | Windows | `START-HERE.bat` ([steps](#from-source-windows)) |
 | Linux | `./setup.sh` ([steps](#from-source-linux)) |
-| Mac (Apple Silicon) | `./setup.sh` ([steps](#from-source-mac)) |
 | A source build to test a change | `./setup.sh --build --no-start` ([steps](#build-from-git-on-linux-to-try-a-pull-request-or-change-the-code)) |
 | An update | `UPDATE.bat` or `./update.sh` ([steps](#updating)) |
 
@@ -69,9 +68,9 @@ cd Strata
 ./setup.sh --build --no-start
 ```
 
-`--build` requests a source engine rather than a ready-made one. It also compiles the new engine of the chosen model
-(`strata-q38` for Qwen3.8, `strata-ds41` for DeepSeek V4.1), and the run config starts that one. `START-HERE.bat --build`
-does the same on Windows, also with an AMD card. `--no-start` prevents serving;
+`--build` requests a source engine rather than a ready-made one. It compiles the engine of the chosen model
+(`strata-q38` for Qwen3.8, `strata-ds41` for DeepSeek V4.1, `strata-q36` for Qwen3.6), and the run config starts it.
+`START-HERE.bat --build` does the same on Windows, also with an AMD card. `--no-start` prevents serving;
 this is still setup and can download and prepare a model. Inspect the printed paths and generated config before
 claiming to have tested a code change. A released engine cannot validate changes to your local C++ files.
 
@@ -79,14 +78,14 @@ For a direct NVIDIA build, with the required compiler and CUDA toolkit installed
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSTRATA_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=native
-cmake --build build --target strata -j8
+cmake --build build --target strata-q38 -j8
 ```
 
 `native` builds for the GPUs in this PC. Name the card instead for another one: `75` (RTX 20), `86` (RTX 30), `89` (RTX 40),
 `120` (RTX 50), or a list such as `"86;120"`. Without the option the build is for RTX 50 only and the configure step says so.
 
-Run against the resulting binary and the matching model config. Use the build instructions for
-[HIP](AMD_HIP.md), [SYCL](INTEL_ARC.md) or [Metal](MAC.md) when changing those backends.
+Run against the resulting binary and the matching model config. Use the [HIP build instructions](AMD_HIP.md)
+for AMD. Strataq has no Mac (Metal) or Intel Arc (SYCL) engine.
 Follow [contribution validation requirements](../CONTRIBUTING.md) before requesting review.
 
 For the Terminal monitor from a checkout:
@@ -96,18 +95,6 @@ For the Terminal monitor from a checkout:
 STRATA_PYTHON="$PWD/.venv/bin/python3" bin/strata monitor --url http://127.0.0.1:8080
 ```
 
-## From source: Mac
-
-Use an Apple Silicon Mac with macOS 15 or newer. Install Apple's Command Line Tools once:
-
-```bash
-xcode-select --install
-```
-
-Then run `./setup.sh` in the source folder. macOS uses its own setup implementation and builds the Metal engine;
-its options and model preparation differ from Windows/Linux. Read [MAC.md](MAC.md#install) and
-`./setup.sh --help`. The released app and Terminal do not require a compiler.
-
 ## AMD cards
 
 Use `START-HERE.bat` on Windows or `./setup.sh` on Linux. Source setup detects supported Radeon cards;
@@ -115,7 +102,6 @@ Use `START-HERE.bat` on Windows or `./setup.sh` on Linux. Source setup detects s
 measurements are in [AMD_HIP.md](AMD_HIP.md). Ryzen AI Max uses the [Strix Halo guide](STRIX_HALO.md).
 
 Do not assume every AMD card, quantization or feature has been validated. Follow the exact backend guide.
-Intel Arc is a separate Linux SYCL path with its own [model preparation instructions](INTEL_ARC.md).
 
 ## Two or three cards
 
@@ -132,7 +118,7 @@ Several cards are not always faster than one; measure the workload you care abou
 ## Docker (Linux)
 
 Use [DOCKER.md](DOCKER.md) for released images, GPU access and the container build instructions.
-A container is a separate installation route. Intel model preparation and host driver requirements still apply.
+A container is a separate installation route. Host driver requirements still apply.
 
 ## Older CPUs (experimental)
 

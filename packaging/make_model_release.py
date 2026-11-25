@@ -38,19 +38,17 @@ sys.path.insert(0, str(ROOT))                         # strata_control.shape_eng
 ENGINE_RE = re.compile(r"^strata-engine-(?P<v>\d[\d.]*)-(?P<plat>.+?)\.(?:tar\.gz|zip)$")
 DSV41_RE = re.compile(r"^strata-dsv41-(?P<v>\d[\d.]*)-(?P<plat>.+?)\.(?:tar\.gz|zip)$")
 CONTROL_RE = re.compile(r"^strata-control-(?P<v>\d[\d.]*)-(?P<plat>.+?)\.(?:tar\.gz|zip)$")
-APP_RE = re.compile(r"^(Strata-\d[\d.]*-(windows-x64-setup\.exe|linux-x86_64\.AppImage|macos-arm64\.dmg)(\.sig)?|Strata\.app\.tar\.gz(\.sig)?)$")
+APP_RE = re.compile(r"^Strata-\d[\d.]*-(windows-x64-setup\.exe|linux-x86_64\.AppImage)(\.sig)?$")
 FEED_NAMES = ["strata-feed.json", "strata-feed.json.sig", "strata-feed-linux-aarch64.json", "strata-feed-linux-aarch64.json.sig"]
 SMALL_NAMES = ["SHA256SUMS.txt", "latest.json", "install.sh", "install.ps1", "install-manifest.txt"]
 
 # where each platform's Qwen engine is built (phaseA-tests/rel0211/RELEASE-STATE.md "Build plan" and the box rules)
 # (the Q4-P8 rehearsal of 2026-11-08, phaseA-tests/qwen4/RESULTS-Q4-P8.md section 5: five variants in 37 minutes)
-BUILD_BOX = {"linux-x86_64-cuda": "l620", "linux-x86_64-hip": "p620", "linux-x86_64-sycl": "p1006", "windows": "owner PC",
-             "macos": "m1002", "linux-aarch64": "the Spark (dgxspark)"}
+BUILD_BOX = {"linux-x86_64-cuda": "l620", "linux-x86_64-hip": "p620", "windows": "owner PC",
+             "linux-aarch64": "the Spark (dgxspark)"}
 BOX_NOTE = {"l620": "jobq; the CUDA build with its packaging takes about 15 min",
             "p620": "jobq; /data has little room, a package is about 4 GB",
-            "p1006": "jobq",
             "owner PC": "jobq --lock heavy, 20 min per job at most (split the release set); never while a model runs",
-            "m1002": "builds the unsigned Mac package (jobq); the owner signs it on his Mac",
             "the Spark (dgxspark)": "off limits unless the coordinator says"}
 
 
@@ -154,11 +152,6 @@ def plan(report: dict, set_index: int, a, prev: dict) -> dict:
                   "python packaging/feed_tool.py pack-engine <package-folder> --out <shape-packs> --url-prefix=   # the archive is %s-<version>-<platform>-<backend>, the entry names the shape" % comp],
                  [renamed(e["name"], e["version"], a.engine_version).replace("strata-engine-", comp + "-", 1) + "  (" + gib(e["size"]) + ", estimated)" for e in es])
             n += 1
-        step("%d" % n, "Mac: the owner signs and notarises the unsigned %s engine on his Mac, then it is signed into the feed" % shape, "the owner's Mac, about 45 min of his time", 45,
-             ["bash sign-and-notarize.sh --engine strata-engine-%s-macos-arm64-metal-unsigned-folder.tar.gz   # the code is generic: the entrypoint comes from the manifest (the package's id is %s)" % (a.engine_version, comp),
-              "python packaging/feed_tool.py sign-package <the signed folder> --key <FEED-KEY>   # OWNER'S KEY, not run here", "python packaging/feed_tool.py pack-engine <the signed folder> --out <shape-packs> --url-prefix="],
-             [comp + "-%s-macos-arm64-metal.tar.gz" % a.engine_version], owner=True,
-             note="a Mac installs a model of its own shape like every other platform (Terminal and app): the Mac engine of the shape is part of the release; after the Mac package exists and before build-feed")
     else:
         kept += [{"name": e["name"], "size": e["size"], "why": "same file, same name; the feed entry is reused"} for e in prev["engine"] + prev["dsv41"] + prev["control"]]
 
@@ -170,20 +163,14 @@ def plan(report: dict, set_index: int, a, prev: dict) -> dict:
         for e in prev["app"]:
             nm = re.sub(r"Strata-\d[\d.]*-", "Strata-%s-" % a.app_version, e["name"])
             changed.append({"name": nm, "size": e["size"], "est": True, "why": "app rebuilt with the Models page text"})
-        step("%d" % n, "App text for the model (Models page) and the app bundles", "owner PC (Windows installer), a Linux box (AppImage), m1002 (Mac, unsigned; the owner signs)", 40,
-             ["# edit apps/host/src (the model's name and one line), then the 0.2.11 app recipe: scripts/relwin/win_installer_rc1.ps1, the AppImage and Mac scripts",
+        step("%d" % n, "App text for the model (Models page) and the app bundles", "owner PC (Windows installer), a Linux box (AppImage)", 40,
+             ["# edit apps/host/src (the model's name and one line), then the 0.2.11 app recipe: scripts/relwin/win_installer_rc1.ps1 and the AppImage script",
               "python packaging/feed_tool.py set-app-platform --app-json latest.json --target <target> --archive <installer> --sig <installer.sig> --version %s" % a.app_version],
              [c["name"] for c in changed if APP_RE.match(c["name"])])
         n += 1
         changed.append({"name": "latest.json", "size": None, "est": True, "why": "updater json at %s" % a.app_version})
     else:
         kept += [{"name": e["name"], "size": e["size"], "why": "no app change"} for e in prev["app"]]
-    if with_app:
-        mac_extra = ""
-        step("%d" % n, "Mac: the owner signs and notarises the unsigned Mac files on his Mac", "the owner's Mac, about 45 min of his time", 45,
-             ["bash sign-and-notarize.sh Strata-%s-macos-arm64.dmg%s --updater-archive --out signed" % (a.app_version, mac_extra)],
-             ["the signed folder (dmg, Strata.app.tar.gz and its .sig)"], owner=True)
-        n += 1
     feed_cmd = ("python packaging/feed_tool.py build-feed --out <RELEASE> --key <FEED-KEY> --sequence %d --engine <engine-entries> --dsv41 <dsv41-entries> "
                 "--drafters <drafter-entries> --models <models-folder> --control <control-entries>%s%s   # OWNER'S KEY; `--models` is Q4-PREP-B's change"
                 % (a.sequence, " --shapes <shape-entries>" if case == "B" else "", " --app-json latest.json" if with_app else ""))

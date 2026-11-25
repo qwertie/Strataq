@@ -556,11 +556,11 @@ def decide_engine(feed: feedmod.Feed, ctx: Context, state: State) -> dict:
     return _choose_engine(feed, ctx, state)[0]
 
 
-GPU_MAKES = ("cuda", "hip", "sycl")
+GPU_MAKES = ("cuda", "hip")
 
 
 def installed_gpu_makes(root: Path, platform: str | None) -> set[str]:
-    """The GPU makes (cuda / hip / sycl) of the engines installed for this platform, whatever their state."""
+    """The GPU makes (cuda / hip) of the engines installed for this platform, whatever their state."""
     try:
         found, _ = ec.scan(root)
     except OSError:
@@ -756,21 +756,19 @@ def stage_engine(ctx: Context, feed: feedmod.Feed, pkg: feedmod.EnginePackage, a
 
 def _runs_on_dsv41_engine(config) -> bool:
     """True for a DeepSeek run config. The test start swaps the engine for the one being updated (the Strata engine), and a DeepSeek model
-    runs on strata-dsv41, which has its own package: the Strata engine rejects its options ('unknown argument: --eos') and a good engine
+    runs on strata-ds41, which has its own package: the Strata engine rejects its options ('unknown argument: --eos') and a good engine
     would be refused. Unreadable configs count as not DeepSeek, so they are tried as before."""
     try:
         cfg = json.loads(Path(config).read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return False
-    if not isinstance(cfg, dict):
-        return False
-    exe = cfg.get("exe")
-    return cfg.get("arch") == "deepseek41" or (isinstance(exe, str) and "strata-dsv41" in exe.replace("\\", "/").rsplit("/", 1)[-1].lower())
+    from strata_control.speed_switches import is_deepseek
+    return isinstance(cfg, dict) and is_deepseek(cfg)
 
 
 def discover_run_config(environ=None) -> Path | None:
     """A saved model's run config for the test start: the one a saved profile uses if its files are all present, otherwise any
-    installed model whose files are present. DeepSeek models are left out (they run on strata-dsv41, not on the engine under test).
+    installed model whose files are present. DeepSeek models are left out (they run on strata-ds41, not on the engine under test).
     None when no model can be used (the first run)."""
     from strata_control import models
     from strata_common import profiles

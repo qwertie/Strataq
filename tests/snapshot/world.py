@@ -35,8 +35,6 @@ def context_for(machine: Machine, model_set: ModelSet) -> int:
         return 131072
     if machine.key == "nv_12gb_streaming":
         return 65536
-    if machine.key == "mac_small":
-        return 32768
     return 131072
 
 
@@ -89,7 +87,7 @@ class World:
     def info(self) -> dict:
         """What the app driver (Node) needs to know about this world; written next to it so the two sides read the same facts."""
         m = self.machine
-        platform = {"windows": "windows-x86_64", "linux": f"linux-{m.machine}", "macos": "macos-arm64"}[m.os]
+        platform = {"windows": "windows-x86_64", "linux": f"linux-{m.machine}"}[m.os]
         family = "deepseek41" if self.mset.multi_file else self.mset.family
         return {"tag": self.tag, "family": family, "title": family, "modelName": self.mset.model_name, "model": self.mset.model, "sizeId": self.tag,
                 "configPath": str(self.config_path), "hardware": self.hardware_report(), "backend": m.backend, "platform": platform, "exe": str(self.exe),
@@ -108,9 +106,7 @@ class World:
         ctx = context_for(m, s)
         if s.multi_file:
             args = ["--pack", str(self.pack), "--max-context", str(ctx), "--eos", "1", "--vision", "on",
-                    "--dspark", "none" if m.os == "macos" else "auto"]
-            if m.os != "macos":
-                args += ["--dspark-conf", "0.65"]
+                    "--dspark", "auto", "--dspark-conf", "0.65"]
             cfg = {"exe": str(self.exe), "args": args, "cwd": str(ROOT), "tokenizer": str(self.pack / "tokenizer"),
                    "model_name": "deepseek-v4.1-flash", "arch": "deepseek41", "log": str(self.install / f"strata-{self.tag}.log"),
                    "lib_dirs": [], "port": 8080, "engine_ready_s": 3600}
@@ -136,7 +132,7 @@ class World:
                 args += ["--resident-budget-gib", "24" if m.ram_gb < 100 else "48"]
             cfg = {"exe": str(self.exe), "args": args, "cwd": str(ROOT), "tokenizer": str(self.pack / "tokenizer"),
                    "model_name": s.model_name, "log": str(self.install / f"strata-{self.tag}.log"), "lib_dirs": [], "port": 8080}
-        if m.backend in ("hip", "metal", "sycl"):
+        if m.backend == "hip":
             cfg["backend"] = m.backend
         if m.cards > 1:
             cfg["gpu"] = list(range(m.cards))
@@ -152,10 +148,8 @@ class World:
         if m.unified:
             card["unified_gb"] = m.ram_gb
             card["uma"] = True
-        hw = {"ram_gb": m.ram_gb, "os": {"windows": "Windows 11", "linux": "Linux", "macos": "Darwin"}[m.os], "disk_free_gb": 2000.0,
-              "cpu": {"avx2": m.machine in ("x86_64",) or None, "name": "snapshot cpu", "cores": 16}, "gpus": [card], "engine_vendor": m.vendor if m.vendor != "apple" else None}
-        if m.os == "macos":
-            hw["mac"] = {"chip": m.card, "macos": "27.2", "unified_gb": m.ram_gb}
+        hw = {"ram_gb": m.ram_gb, "os": {"windows": "Windows 11", "linux": "Linux"}[m.os], "disk_free_gb": 2000.0,
+              "cpu": {"avx2": m.machine in ("x86_64",) or None, "name": "snapshot cpu", "cores": 16}, "gpus": [card], "engine_vendor": m.vendor}
         return hw
 
     def vram_mib(self) -> float | None:
@@ -239,8 +233,6 @@ class World:
                 st.enter_context(mock.patch.object(server, "gpu_vram_mib", lambda gl, hip=False: {} if m.unified or vram is None else {int((gl or [0])[0]): vram}))
             except ImportError:                                  # serve needs its packages: a world without them still plans
                 pass
-            if m.os == "macos":
-                st.enter_context(mock.patch.object(sys, "platform", "darwin"))
             yield self
         os.environ.clear()
         os.environ.update(saved_env)

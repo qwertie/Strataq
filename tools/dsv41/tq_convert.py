@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """tq_convert.py - re-encode the routed experts of some layers of a DeepSeek-V4.1 pack with the trellis encoder
-(tools/tqenc.py, HIP) and write them in the format the engine reads (strata-dsv41: ds4_tq.cu / ds4_tq_cpu.cpp):
+(tools/tqenc.py, HIP) and write them in the format the engine reads (strata-ds41: ds4_tq.cu / ds4_tq_cpu.cpp):
 
     HIP_VISIBLE_DEVICES=2 TQENC_GPU_LOCK=2 python tools/dsv41/tq_convert.py --pack PACK --out DIR --layers 1,7 --type K5
 

@@ -106,7 +106,6 @@ test('engine helpers: sizes, makes and version order', () => {
   assert.equal(engineSize(10, 'en'), '1 MB');
   assert.equal(engineMake('cuda'), 'NVIDIA');
   assert.equal(engineMake('hip'), 'AMD');
-  assert.equal(engineMake('sycl'), 'Intel');
   assert.equal(versionLess('0.1.9', '0.1.10'), true);
   assert.equal(versionLess('0.1.49', '0.1.49.1'), true);
   assert.equal(versionLess('0.1.55', '0.1.55'), false);

@@ -44,7 +44,7 @@ against off) show where it costs answers when more layers are approximated:
 
 KVA runs when all of these hold, and says so in the engine log:
 
-- Qwen3.8-Flash-Next on CUDA or HIP (not SYCL, not Metal). The split layer and the tail were measured on one shape, 48
+- Qwen3.8-Flash-Next on CUDA or HIP. The split layer and the tail were measured on one shape, 48
   layers and 512 experts. Any other model (Qwen3.6-35B-A3B, other layer or expert counts) reads exactly even with
   `STRATA_KVA=1` and logs `KVA configured but NOT applied: this model's shape (L layers, E experts) is not one KVA was
   measured on`. `STRATA_KVA_ANY_MODEL=1` (research) lets it run there anyway, with one warning;
@@ -96,12 +96,10 @@ greater than 0 and is read exactly.
 - **Unset (or `STRATA_KVA=0`)** is 0.2.6: every prompt is read exactly, the draft window is 32768 cells, nothing else
   changes.
 
-## Layer splits, batch slots, SYCL, Metal
+## Layer splits and batch slots
 
-These never take the approximate path and say why: a layer split reports "a layer split (not the whole trunk)", the
-batch slots and a peer device switch KVA off for the process (one line at start-up with `STRATA_KVA=1`), the SYCL
-engine has its own prompt path without KVA, and the Metal build has no state-only kernels (`STRATA_KVA` is ignored
-there, with a line when it is set).
+These never take the approximate path and say why: a layer split reports "a layer split (not the whole trunk)", and the
+batch slots and a peer device switch KVA off for the process (one line at start-up with `STRATA_KVA=1`).
 
 ## Settings
 
@@ -186,4 +184,4 @@ place of a projector; the replay must use the same prompt and the same chunking.
   forever.
 - `src/models/qwen38/prefill/kernels.cu` — `gdn_recurrence_state_only()`, the same recurrence dispatch without the output
   normalization.
-- CUDA and HIP builds (`src/`); the SYCL engine (`sycl/`) does not have the feature.
+- CUDA and HIP builds (`src/`).

@@ -38,7 +38,8 @@ int main() {
     CHECK(parallel_default_env_cuda(true, 8).size() == 9);
     CHECK(parallel_default_env_cuda(true, 1).empty());
     CHECK(parallel_default_env_cuda(true, 0).empty());
-    CHECK(parallel_default_env_cuda(false, 4).empty());            // HIP, Windows, Metal, SYCL builds
+    CHECK(parallel_default_env_cuda(false, 4).empty());            // HIP, Windows builds
+
     for (const auto& kv : parallel_default_env_cuda(true, 4)) CHECK(kv.first != "STRATA_BATCH_CONCURRENT_READ");
     {
         const auto cuda = parallel_default_env_cuda(true, 4), gfx = parallel_default_env("gfx1151", true, 4);
@@ -637,10 +638,8 @@ int main() {
     }
     {   // the spill gate: only a discrete GPU may have its start moved off VRAM (draft layer dropped, head on the host, loan of 16, KV window below 20480)
         using strata::spill_allowed;
-        CHECK(spill_allowed(false, false));     // CUDA / HIP discrete
-        CHECK(!spill_allowed(true, false));     // Metal: one pool, "free VRAM" is the OS's available RAM
-        CHECK(!spill_allowed(false, true));     // an integrated GPU (Strix Halo gfx1151, APUs): the same
-        CHECK(!spill_allowed(true, true));
+        CHECK(spill_allowed(false));     // CUDA / HIP discrete
+        CHECK(!spill_allowed(true));     // an integrated GPU (Strix Halo gfx1151, APUs): one pool, "free VRAM" is the OS's available RAM
     }
     return fails ? 1 : 0;
 }

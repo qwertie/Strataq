@@ -281,7 +281,6 @@ class OnDemandByDefault(unittest.TestCase):
             self.assertTrue(S.apply_vision_defaults(amd)["vision"]["elastic"])
         with mock.patch.object(__import__("strata_server.server").server, "VISION_ON_DEMAND_AMD_BY_DEFAULT", True):
             self.assertFalse(f(self.cfg(vision={"exe": "/e/strata-vision-hip", "cpu_exe": "/e/strata-vision"}, backend="hip", gpu=[0, 1])))
-        self.assertFalse(f(self.cfg(vision={"exe": "/e/strata-vision-sycl", "cpu_exe": "/e/strata-vision"}, backend="sycl")))
 
     def test_what_stays_as_it_was(self):
         from strata_server.server import vision_on_demand_by_default as f
@@ -290,7 +289,6 @@ class OnDemandByDefault(unittest.TestCase):
         self.assertFalse(f(self.cfg(vision={"cuda_device": 1})))                     # a reader on its own card
         self.assertFalse(f(self.cfg(vision={"exe": "/e/strata-vision-hip"}, backend="hip")))              # AMD without its CPU reader
         self.assertFalse(f(self.cfg(vision={"exe": "/e/strata-vision"}, backend="hip")))
-        self.assertFalse(f(self.cfg(backend="sycl", vision={"exe": "/e/strata-vision-sycl"})))
         self.assertFalse(f(self.cfg(gpu=[0, 1])))                                     # a layer split
         self.assertFalse(f(self.cfg(args=["--vision", "--kv-grow"])))
         self.assertTrue(f(self.cfg(args=["--vision", "--resident-budget-gib", "30"])))   # no cache to shrink is needed

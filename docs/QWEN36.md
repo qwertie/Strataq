@@ -5,8 +5,7 @@ experts, 3B active, 256 experts, top-8) with Strata and want to know how picture
 chunk behave. For sizes and memory, see [MODELS.md](MODELS.md).
 
 Strata runs [Unsloth's GGUFs with the MTP layer](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF)
-(UD-Q4_K_XL, UD-Q6_K_XL, Q8_0) on its own engine path (`src/models/qwen36`; `strata` switches to it from the file's
-architecture). It runs on NVIDIA and AMD cards. The Intel Arc and Mac engines do not run it.
+(UD-Q4_K_XL, UD-Q6_K_XL, Q8_0) on its own engine, `strata-q36` (`src/models/qwen36`). It runs on NVIDIA and AMD cards.
 
 ## Quick start
 
@@ -137,7 +136,6 @@ More numbers are in [History](#history--older-measurements).
 - A slot that stopped being alone goes back to the solo path only through the server's own hand-over. The MTP block's
   cache has holes for the tokens a slot decoded in batch windows, so the drafts of a later solo stretch are a little
   worse. The text is not affected.
-- Intel Arc (SYCL) and Mac do not run this family.
 
 ## Testing
 

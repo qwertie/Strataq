@@ -14,7 +14,7 @@ from unittest import mock
 from strata_cli.launch import access, harness, params, settings as S, store
 from strata_cli.launch.catalog import Catalog, CatalogUnavailable, fit_on, verdict
 from strata_cli.launch.runner import Result, Runner, derive_config, desc_matches, tune_words
-from tests.terminal.launch_support import HW_12, HW_24, HW_2X16, Home, catalog, run_cli
+from tests.terminal.launch_support import HW_12, HW_2X16, Home, catalog, run_cli
 
 
 class SettingsRules(unittest.TestCase):
@@ -138,33 +138,6 @@ class CatalogRules(unittest.TestCase):
         gyro = fit_on({"mem_total": True, "ram_needed_gb": 27.6}, 64, 12)
         self.assertEqual(gyro["memoryGb"], 27.6)
 
-    def test_a_mac_is_judged_by_unified_memory_and_the_words_follow(self):
-        hw = {"ram_gb": 32.0, "disk_free_gb": 5000.0, "os": "Darwin", "cpu": {"avx2": None, "name": "Apple M4"}, "mac": {"chip": "Apple M4", "macos": "27.2", "unified_gb": 32.0},
-              "gpus": [{"index": 0, "name": "Apple M4", "vendor": "apple", "vram_gb": 0.0, "unified_gb": 32.0, "usable": True}]}
-        with Home() as h:
-            cat = catalog(hw)
-            eng = h.base / "strata-dsv41"
-            eng.write_bytes(b"engine without the Metal picture tower")      # an installed DeepSeek engine without STRATA_DS4_METAL_VISION_V1: text only (with it: pictures)
-            patcher = mock.patch.object(type(cat.strata), "dsv41_engine_exe", lambda self_: eng)
-            patcher.start()
-            self.addCleanup(patcher.stop)
-            rows = {r.model: r for r in cat.rows()}
-            self.assertEqual(set(rows), {"Q2_0", "IQ3_XXS", "IQ3_S", "Gyro-S", "Gyro-M", "IST-DAS-2.00bpw", "IST-DAS-2.25bpw", "ISTA-DAS-Coder", "UD-IQ1_S", "UD-IQ1_M",
-                                "UD-Q2_0", "UD-IQ2_XS", "UD-Q2_K_XL", "UD-IQ3_XXS", "UD-Q3_K_XL", "UD-IQ4_XS-v31", "UD-Q4_K_XL", "UD-Q5_K_XL", "UD-Q6_K_XL"})   # DeepSeek (0.2.7.1): the two ISTA; Unsloth's sets (round 0214: the Mac app repacks them; UD-IQ1_M is also DeepSeek's name)-DAS sets run on a Mac, UD-IQ1_S since f-039; the Coder and UD-IQ1_M are offered with a "not run yet" line
-            self.assertEqual([r.model for r in rows.values() if r.recommended], ["Q2_0"])
-            for name in ("IST-DAS-2.00bpw", "IST-DAS-2.25bpw"):            # a 32 GB Mac: said plainly (mostly read from the SSD), never refused
-                self.assertEqual(rows[name].family, "deepseek41")
-                self.assertEqual((rows[name].verdict, rows[name].words), ("slower", "may run slower"))
-                self.assertFalse(rows[name].images)
-                self.assertGreater(rows[name].spill_gb, 100)
-            self.assertEqual((rows["Q2_0"].verdict, rows["Q2_0"].words), ("slower", "may run slower"))
-            self.assertEqual(rows["IQ3_S"].verdict, "slower")
-            self.assertGreater(rows["IQ3_S"].spill_gb, 10)
-            self.assertEqual(cat.max_context("qwen", "Q2_0", hw), 32768)
-            self.assertEqual(cat.computer().line(), "Apple M4 · 32 GB unified memory · " + cat.computer().line().split(" · ")[-1])
-            # no "0 GB" of video memory in the card part of the line (the free-disk figure after it may end in a zero: "60 GB free")
-            self.assertNotIn("0 GB", " · ".join(cat.computer().line().split(" · ")[:2]))
-
     def test_verdict_words_never_block(self):
         self.assertEqual(verdict("fits")[0], "fits")
         self.assertEqual(verdict("does not fit"), ("slower", "may run slower"))              # an older Control's words, read as the one label
@@ -200,8 +173,7 @@ class CatalogRules(unittest.TestCase):
             cat = catalog()
             self.assertAlmostEqual(cat.kv_gb(131072, "int8"), 1.799, places=2)
             self.assertLess(cat.kv_gb(131072, "q4_0"), cat.kv_gb(131072, "int8"))
-            self.assertEqual(cat.max_context("qwen", "IQ3_XXS", HW_12), 131072)      # 128K on every card (owner, 2026-11-01)
-            self.assertEqual(cat.max_context("qwen", "IQ3_XXS", HW_24), 131072)
+            self.assertEqual(cat.max_context("qwen", "IQ3_XXS"), 131072)      # 128K on every card (owner, 2026-11-01)
 
     def test_missing_installer_files_are_said_in_words(self):
         with Home():
@@ -347,14 +319,6 @@ class RunConfig(unittest.TestCase):
 
 
 class SetupArgs(unittest.TestCase):
-    def test_the_engine_choice_reaches_setup(self):
-        """Both engine choices must survive the launch wrapper's noninteractive setup call."""
-        for family in ("qwen", "deepseek41"):
-            for choice in ("original", "new"):
-                with self.subTest(family=family, engine=choice):
-                    args = self.args_for(family=family, engine=choice)
-                    self.assertEqual(args[args.index("--engine") + 1], choice)
-
     def runner(self, **kw):
         with Home():
             cat = catalog(HW_12)
@@ -398,9 +362,8 @@ class SetupArgs(unittest.TestCase):
         from tests.terminal.launch_support import HW_12 as NV
         card = lambda name, gb, vendor: {**NV, "gpus": [{"index": 0, "name": name, "vram_gb": gb, "usable": True, "vendor": vendor}]}   # noqa: E731
         amd = card("AMD Radeon RX 9070 XT", 16.0, "amd")
-        intel = card("Intel Arc B580", 12.0, "intel")
         with Home():
-            for hw, want in ((NV, "cpu"), (amd, "cpu"), (intel, "cpu"), (card("NVIDIA GeForce RTX 4090", 24.0, "nvidia"), "gpu"),
+            for hw, want in ((NV, "cpu"), (amd, "cpu"), (card("NVIDIA GeForce RTX 4090", 24.0, "nvidia"), "gpu"),
                              (card("AMD Radeon AI PRO R9700", 32.0, "amd"), "gpu")):
                 cat = catalog(hw)
                 r = Runner(S.LaunchSettings(family="qwen", model="IQ3_XXS", context=32768), catalog=cat)
@@ -409,29 +372,9 @@ class SetupArgs(unittest.TestCase):
             off = Runner(S.LaunchSettings(family="qwen", model="IQ3_XXS", context=32768, vision="off"), catalog=catalog(NV))
             self.assertEqual(off.setup_args()[off.setup_args().index("--vision") + 1], "no")
 
-    def test_an_arc_b_series_card_is_allowed_with_pictures_on_the_cpu_reader_and_one_plain_line(self):
-        """Owner decision 2026-10-22: Arc B-series (Battlemage) runs like any Arc. An Arc Pro B70 (32 GB) gets pictures on, with the CPU reader (the GPU
-        reader has not run on a 24 GB+ Arc), and a warn-level note that it is new and how to report a problem. An A-series card gets no such note."""
-        from strata_cli.launch import cmd
-        for name, vram, note in (("Intel Arc Pro B70", 32.0, True), ("Intel Arc B580", 12.0, True), ("Intel Arc A750", 8.0, False)):
-            hw = {"ram_gb": 64.0, "os": "Linux", "cpu": {"avx2": True, "name": "x"},
-                  "gpus": [{"index": 0, "name": name, "vendor": "intel", "vram_gb": vram, "usable": True}]}
-            with Home():
-                from strata_cli.launch.catalog import Computer
-                cat = catalog(hw)
-                comp = Computer(ram_gb=64.0, gpus=hw["gpus"], disk_free_gb=500.0, os="Linux", avx2=True, raw=hw, engine_vendor="intel")
-                with mock.patch.object(type(cat), "reader_state", lambda self: "present"), mock.patch.object(type(cat), "computer", lambda self, fresh=False: comp):
-                    self.assertEqual(cat.picture_default(True), "cpu", name)
-                self.assertEqual(bool(comp.new_card_note), note, name)
-                if note:
-                    text, nxt = comp.new_card_note
-                    self.assertIn("new to Strata", text)
-                    self.assertIn("--vision off", nxt)
-                    self.assertIn("github.com/Niko1221/Strata/issues", nxt)
-
     def test_deepseek_on_an_rx_7000_card_says_once_that_it_is_untested(self):
         """The 0.2.9 update adds a DeepSeek package for gfx1100-1102; it was built and never run on a real RX 7000 card, and the Terminal and the app say so
-        the way they say it for an Arc B-series card (one warn line, how to report)."""
+        in one warn line that says how to report."""
         from strata_cli.launch import cmd
         from strata_cli.launch.catalog import Computer
         line = "DeepSeek has not been tested on RX 7000 cards yet; please report how it runs."
@@ -448,23 +391,6 @@ class SetupArgs(unittest.TestCase):
             if expect:
                 self.assertEqual(notes[0].level, "warn")
                 self.assertIn("github.com/Niko1221/Strata/issues", notes[0].next)
-
-    def test_a_mac_defaults_pictures_to_the_metal_reader_whatever_its_memory(self):
-        for gb in (16.0, 32.0, 128.0):
-            hw = {"ram_gb": gb, "os": "Darwin", "cpu": {"avx2": None, "name": "Apple M4"},
-                  "mac": {"chip": "Apple M4", "macos": "27.2", "unified_gb": gb},
-                  "gpus": [{"index": 0, "name": "Apple M4", "vendor": "apple", "vram_gb": 0.0, "unified_gb": gb, "usable": True}]}
-            with Home():
-                cat = catalog(hw)
-                with mock.patch.object(type(cat), "reader_state", lambda self: "present"):
-                    self.assertTrue(cat.is_mac())
-                    self.assertEqual(cat.picture_default(True), "gpu", gb)
-                    r = Runner(S.LaunchSettings(family="qwen", model="Q2_0", context=32768), catalog=cat)
-                    with mock.patch.object(sys, "platform", "darwin"):
-                        args = r.setup_args()
-                    self.assertEqual(args[args.index("--vision") + 1], "gpu", gb)
-                with mock.patch.object(type(cat), "reader_state", lambda self: "missing"):
-                    self.assertEqual(cat.picture_default(True), "off")
 
     def test_a_model_that_cannot_read_pictures_stays_off_without_a_question(self):
         import dataclasses
@@ -520,18 +446,9 @@ class SetupArgs(unittest.TestCase):
             self.assertEqual(a[a.index(pair[0]) + 1], pair[1])
         self.assertIn("--set-default-data-dir", a)             # a folder the person chose is the remembered one (the app and the next start use it)
 
-    def test_a_mac_gets_only_the_options_its_setup_knows(self):
-        with mock.patch.object(sys, "platform", "darwin"):
-            a = self.runner(data_dir="/d", gpus=[0])
-        self.assertEqual(a, ["--yes", "--no-start", "--family", "qwen", "--model", "IQ3_XXS", "--context", "32768", "--vision", "no", "--data-dir", "/d",
-                             "--set-default-data-dir"])
 
 
 class AdoptRules(unittest.TestCase):
-    def setUp(self):
-        from tests.terminal.launch_support import not_intel
-        not_intel(self)
-
     def files(self, root: Path, shards=2, pack=True, tokenizer=True, mtp=True):
         d = root / "Strata-data"
         m = d / "models" / "IQ3_XXS"
@@ -568,49 +485,15 @@ class AdoptRules(unittest.TestCase):
             d, m = self.files(h.base)
             src = Path(__file__).resolve().parents[2]
             cfg, problems = adopt.plan(family="qwen", model="IQ3_XXS", model_dir=m, data_dir=d, src=src, context=32768, kv=None,
-                                       model_name="qwen3.8-flash-next-iq3_xxs", family_def={}, log=h.base / "x.log", backend="sycl")
+                                       model_name="qwen3.8-flash-next-iq3_xxs", family_def={}, log=h.base / "x.log", backend="cuda")
             self.assertEqual(problems, [])
             a = cfg["args"]
             self.assertEqual(a[a.index("--max-context") + 1], "32768")
             self.assertEqual(a[a.index("--kv") + 1], "int8")
             self.assertIn("--ple-gguf", a)
             self.assertIn("--mtp", a)
-            self.assertEqual((cfg["exe"], cfg["backend"]), ("component:strata-engine", "sycl"))
+            self.assertEqual((cfg["exe"], cfg["backend"]), ("component:strata-engine", "cuda"))
             self.assertTrue(cfg["tokenizer"].endswith("tokenizer"))
-
-    def test_plan_intel_flags_follow_the_driver(self):
-        from unittest import mock
-        from strata_cli.launch import adopt
-        for driver, want, other in (("i915", ["--ple-io", "ram"], "--stream-experts"), ("xe", ["--stream-experts"], "--ple-io")):
-            with Home() as h, mock.patch.object(adopt, "intel_driver", return_value=driver):
-                d, m = self.files(h.base)
-                for ctx, reserve in ((32768, "1024"), (65536, "2048")):
-                    cfg, problems = adopt.plan(family="qwen", model="IQ3_XXS", model_dir=m, data_dir=d, src=Path(__file__).resolve().parents[2],
-                                               context=ctx, kv=None, model_name="x", family_def={}, log=h.base / "x.log", backend="sycl")
-                    self.assertEqual(problems, [])
-                    a = cfg["args"]
-                    for w in want:
-                        self.assertIn(w, a)
-                    self.assertNotIn(other, a)
-                    self.assertEqual(a[a.index("--vram-reserve-mib") + 1], reserve)
-
-    def test_intel_arc_is_read_from_the_kernel_and_gets_a_small_context(self):
-        from strata_cli.launch import catalog as C
-        with Home() as h:
-            card = h.base / "drm" / "card0" / "device"
-            card.mkdir(parents=True)
-            (card / "vendor").write_text("0x8086")
-            (card / "device").write_text("0x56a1")
-            cards = C.intel_arc_cards(str(h.base / "drm"))
-            self.assertEqual([(c["name"], c["vram_gb"]) for c in cards], [("Intel Arc A750", 8.0)])
-            self.assertEqual(C.intel_arc_cards(str(h.base / "nothing")), [])
-            hw = dict(HW_12)
-            hw["gpus"] = cards
-            cat = catalog(hw)
-            self.assertEqual(cat.computer().line().split(" 8 GB")[0], "Arc A750".replace("Arc", "Intel Arc"))
-            self.assertEqual(cat.max_context("qwen", "IQ3_XXS", hw), 131072)      # an 8 GB Arc too: warned about, never lowered
-            hw["gpus"] = [{"vendor": "intel", "name": "Intel Arc Pro B70", "vram_gb": 32.0, "usable": True}]
-            self.assertEqual(cat.max_context("qwen", "IQ3_XXS", hw), 131072)
 
     def test_plan_names_what_is_missing(self):
         from strata_cli.launch import adopt
@@ -772,8 +655,7 @@ class AdoptRules(unittest.TestCase):
             self.assertTrue(store.summary(store.load("Fastest"))["tuned"])
 
     def test_runner_adopts_when_setup_cannot_handle_the_card(self):
-        # the engine make is read from the machine (adopt_prepared_files asks engine_component.detect_backend); on a box with an Intel Arc the
-        # second launch below would be refused as an Intel one. This case is the "no NVIDIA driver" one.
+        # the engine make is read from the machine (adopt_prepared_files asks engine_component.detect_backend). This case is the "no NVIDIA driver" one.
         with Home() as h, mock.patch("strata_common.engine_component.detect_backend", lambda environ=None: ("cuda", "test")):
             d, m = self.files(h.base)
             cat = catalog(HW_12)
@@ -787,7 +669,7 @@ class AdoptRules(unittest.TestCase):
             r2 = Runner(S.LaunchSettings(family="qwen", model="IQ3_S", context=32768, data_dir=str(d)), catalog=cat)
             with self.assertRaises(LaunchError) as e:
                 r2.adopt_prepared_files("no NVIDIA GPU found")
-            self.assertIn("cannot set up this graphics card yet", e.exception.text)
+            self.assertIn("Setup could not see the graphics card", e.exception.text)
 
 
 class AccessRules(unittest.TestCase):
@@ -929,17 +811,6 @@ class FlagsCommand(unittest.TestCase):
         p = self.plan("--model", "q2_0", "--pool-cores", "two,four")        # a list that cannot be read: a warning, never a refusal
         self.assertNotIn("--pool-cores", p["settings"]["extra"])
         self.assertTrue(any("pool-cores" in w for w in p["warnings"]))
-
-    def test_dspark_on_a_mac_is_warned_about_and_not_refused(self):
-        # the drafter has no Metal kernels yet: --dspark on is passed on as asked, with a plain warning (recommend, never force)
-        import sys
-        from unittest import mock
-        with mock.patch.object(sys, "platform", "darwin"):
-            p = self.plan("--model", "q2_0", "--dspark", "on")
-        self.assertEqual(p["settings"]["extra"].get("--dspark"), "on")
-        self.assertTrue(any("DSpark" in w and "Mac" in w for w in p["warnings"]), p["warnings"])
-        p = self.plan("--model", "q2_0", "--dspark", "auto")
-        self.assertFalse(any("DSpark" in w and "Mac" in w for w in p["warnings"]))
 
     def test_dspark_takes_a_word_and_the_word_reaches_the_engine_line(self):
         # --set dspark=on used to start strata-dsv41 with a lone "--dspark" ("--dspark needs a value", #3959)

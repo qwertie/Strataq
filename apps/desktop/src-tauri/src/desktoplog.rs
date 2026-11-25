@@ -9,13 +9,13 @@
 //! `strata-desktop --save-logs` puts the newest crash log, the tails of the newest shell logs and the engine server logs into one text file
 //! in the Downloads folder. The same pieces go into Settings > Engine > Diagnostics > Save logs (the host reads this folder).
 //!
-//! Windows and macOS (one process owns the host and the window) use the same folder and file names for what happens while the app starts:
+//! Windows (one process owns the host and the window) uses the same folder and file names for what happens while the app starts:
 //! `init_startup` opens the run log first thing in `main`, before anything that can fail, and installs a panic hook; a start that fails
 //! (the host does not come up, the window cannot be made, any panic) ends in `startup_failed`: the reason goes into the run log and a
 //! `desktop-crash-` file, and the person sees a plain message box instead of a process that vanished with no trace. On Windows the folder
 //! is `%LOCALAPPDATA%\Strata\logs`, next to the components folder.
 
-// Linux uses the shell log, the crash log and --save-logs; Windows and macOS use the start-up half. Each side leaves the other unused.
+// Linux uses the shell log, the crash log and --save-logs; Windows uses the start-up half. Each side leaves the other unused.
 #![allow(dead_code)]
 
 use std::collections::VecDeque;
@@ -47,7 +47,7 @@ fn platform_data_dir() -> PathBuf {
         .join("Strata")
 }
 
-/// Linux and macOS: `$XDG_DATA_HOME/strata`, usually `~/.local/share/strata`.
+/// Linux: `$XDG_DATA_HOME/strata`, usually `~/.local/share/strata`.
 #[cfg(not(windows))]
 fn platform_data_dir() -> PathBuf {
     let base = std::env::var_os("XDG_DATA_HOME")
@@ -342,7 +342,7 @@ pub fn save_logs(out_dir: &Path) -> std::io::Result<PathBuf> {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
-// Start-up failures (Windows and macOS)
+// Start-up failures (Windows)
 // ---------------------------------------------------------------------------------------------------------------------------------
 
 /// The run log and whether a failure may show a message box. Set once, first thing in `main`.

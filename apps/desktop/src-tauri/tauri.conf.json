@@ -16,8 +16,6 @@
   "bundle": {
     "active": true,
     "targets": [
-      "dmg",
-      "app",
       "nsis",
       "appimage",
       "deb"
@@ -42,10 +40,6 @@
       "appimage": {
         "bundleMediaFramework": true
       }
-    },
-    "macOS": {
-      "minimumSystemVersion": "15.0",
-      "entitlements": "entitlements.plist"
     },
     "createUpdaterArtifacts": false,
     "windows": {

@@ -18,11 +18,10 @@ strata launch --status
 **I cannot find `START-HERE.bat` or `SETUP.bat`.**
 Open the installed Strata app, or run `strata launch`. Those wrappers are in the source repository and are not the
 startup path for the app. For a fresh desktop install, download the one installer for your system
-(`Strata-0.2.13-windows-x64-setup.exe`, `Strata-0.2.13-linux-x86_64.AppImage` or `Strata-0.2.13-macos-arm64.dmg`), not a
-`strata-engine-…` archive.
+(`Strata-0.2.13-windows-x64-setup.exe` or `Strata-0.2.13-linux-x86_64.AppImage`), not a `strata-engine-…` archive.
 
 **`strata` is not found.**
-On Windows, open a new PowerShell window after installing. On Linux or Mac, use the full path the installer printed,
+On Windows, open a new PowerShell window after installing. On Linux, use the full path the installer printed,
 normally `~/.local/bin/strata`, and add `~/.local/bin` to PATH if needed. Check `strata --version`.
 
 **A warning says Strata "couldn't find an engine for this computer".**
@@ -31,10 +30,10 @@ files stay on your computer, but the model may not run until the right engine is
 no engine is installed yet and the update source has none for your card, that the engine found is for another make of
 card, or that the graphics driver is too old. In the app, open Settings, then Engine. In the Terminal, the message names
 the next step: run `strata update` and start again. Run `strata doctor --live` and `strata update --check` to see the
-selected GPU and driver, and check the [backend guide](INSTALL.md#what-you-need). Supported paths include Apple Silicon and
-Intel Arc on Linux, so do not assume every machine without an NVIDIA or AMD discrete card is unsupported. If the computer
-has no graphics card Strata can use (only an Intel UHD or Iris chip, a virtual machine, or Windows on ARM), Strata says so
-and there is nothing to install. Verify `strata launch --status` and `/health` before calling the installation successful.
+selected GPU and driver, and check the [backend guide](INSTALL.md#what-you-need). Strataq runs on NVIDIA and AMD
+cards only (an AMD Ryzen AI Max counts); it has no engine for Intel Arc cards or Macs. If the computer has no graphics
+card Strata can use (only an Intel UHD or Iris chip, a virtual machine, or Windows on ARM), Strata says so and there is
+nothing to install. Verify `strata launch --status` and `/health` before calling the installation successful.
 
 **"This model needs a newer engine." (the app), or a button called Update engine.**
 Some models need an engine newer than the one installed: Gyro needs 0.1.45.1 or newer, NVFP4 needs 0.1.44, and NVFP4
@@ -55,25 +54,6 @@ Stop the model, then use the app's rollback control or `strata components rollba
 replaced (one generation, about 210 MiB). Source-checkout engines use a separate rollback workflow, in `engine\.previous`:
 `python setup.py --rollback-engine` puts the old one back and keeps the newer one there, so run it again to go forward
 (#670). It is described in [source setup](SOURCE_INSTALL.md).
-
-**On a Mac: "Strata is damaged and can't be opened", "cannot be opened", or "unidentified developer".**
-Check first that the download is for Apple Silicon and that macOS is 15 or newer ([Mac installation](MAC.md#the-desktop-app-and-strata-launch-on-a-mac)).
-Nothing is wrong with the file if the message is only about the developer: macOS marks everything a browser downloads, and
-only lets a marked program run if Apple has checked it. Strata's release builds are checked by Apple ("notarised"): drag
-Strata onto Applications and open it; the first time, macOS asks "Are you sure you want to open it?" and you press Open. A
-test build that is not notarised says "damaged". Do not move it to the Trash. Open the Terminal app and remove the mark,
-with the line that matches what you have (drag the file from Finder into the Terminal window to type its path):
-
-    xattr -dr com.apple.quarantine ~/Downloads/<the .dmg file>        # the .dmg, before opening it
-    xattr -dr com.apple.quarantine /Applications/Strata.app           # the app, after dragging it over
-    xattr -dr com.apple.quarantine <the folder you unzipped>          # an unzipped Terminal folder
-
-Then open it again. If macOS says only "the developer cannot be verified", you can instead try to open it once, then open
-System Settings > Privacy & Security and press "Open Anyway" next to the message about Strata. Only remove the mark from a
-file you downloaded from the official release; a warning alone does not show that a file is safe or intact. Installs made
-with `curl ... | sh` carry no mark and need none of this. To see which kind you have: `spctl -a -vv /Applications/Strata.app`
-answers "accepted" and "Notarized Developer ID" for a notarised build. How the builds are signed is in
-[Mac packaging](../packaging/mac/README.md).
 
 **The Linux AppImage does not open.**
 Make the downloaded file executable. It may need FUSE 2 (`libfuse2` on Ubuntu 22.04, `libfuse2t64` on newer Ubuntu;
@@ -106,7 +86,7 @@ you insist.
 
 **The engine stops at the start with no line in its log, and the error says `the engine process ended: ...`.**
 The error names how the system ended the engine process, because the engine log is silent then: for example `killed by signal 4 (SIGILL, Illegal
-instruction)` on Linux and Mac, or `exit code 0xC000001D: illegal instruction` on Windows. An illegal instruction means the engine ran an instruction
+instruction)` on Linux, or `exit code 0xC000001D: illegal instruction` on Windows. An illegal instruction means the engine ran an instruction
 the CPU cannot execute; the error lists the AVX, AVX2, FMA and F16C flags the CPU lacks, or says the CPU has them all, which is a bug in the engine.
 Report it with the CPU model.
 
@@ -179,8 +159,7 @@ optional [image generation](IMAGES.md). The reader runs on the CPU under 24 GB o
 24 GB, on NVIDIA and AMD cards. Pictures that take several seconds (about 3 s at 300 image tokens on 8 cores, more with more
 tokens) are read by the encoder on the CPU; `--vision gpu` (NVIDIA and AMD, ~1.4 GB of VRAM) makes it 0.1-0.5 s. On AMD the
 card's reader is `strata-vision-hip`; if it cannot start, the server prints "the GPU picture reader did not start (...);
-pictures are read on the CPU" and goes on with the CPU reader. On a Mac the reader runs on the GPU; `--vision cpu` takes
-about 50 s per picture there. On Intel Arc the CPU reader is the default. The model, backend and installed engine package
+pictures are read on the CPU" and goes on with the CPU reader. The model, backend and installed engine package
 must include a compatible picture reader; inspect the startup error and the model guide.
 
 **"Windows blocked the Strata engine (or the image encoder) ... Smart App Control".**

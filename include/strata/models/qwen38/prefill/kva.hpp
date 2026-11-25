@@ -42,14 +42,6 @@
 
 namespace strata::prefill {
 
-/// Does this build have the state-only late-layer path?  CUDA and HIP: yes.  The Metal engine compiles prefill.cpp
-/// against its own kernel library, which has none.
-#if defined(STRATA_GPU_METAL)
-inline constexpr bool kKvaBackend = false;
-#else
-inline constexpr bool kKvaBackend = true;
-#endif
-
 /// The reason decline() gives for a model whose shape KVA was not measured on (prefill.cpp prints it with the numbers).
 inline constexpr const char* kKvaShapeReason = "this model's shape is not one KVA was measured on";
 
@@ -100,7 +92,7 @@ struct KvaConfig {
     /// Does the draft layer need the cell floor at all?  Only when a read can approximate something: KVA on, not ruled
     /// out for the process, and a draft layer loaded.  Otherwise the draft layer's attention is 0.2.6's own code.
     bool wants_cell_floor(const KvaEngine& e, bool has_drafter) const {
-        return kKvaBackend && on && draft_floor && e.blocked.empty() && has_drafter;
+        return on && draft_floor && e.blocked.empty() && has_drafter;
     }
 
     /// Why this read cannot take the approximate path, or nullptr when it can: a cold read of one prompt (not a
@@ -142,7 +134,6 @@ inline KvaConfig kva_config_from_env() {
     KvaConfig k;
     k.on = is_env_on("STRATA_KVA");
     k.explicit_on = k.on;
-    if (!kKvaBackend) k.on = false;
     k.split = env_i64("STRATA_KVA_SPLIT", kKvaSplitDefault);
     k.suffix_env = std::max<int64_t>(0, env_i64("STRATA_KVA_SUFFIX", 0));
     k.min_prompt = env_i64("STRATA_KVA_MIN_PROMPT", 4096);

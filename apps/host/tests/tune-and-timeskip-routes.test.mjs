@@ -94,7 +94,7 @@ test('the tuning plan comes from the engine binary and excludes what it cannot a
     const r = await fetch(`${base}/api/tune/plan`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ engine, backend: 'metal', model: 'fixture', objective: 'generation' }),
+      body: JSON.stringify({ engine, backend: 'cuda', model: 'fixture', objective: 'generation' }),
     });
     // Read the body once: consuming it in an assertion message leaves nothing for `.json()`.
     const raw = await r.text();

@@ -781,11 +781,7 @@ int64_t qsa_kv_resident_min() {
     static const int64_t v = [] {
         const char* e = std::getenv("STRATA_KV_RESIDENT_MIN");
         const long long n = e != nullptr ? std::atoll(e) : 0;
-        #if defined(STRATA_GPU_METAL)
-        return n >= 1024 ? (int64_t) n : (int64_t) 20480;   // a Mac keeps the old floor: its pool is the host's RAM (strata/core/spill_gate.hpp)
-#else
         return n >= 1024 ? (int64_t) n : (int64_t) 4096;
-#endif
     }();
     return v;
 }

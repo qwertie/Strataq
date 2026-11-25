@@ -1,6 +1,6 @@
 #!/bin/bash
 # strata-split-N (the all-cards split engine, src/split, from sFNX, MIT, John Fink) for NVIDIA on Linux, built next to the release engine
-# so package_engine.py can ship it with `--include 'strata-split-*'` beside `strata`.  One executable per card count and one architecture
+# so package_engine.py can ship it with `--include 'strata-split-*'` beside `strata-q38`.  One executable per card count and one architecture
 # (the engine refuses a card of any other architecture).  RUNPATH $ORIGIN: it finds cudart/cublas beside itself.
 #
 #   SRC=<checkout> B=<build dir> CUDA=/usr/local/cuda-13.1 GG=<llama.cpp checkout> [ARCH=86] [CARDS="2"] [JOBS=8]  packaging/build_split_cuda.sh

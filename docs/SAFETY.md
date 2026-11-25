@@ -32,7 +32,7 @@ Some things sound similar and stay on your PC:
 
 - The Monitor, `/metrics` and `/v1/telemetry` show hardware readings (temperature, speed, memory) to you. They are served
   from your own PC, and they need your API key when you set one.
-- When the app window crashes (Linux) or the app fails to start (Windows, Mac), a crash log is written to a folder on your disk
+- When the app window crashes (Linux) or the app fails to start (Windows), a crash log is written to a folder on your disk
   (on Windows, `%LOCALAPPDATA%\Strata\logs`). Nothing sends it. **Save logs**
   (Settings, Engine, Diagnostics) puts a text file in your Downloads folder, and you decide whether to attach it to a bug report.
 - The coding agent is a separate component (the DeepSeek Harness, MIT). It has its own telemetry switch, and Strata starts it
@@ -74,10 +74,10 @@ That is the full list found in the code. Some details:
   `STRATA_PACKAGED=1` and `STRATA_NO_ACQUIRE=1` for its parts (`apps/desktop/src-tauri/src/main.rs`), and the downloaders
   refuse to run under them (`strata_common/acquisition.py`, `apps/host/server/acquisition.mjs`). That is why the app
   never downloads `cloudflared` for you while it runs.
-- **The engine itself has no network code.** The part of Strata that runs the model (`src/`, `include/`, `sycl/`, `metal/`)
+- **The engine itself has no network code.** The part of Strata that runs the model (`src/`, `include/`)
   contains no networking. The app's own pages load no fonts, scripts or trackers from the internet.
 - **Building from source** reaches more places. Python from python.org or winget (`START-HERE.bat`), a standalone Python
-  from GitHub on a Mac (`setup.sh`), Python packages from PyPI (`requirements.txt`, pinned versions), NVIDIA's CUDA libraries
+  Python packages from PyPI (`requirements.txt`, pinned versions), NVIDIA's CUDA libraries
   from PyPI and, on Ubuntu and Debian, NVIDIA's apt key and packages, AMD's ROCm wheels, the Vulkan SDK from LunarG, and
   llama.cpp and stable-diffusion.cpp source from GitHub. These run only while you run the setup.
 
@@ -149,9 +149,7 @@ HTTPS and the `Niko1221/Strata` release itself. What that means, and how to read
 [SECURITY.md](../SECURITY.md#how-far-to-trust-curl--sh-and-irm--iex). Later updates are checked against the key already on
 your PC.
 
-**Code signing.** The Windows installer is not code-signed yet, so Windows shows "Windows protected your PC". The signing and
-Apple notarisation of the Mac builds is set up in `packaging/mac/` and runs on the maintainer's Mac. A Mac build that has not
-been notarised shows macOS's "damaged" warning ([MAC.md](MAC.md)).
+**Code signing.** The Windows installer is not code-signed yet, so Windows shows "Windows protected your PC".
 
 **What the checks do not cover.** They catch a damaged or swapped download and a feed nobody signed with the release key. They
 cannot protect you if someone who can publish a release (or who holds the signing key) publishes something harmful.

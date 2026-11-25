@@ -9,7 +9,7 @@ Nothing here is known to work on another ARM machine.
 
 - **Works:** Qwen3.8-Flash-Next IQ3_S and the NVFP4 GPTQ pack (64K context, every expert in the GPU's cache), DeepSeek-V4.1-Flash 2.00 bpw
   (a short chat), the Terminal (`strata launch`, `strata update`, `strata serve`) and the engine packages of the signed feed.
-- **Not built for ARM:** the desktop app (no AppImage; use the Terminal), the HIP, SYCL and CPU-only engines, and the Q2_0 and Gyro packs,
+- **Not built for ARM:** the desktop app (no AppImage; use the Terminal), the HIP and CPU-only engines, and the Q2_0 and Gyro packs,
   whose CPU kernels are x86-only (the engine refuses them at start). Picture reading is compiled in and was not tried on the Spark.
 - **Not tested:** contexts above 128K, more than eight chat slots (four and eight were measured: "Several chats at once" below), a long soak. `strata doctor --live` lists the GB10 with no memory
   figure, because `nvidia-smi` reports none for it.

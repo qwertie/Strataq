@@ -55,10 +55,6 @@ def install_isolation_words(catalog, data_dir: str | os.PathLike | None = None) 
             f"{chosen}: the data folder only says where model files are kept. To test from scratch, use a new user account or remove the earlier install first."]
 
 
-#: the first engine whose Metal build reads Gyro files (round 8, M: 0.1.45.3 was reused and failed on missing TQK6/TQK7 kernels)
-GYRO_METAL_ENGINE = (0, 1, 47)
-
-
 def version_tuple(version: str | None) -> tuple[int, ...]:
     """'0.1.45.3' -> (0, 1, 45, 3); () when it is not a dotted run of numbers (a source build says so itself)."""
     m = re.match(r"\d+(?:\.\d+)*", str(version or "").strip())
@@ -186,7 +182,7 @@ NO_ENGINE_STEP = ("run `strata update` to get the newest engines and start again
 
 #: no graphics card Strata can use at all (an Intel UHD/Iris only, an AMD APU-only laptop, a virtual machine, Windows on ARM)
 NO_GPU_PREFIX = "no graphics card that Strata can use was found"
-NO_GPU_STEP = ("Strata needs an NVIDIA or AMD graphics card, an Intel Arc card or an Apple Silicon Mac, and there is no CPU-only engine for this "
+NO_GPU_STEP = ("Strata needs an NVIDIA or AMD graphics card, and there is no CPU-only engine for this "
                 "computer. Run Strata on a computer that has one; the model files stay here")
 
 
@@ -196,6 +192,18 @@ def no_gpu_words(names: list[str] | None = None) -> str:
     if names:
         return f"{NO_GPU_PREFIX}; this computer has {', '.join(names[:3])}"
     return NO_GPU_PREFIX
+
+
+def card_backend() -> str | None:
+    """Gets the engine family this computer's graphics card needs (engine_component.detect_backend), None when no probe could tell.
+    Raises LaunchError with that module's plain sentence on a computer Strata has no engine for (a Mac, Intel graphics only)."""
+    from strata_common import engine_component as ec
+    try:
+        return ec.detect_backend()[0]
+    except ec.ComponentProblem as exc:
+        raise LaunchError(str(exc), NO_GPU_STEP + ".", 5) from None
+    except Exception:                                        # noqa: BLE001 - a probe that fails cannot tell
+        return None
 
 
 def _step_for(reason: str) -> str:
@@ -425,27 +433,19 @@ EXPERTS_MIN_ENGINE = (0, 1, 50)      # the first DeepSeek engine that accepts --
 
 
 def dsv41_engine_version(exe) -> tuple:
-    """The version of a DeepSeek engine: from its package folder's name ("0.1.50-windows-x86_64-cuda-cuda13"), else what `--version` prints;
-    () when neither says."""
+    """Reads a DeepSeek engine's version from its package folder's name ("0.1.50-windows-x86_64-cuda-cuda13"); () when the name has none."""
     if not exe:
         return ()
     from strata_control import dsv41_engine
     folder = Path(str(exe)).parent.name
-    version = dsv41_engine.version_key(folder) if folder[:1].isdigit() else ()
-    if version:
-        return version
-    try:
-        done = subprocess.run([str(exe), "--version"], capture_output=True, text=True, errors="replace", timeout=10, stdin=subprocess.DEVNULL)
-        found = re.search(r"(\d+\.\d+\.\d+(?:\.\d+)?)", (done.stdout or "") + (done.stderr or ""))
-        return tuple(int(x) for x in found.group(1).split(".")) if found else ()
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return ()
+    return dsv41_engine.version_key(folder) if folder[:1].isdigit() else ()
 
 
 def engine_takes_experts(exe) -> bool:
-    """Does this DeepSeek engine accept --experts (0.1.50 or newer)? An engine whose version cannot be told counts as not: nothing is passed,
-    nothing is shown, no error."""
-    return dsv41_engine_version(exe) >= EXPERTS_MIN_ENGINE
+    """Tells whether this DeepSeek engine accepts --experts (0.1.50 or newer). An engine outside a versioned package folder is a build of
+    strata-ds41, which always takes it; no engine at all counts as not: nothing is passed, nothing is shown, no error."""
+    version = dsv41_engine_version(exe)
+    return bool(exe) and (not version or version >= EXPERTS_MIN_ENGINE)
 
 
 def used_cards(computer, s: "S.LaunchSettings") -> list:
@@ -468,10 +468,8 @@ def used_vram_gb(computer, s: "S.LaunchSettings") -> float:
 
 def uses_integrated_gpu(computer, s: "S.LaunchSettings") -> bool:
     """Does the launch run on an integrated / unified-memory GPU (Strix Halo, gfx1151, Radeon 8060S: the hardware probe marks it uma, integrated or
-    unified_memory)? A Mac is left out: DeepSeek is not on the Mac."""
+    unified_memory)?"""
     for c in used_cards(computer, s):
-        if str(c.get("vendor")) == "apple" or c.get("unified_gb"):
-            continue
         if c.get("integrated") or c.get("uma") or c.get("unified_memory"):
             return True
     return False
@@ -569,15 +567,12 @@ def derive_config(base: dict, s: S.LaunchSettings, *, bool_flags: frozenset[str]
         draft_layer.apply(cfg)
     elif s.mtp == "on":
         cfg["mtp"] = True
-    if cfg.get("backend") == "sycl":                         # exactly two Arc B-series cards: --spec 2 (strata_common/intel_spec.py); the person's
-        from strata_common import intel_spec                # own choices (user_args, an extra option below) come after it and win
-        intel_spec.apply_for_launch(cfg)
     extra = dict(s.extra or {})
     exe = extra.pop("--exe", None)
     if exe:
         cfg["exe"] = exe
     word_flags = S.WORD_VALUE_FLAGS
-    if cfg.get("arch") == "deepseek41":                      # strata-dsv41 takes --mmap-experts on|off|auto: "off" must reach it as a word (#5027)
+    if cfg.get("arch") == "deepseek41":                      # DeepSeek takes --mmap-experts on|off|auto: "off" must reach it as a word (#5027)
         bool_flags = bool_flags - tune_knobs.DSV41_WORD_FLAGS
         word_flags = word_flags | tune_knobs.DSV41_WORD_FLAGS
     a_changes, e_changes = S.as_argv_changes(extra, bool_flags, word_flags) if extra else ({}, {})
@@ -761,6 +756,7 @@ class Runner:
                 return
             self.emit("engine", stale + " Looking for a newer one…", 0, level="warn")
         else:
+            card_backend()                                   # a computer Strata has no engine for stops here, before any download
             self.emit("engine", "No engine is installed yet. Getting the one for your graphics card…", 0)
         argv = self._cli("update", "--no-control", "--output", "jsonl")
         if feed:
@@ -889,8 +885,6 @@ class Runner:
             need = tuple(getattr(mod, "MIN_ENGINE", ()) or ())
             if self.s.family == "gyro":
                 need = max(need, GYRO_ENGINE)
-                if sys.platform == "darwin":
-                    need = max(need, GYRO_METAL_ENGINE)      # the Metal Gyro kernels (TQK6/TQK7/TQ2_T) first shipped in 0.1.47; CUDA, HIP, SYCL had them earlier
             return need or None
         except Exception:                                    # noqa: BLE001 - no table, no check
             return None
@@ -1011,8 +1005,6 @@ class Runner:
             args += ["--gguf-dir", str(p if p.is_dir() else p.parent)]
         if s.dsv41_package and s.family == "deepseek41":
             args += ["--dsv41-package", s.dsv41_package]
-        if s.engine:
-            args += ["--engine", s.engine]
         if self.feed:                                     # --feed / STRATA_UPDATE_FEED: setup fetches the DeepSeek engine from it too
             args += ["--feed", str(self.feed)]
         if s.gpu_roles:
@@ -1021,21 +1013,6 @@ class Runner:
             args += ["--gpus", ",".join(str(g) for g in s.gpus)] if len(s.gpus) > 1 else ["--gpu", str(s.gpus[0])]
         else:
             args += self.installed_card_args()
-        if sys.platform == "darwin":
-            # a Mac's setup (Control mode, strata_control/mac_fit.py) takes fewer options (no --kv, --gpu, speed projection)
-            keep = {"--yes", "--no-start", "--family", "--model", "--context", "--vision", "--data-dir", "--gguf-dir", "--move-data",
-                    "--set-default-data-dir", "--feed", "--dsv41-package"}   # (the last two: the DeepSeek engine package, 0.2.7.1)
-            flags = ("--yes", "--no-start", "--move-data", "--set-default-data-dir")
-            out, i = [], 0
-            while i < len(args):
-                if args[i] in keep:
-                    out.append(args[i])
-                    if args[i] not in flags and i + 1 < len(args):
-                        out.append(args[i + 1])
-                    i += 2 if args[i] not in flags else 1
-                else:
-                    i += 2 if i + 1 < len(args) and not args[i + 1].startswith("--") else 1
-            args = out
         return args
 
     def installed_card_args(self) -> list[str]:
@@ -1070,20 +1047,12 @@ class Runner:
         return path, desc
 
     def installed_serves_request(self, path: Path) -> bool:
-        """Checks whether the saved model uses the requested engine and folders before reusing its setup."""
+        """Checks whether the saved model uses the requested folders before reusing its setup."""
         s = self.s
-        if not (s.engine or s.model_path or s.data_dir):
+        if not (s.model_path or s.data_dir):
             return True
         try:
             cfg = read_config(path)
-            if s.engine:
-                program = Path(str(cfg.get("exe", ""))).stem
-                original = program in ("strata", "strata-dsv41", "component:strata-engine")
-                new = program in ("strata-q38", "strata-ds41")
-                if (s.engine == "new" and original) or (s.engine == "original" and new):
-                    return False
-            if not (s.model_path or s.data_dir):
-                return True
             args = [str(a) for a in cfg.get("args") or []]
             if s.model_path:
                 want = Path(s.model_path).expanduser().resolve()
@@ -1225,16 +1194,6 @@ class Runner:
             title = next((r.title for r in self.catalog.rows() if r.family == s.family and r.model == s.model), title)
         except Exception:                                    # noqa: BLE001 - a label only
             pass
-        if sys.platform == "darwin" and not (cat.src / "strata_control" / "mac_fit.py").is_file():
-            # a Terminal from before the Mac rules moved into strata_control/mac_fit.py: setup.py cannot install a Mac model in its Control
-            # mode (no source build, no setup_mac.py), so use model files prepared on this Mac. Every other Terminal installs through setup.py.
-            adopted = self.adopt_prepared_files("no Mac model installer in this Terminal")
-            if adopted is not None:
-                return adopted
-        if self.intel_chosen():
-            adopted = self.adopt_prepared_files("", chosen=True)
-            if adopted is not None:
-                return adopted
         self.emit("model", f"Preparing {title} from your model files…" if s.model_path else
                   f"Getting {title} ready (a download may be large; it continues where it stopped if interrupted)…", 0)
         argv = [self.python, str(cat.src / "setup.py"), *self.setup_args()]
@@ -1356,59 +1315,12 @@ class Runner:
         except (OSError, ValueError):
             return None
 
-    def intel_chosen(self) -> bool:
-        """The engine for this launch is the Intel Arc one (chosen with --backend intel, saved, or the only make here), and the model is one
-        the built-in downloader sets up for NVIDIA and AMD only: Strata prepares the model files itself instead (adopt_prepared_files)."""
-        if self.multi_file() or sys.platform == "darwin" or WINDOWS:
-            return False
-        try:
-            from strata_common import engine_component
-            return engine_component.detect_backend()[0] == "sycl"
-        except Exception:                                        # noqa: BLE001
-            return False
-
-    def prepare_pack(self, model_dir: Path, pack: Path, shards: list) -> None:
-        """Build the pack an Intel Arc run needs from the GGUF files (the step setup.py runs for NVIDIA and AMD cards): setup.py --prepare-pack
-        fetches llama.cpp's gguf-py by itself and runs tools/iq_pack.py. Takes seconds to a few minutes; the draft layer is not built."""
-        cat = self.catalog
-        fam, model = self.s.family, self.s.model
-        try:
-            fam, model = cat.resolve(str(model), None if fam is None else str(fam))      # setup's own spelling (IQ2_XS, not iq2_xs)
-        except Exception:                                    # noqa: BLE001
-            pass
-        self.emit("model", "Preparing the model files for this graphics card (once, a few minutes; nothing is downloaded except a small helper)…", 0)
-        argv = [self.python, str(cat.src / "setup.py"), "--prepare-pack", str(pack), "--gguf-dir", str(model_dir),
-                "--family", str(fam), "--model", str(model)]
-        env = self._env()
-        env.update(STRATA_CONTROL_INSTALL="1", STRATA_INSTALL_DIR=str(cat.root), PYTHONNOUSERSITE="1")
-        for k in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
-            env.pop(k, None)
-        env["PYTHONPATH"] = str(cat.src)
-        p = self._spawn(argv, env=env, cwd=str(cat.src))
-        lines: list[str] = []
-        for line in self._read_lines(p):
-            if self.cancel.is_set():
-                self._stop_children()
-                raise Cancelled()
-            if line is None:
-                continue
-            line = line.rstrip()
-            if line:
-                lines.append(line)
-                lines[:] = lines[-400:]
-        if p.wait() != 0:
-            err = next((ln.strip()[3:].strip() for ln in reversed(lines) if ln.strip().startswith("[X]")), "")
-            raise LaunchError("Strata could not prepare the model files for this graphics card" + (f": {err}" if err else "."),
-                              "The last lines of the preparation are in " + (self.keep_setup_output(lines) or "the launch log")
-                              + ". If it says the helper could not be downloaded, check the internet connection (proxy: set HTTPS_PROXY) and try again.", 5)
-
-    def adopt_prepared_files(self, setup_error: str, chosen: bool = False) -> Path | None:
-        """The installer cannot set this graphics card up (Intel Arc, for one): if the model's files and prepared pack are already on disk,
+    def adopt_prepared_files(self, setup_error: str) -> Path | None:
+        """The installer cannot see this graphics card (its probe did not answer): if the model's files and prepared pack are already on disk,
         write the run config here (strata_cli/launch/adopt.py); else say what is missing."""
         from strata_cli.launch import adopt
-        from strata_common import engine_component
         s, cat = self.s, self.catalog
-        if not chosen and not adopt.setup_cannot_handle_this_card(setup_error):
+        if not adopt.setup_cannot_handle_this_card(setup_error):
             return None
         _models, families, _ctx, _src = cat.tables()
         fam = families.get(s.family or "", {})
@@ -1417,31 +1329,19 @@ class Runner:
         model_dir = Path(s.model_path) if s.model_path else data_dir / "models" / (fam.get("tag", "") + s.model)
         if model_dir.is_file():
             model_dir = model_dir.parent
-        try:
-            backend = engine_component.detect_backend()[0]
-        except Exception:                                    # noqa: BLE001
-            backend = None
-        pack_dir = data_dir / "packs" / tag.lower()
-        if backend == "sycl" and adopt.find_shards(model_dir) and not (pack_dir / "experts.bin").exists() and not (
-                (pack_dir / "index.txt").exists() and (pack_dir / "tokenizer" / "vocab.json").exists()):
-            self.prepare_pack(model_dir, pack_dir, adopt.find_shards(model_dir))
+        backend = card_backend()
         cfg, problems = adopt.plan(family=s.family, model=s.model, model_dir=model_dir, data_dir=data_dir, src=cat.src,
                                    context=s.context or 32768, kv=s.kv, model_name=f"{fam.get('name', s.family)}-{s.model.lower()}", family_def=fam,
-                                   log=cat.root / f"strata-{tag}.log", backend=backend,
-                                   vram_gb=float(cat.computer().main_vram_gb or 0), notes=self.notices, pack_name=tag.lower())
+                                   log=cat.root / f"strata-{tag}.log", backend=backend, pack_name=tag.lower())
         if cfg is None:
-            if backend == "sycl":
-                raise LaunchError("Strata cannot start this model on the Intel Arc card yet: " + "; ".join(problems) + ".",
-                                  "Give the folder that holds the model's .gguf files with --model-path (Strata prepares them itself). "
-                                  "Intel cards do not download models yet; see docs/INTEL_ARC.md.", 5)
-            raise LaunchError("The installer cannot set up this graphics card yet, and the files Strata would need to write the settings itself are not all there: "
+            raise LaunchError("Setup could not see the graphics card, and the files Strata would need to write the settings itself are not all there: "
                               + "; ".join(problems) + ".",
-                              "Use model files that were prepared on this computer already (folder + pack): for an Intel Arc card the steps are in docs/INTEL_ARC.md (the Terminal carries tools/iq_pack.py for the pack). Or install on a computer with an NVIDIA or AMD card.", 5)
+                              "Use model files that were prepared on this computer already (folder + pack), or install on a computer with an NVIDIA or AMD card.", 5)
         path = cat.root / f"strata-{tag}.json"
         adopt.write(path, cfg)
-        self.notices.append("The downloader built into this Terminal sets up NVIDIA and AMD cards only (Intel Arc cards have a separate installer), so Strata wrote the "
+        self.notices.append("Setup could not see the graphics card, so Strata wrote the "
                             f"run settings itself from the prepared model files already on this computer ({path.name}). No model files were downloaded.")
-        self.emit("model", f"Used your prepared model files and wrote the run settings ({path.name}); this card is not one the built-in downloader sets up.", 100, level="warn")
+        self.emit("model", f"Used your prepared model files and wrote the run settings ({path.name}); setup could not see the graphics card.", 100, level="warn")
         return path
 
     @staticmethod
@@ -1490,7 +1390,7 @@ class Runner:
             return False
         model, d, folder = found
         from strata_control import dsv41_fit
-        if dsv41_fit.not_here(model):     # Mac: no Metal IQ1_S kernel yet; DGX Spark: never run; said before an engine or a download is touched
+        if dsv41_fit.not_here(model):     # said before an engine or a download is touched
             raise LaunchError(dsv41_fit.not_here(model),
                               "Use the 2.00 or 2.25 files (--model ist-das-2.00bpw or --model ist-das-2.25bpw, or --model-path to those files). "
                               "Nothing was downloaded or changed.", 2)
@@ -1592,7 +1492,7 @@ class Runner:
         try:
             from strata_control import split_engine as SE
             s = self.s
-            if s.family in modelstate.HELPER_FAMILIES and not self.multi_file() and not self.intel_chosen():
+            if s.family in modelstate.HELPER_FAMILIES and not self.multi_file():
                 base = dict(cfg or {})
                 if s.split_engine:
                     base["split_engine"] = s.split_engine
@@ -2416,9 +2316,6 @@ class Runner:
             # a ready-made pack (NVFP4) is taken from setup's own models folder, not from where the person's files are (round 8, N2: the plan
             # said "nothing to download" and setup then asked for 129 GB): count what setup will fetch
             parts = [p for p in parts if p["kind"] != "weights"] + [{"kind": "weights", "label": "the ready-made pack", "gb": gap["gb"]}]
-        intel = self.intel_chosen()
-        if intel:                                            # the Intel route builds the pack from the files and fetches no draft layer, picture reader or drafter
-            parts = [p for p in parts if p["kind"] not in ("mtp", "mmproj", "dflash2")]
         if self.multi_file() and st.own_files and s.model:
             # DeepSeek with the person's own shards: setup still fetches the shared files that are not here (the Engram, the DSpark drafter, the picture file); count
             # them with the same search setup makes (setup.dsv41_shared_missing), so the plan is the download (0.2.9.1: "Nothing to download" and then 8 GB)
@@ -2477,9 +2374,6 @@ class Runner:
                      "first. `strata components engine` says why.")
         elif not engine:
             text += " The engine for your graphics card is downloaded first (from the update source; its size is shown when it starts)."
-        if intel:
-            text += (" For the Intel card Strata builds the model's pack from your files itself (once, a few minutes); the first time it fetches "
-                     "a small helper (llama.cpp's gguf-py) from GitHub. No draft layer or picture reader is used on Intel cards yet.")
         return {"gb": gb, "parts": parts, "engine_missing": not engine and not here, "engine_usable": engine, "own_files": st.own_files, "text": text}
 
     def ready_pack_gap(self) -> dict | None:
@@ -2612,8 +2506,6 @@ class Runner:
         if self.feed_without_draft_layer():                  # the model list says this model has no draft layer: setup fetches none and the engine starts without a drafter
             return drafting.summary_line(drafting.Decision("off", "off"))
         if self.multi_file():                                # DeepSeek drafts with its own DSpark drafter (the --dspark auto the config writes), not MTP
-            if sys.platform == "darwin":
-                return "Drafting: off (DeepSeek's drafter was not faster on a Mac)"
             return "Drafting: DSpark (used when it speeds up answers on this computer)"
         try:
             base, cfg = self.installed_state()
@@ -2644,10 +2536,9 @@ class Runner:
         """Keeps explicit program choices; otherwise uses this install's DeepSeek package.
 
         A shared model's config can name another install or a package an update has replaced. Without an installed
-        package, its saved path stays. The page-pool engine also keeps its saved path.
+        package, its saved path stays.
         """
-        from strata_common.paged_launch import is_paged_engine
-        if cfg.get("arch") != "deepseek41" or is_paged_engine(cfg) or self.s.extra.get("--exe"):
+        if cfg.get("arch") != "deepseek41" or self.s.extra.get("--exe"):
             return
         found, _known = self.dsv41_engine_found()
         if found is None:
@@ -2680,7 +2571,7 @@ class Runner:
         return found
 
     def dsv41_engine_found(self) -> tuple[Path | None, bool | None]:
-        """(strata-dsv41 already installed, or None; whether the engine can be told at all).  Looks where setup puts DeepSeek's own engine package
+        """(DeepSeek's engine already installed, or None; whether the engine can be told at all).  Looks where setup puts DeepSeek's own engine package
         (engine-dsv41/ beside the engine, in Strata's own folder, and in the data folder), and at STRATA_DSV41_EXE (a build of your own)."""
         from strata_control import dsv41_engine
         own = (os.environ.get("STRATA_DSV41_EXE") or "").strip()
@@ -2737,13 +2628,13 @@ class Runner:
             if found is not None:
                 return found, True
         for f in folders[:1]:                                # the engine's own folder: an all-in-one package carries it
-            for n in ("strata-dsv41", "strata-dsv41.exe"):
+            for n in (dsv41_engine.NAME, dsv41_engine.NAME + ".exe"):
                 if (f.parent / n).is_file():
                     return f.parent / n, True
         return None, known
 
     def dsv41_engine(self) -> bool | None:
-        """Whether the installed engine carries strata-dsv41 (True / False); None when no engine is installed yet or it cannot be told."""
+        """Whether the installed engine carries DeepSeek's engine (True / False); None when no engine is installed yet or it cannot be told."""
         found, known = self.dsv41_engine_found()
         return True if found is not None else (False if known else None)
 
@@ -2847,7 +2738,7 @@ KNOWN_CAUSES = (
     (re.compile(r"cannot run the expert kernel|needs AVX-?512", re.I),
      "This model folder holds the pack for CPUs with AVX-512, and this PC's CPU does not have it. Run `strata setup` again: on a CPU "
      "without AVX-512 it builds the pack that runs on AVX2 CPUs (Ryzen 3000-5000, Intel Core 12th-14th generation)."),
-    (re.compile(r"no device of requested type|device not found|no (gpu|sycl|level.zero) device|permission denied.*(dri|render)", re.I),
+    (re.compile(r"device not found|no gpu device|permission denied.*(dri|render)", re.I),
      "The engine could not open the graphics card. On Linux the account must be allowed to use it: add it to the render group "
      "(`sudo usermod -aG render $USER`), log in again and start it again."),
     (re.compile(r"out of memory|not enough (gpu |video |free )?memory|cudaerrormemory|allocation failed", re.I),
@@ -2900,8 +2791,7 @@ def engine_log_tail(config: Path | None, limit: int = 65536, since: dict | None 
 
 def explain_engine_exit(result: dict, config: Path | None, marks: dict | None = None, server_log: Path | None = None,
                         shared_memory: bool = False) -> tuple[str, str]:
-    """(text, next) for a start that did not reach ready: the stage, the cause line from the engine log, the next step and the log path
-    (round 8, L3: an Arc engine died with 'No device of requested type available' and the person saw only 'server_exited')."""
+    """(text, next) for a start that did not reach ready: the stage, the cause line from the engine log, the next step and the log path."""
     server_lines = _lines_since(server_log, (marks or {}).get(str(server_log))) if (server_log and marks is not None) else []
     for x in server_lines:                                   # the server's own refusal (server.py: error: ...) is the cause when there is one
         busy = re.search(r"port (\d+) is already in use", x)

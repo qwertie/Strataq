@@ -32,8 +32,8 @@ ANSWER_NOTICE = {
     "quality": "Includes a quality setting that changes the numbers.",
 }
 
-#: On some cards the standard setup itself is not repeatable run to run (the RTX 3060 in resident-RAM mode and the Arc A750:
-#: 2 and 3 of 10 gate prompts identical between two runs of the default, spec 3.3 note). There "exact" can only mean "no worse
+#: On some cards the standard setup itself is not repeatable run to run (the RTX 3060 in resident-RAM mode: 2 and 3 of 10
+#: gate prompts identical between two runs of the default, spec 3.3 note). There "exact" can only mean "no worse
 #: than the default's own variation", so the notice must not promise identical answers.
 ANSWER_NOTICE_UNSTEADY = {
     "exact": "Answers can differ from run to run on this PC even with the standard setup; this setting does not add to that.",
@@ -41,8 +41,8 @@ ANSWER_NOTICE_UNSTEADY = {
 
 
 def default_unsteady(ctx: "Context") -> bool:
-    """True where the setup default is itself not repeatable: the low-RAM resident mode (adaptive tier and draft timing) and SYCL."""
-    return ctx.backend == "sycl" or condition_holds("resident_ram", ctx)
+    """True where the setup default is itself not repeatable: the low-RAM resident mode (adaptive tier and draft timing)."""
+    return condition_holds("resident_ram", ctx)
 
 
 #: Flags that take no value (present = on, absent = off).
@@ -96,11 +96,8 @@ ARMS: tuple[Arm, ...] = (
     Arm("adapt_tier_fast", "Re-balance the expert cache faster", "placement",
         {"--adapt-every": 1, "--adapt-swaps": 80, "--adapt-decay": 0.97}, classes=("B", "C")),
     Arm("adapt_decay_09", "Forget old expert use a little faster", "placement", {"--adapt-decay": 0.9},
-        classes=("B", "C", "G"), backends=("cuda", "hip", "sycl")),
+        classes=("B", "C"), backends=("cuda", "hip")),
     Arm("spec3", "Shorter speculative window (3 tokens)", "placement", {"--spec": 3}, classes=("A", "B")),
-    # --- class G: Intel Arc (SYCL): +5.5% (5/5, twice) ------------------------------------------------------------------------
-    Arm("pcie_start_02", "Start with a smaller PCIe share", "placement", {"--pcie-frac": 0.2},
-        backends=("sycl",), classes=("G",)),
     # --- Qwen3.6 hybrid (class D): exact while the experts fit the card, placement-dependent when CPU experts take part ------
     Arm("q36_workers_explicit", "Fix the CPU helper thread count", "exact", {}, families=("qwen36",),
         backends=("cuda", "hip"), classes=("D",), dynamic={"--pool-workers": "workers"}, needs=("hybrid_experts",)),
@@ -119,15 +116,15 @@ ARMS: tuple[Arm, ...] = (
     Arm("workers_minus1", "One fewer CPU helper thread", "exact", {}, classes=("F",),
         dynamic={"--pool-workers": "workers-1"}, needs=("hybrid_cpu",), deep_only=True),
     Arm("kv_grow", "Allocate the conversation memory as it grows", "exact", {"--kv-grow": True},
-        classes=("B", "C"), backends=("cuda", "hip", "sycl"), deep_only=True),
+        classes=("B", "C"), backends=("cuda", "hip"), deep_only=True),
 )
 
 #: The per-request settings (3.1, 4.1). They need no restart, so every one is tried before any restart (5).
 #: `values` are tried against the engine's own choice (absent); a win needs >= 3% in every round.
 PER_REQUEST: tuple[dict[str, Any], ...] = (
-    {"key": "pcie_frac", "values": (0.2, 0.35, 0.0), "backends": ("cuda", "hip", "sycl"),
+    {"key": "pcie_frac", "values": (0.2, 0.35, 0.0), "backends": ("cuda", "hip"),
      "label": "PCIe share", "answer": "placement"},
-    {"key": "spec_min_p", "values": (0.7, 0.5), "backends": ("cuda", "hip", "sycl", "metal"),
+    {"key": "spec_min_p", "values": (0.7, 0.5), "backends": ("cuda", "hip"),
      "label": "speculative confidence floor", "answer": "exact"},
     {"key": "aux_cpus", "values": (1, 0), "backends": ("cuda", "hip"), "label": "spare CPU cores for helper threads",
      "answer": "exact"},
@@ -193,7 +190,7 @@ ANSWER_OF_FLAG: dict[str, str] = {
 class Context:
     """The machine and the choices a candidate plan is made for."""
 
-    backend: str = "cuda"                 # cuda | hip | sycl | metal | cpu
+    backend: str = "cuda"                 # cuda | hip | cpu
     family: str = "flash-next"            # flash-next | qwen36
     gpu_count: int = 1
     vram_mib: int = 0                     # the card the model runs on (smallest if several)
@@ -238,8 +235,6 @@ def machine_classes(ctx: Context) -> list[str]:
     if ctx.family == "qwen36":
         classes.append("D" if ctx.facts.get("hybrid_experts") else "E")
         return classes
-    if ctx.backend == "sycl":
-        return ["G"]
     if condition_holds("resident_ram", ctx) or (ctx.ram_gib and ctx.model_gib and ctx.ram_gib - ctx.model_gib < 12):
         classes.append("A")
     classes.append("B" if ctx.vram_mib >= 24000 else "C")

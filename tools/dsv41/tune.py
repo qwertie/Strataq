@@ -1,8 +1,8 @@
-"""A short tune for DeepSeek-V4.1-Flash (strata-dsv41): the few settings the engine has, measured on this computer.
+"""A short tune for DeepSeek-V4.1-Flash (strata-ds41): the few settings the engine has, measured on this computer.
 
     python tools/dsv41/tune.py --config <launch config .json> [--mode quick|thorough] [--runs N]
 
-What it does (a few short decode runs through the engine's own command line; each loads the model, so about 1-3 minutes each):
+What it does (a few short decode runs, each a fresh start of the engine that loads the model, so about 1-3 minutes each):
   1. the launch's own settings (the baseline);
   2. the same with the DSpark drafter forced on (`--dspark on --dspark-conf 0.65`) against `--dspark auto`, which leaves it unloaded on a
      small card: kept only when it is clearly faster; with it on, a draft block of 3 against the pack's own (5);
@@ -17,10 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,16 +25,10 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 GAIN = 1.05
-DECODE = re.compile(r"decode:\s*\d+ tokens in [\d.]+ ms \(([\d.]+) tok/s\)")
 
 
 def say(msg: str) -> None:
     print(msg, flush=True)
-
-
-def parse_speed(stderr: str) -> float | None:
-    m = DECODE.findall(stderr or "")
-    return float(m[-1]) if m else None
 
 
 def drop(args: list[str], flag: str) -> list[str]:
@@ -64,16 +55,16 @@ def physical_cores() -> int | None:
         return None
 
 
-def measure(exe: str, args: list[str], ids_file: Path, n: int, timeout: int, env: dict) -> float | None:
-    """Decode tokens a second of one CLI run, or None when it did not run to the end."""
-    cmd = [exe, *[a for a in args if a not in ("--serve",)], "--ids", "@" + str(ids_file), "--n", str(n)]
+def measure(exe: str, args: list[str], ids: list[int], n: int, timeout: int, env: dict) -> float | None:
+    """Gets the decode speed (tokens a second) of one engine start that answers prompt `ids`, or None when it did not
+    run to the end."""
+    import smoke
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, env=env)
-    except (OSError, subprocess.TimeoutExpired):
+        last = smoke.run_engine(exe, args, ids, n, timeout, env)[1]
+    except Exception:                                    # noqa: BLE001 - a failed run is a setting that is not kept
         return None
-    if r.returncode != 0:
-        return None
-    return parse_speed(r.stderr)
+    generated, ms = last.get("generated"), last.get("decode_ms")
+    return generated / ms * 1000 if generated and ms else None
 
 
 def prompt_ids(pack: Path) -> list[int]:
@@ -106,42 +97,39 @@ def tune(config: Path, mode: str = "quick", n: int = 48, timeout: int = 1500, me
     except Exception as e:                                # noqa: BLE001
         res["lines"].append(f"The tuner could not prepare its test question ({e}), so the standard settings run.")
         return res
-    with tempfile.TemporaryDirectory() as d:
-        f = Path(d) / "ids.txt"
-        f.write_text(",".join(str(i) for i in ids), encoding="ascii")
-        base_args = [a for a in args if a != "--serve"]
-        say("Tuning DeepSeek: measuring the standard settings first ...")
-        base = measure_fn(exe, base_args, f, n, timeout, env)
-        if base is None:
-            res["lines"].append("The standard settings did not finish a test run here, so nothing was tuned and they stay as they are.")
-            return res
-        res["speeds"]["standard"] = base
-        best, best_args = base, base_args
-        say(f"  standard settings: {base:.2f} tokens a second")
-        trials = [("the drafter on (DSpark)", lambda a: with_flag(with_flag(a, "--dspark", "on"), "--dspark-conf", "0.65"))]
-        trials.append(("a shorter draft block (3)", lambda a: with_flag(a, "--dspark-block", "3")))
-        cores, logical = physical_cores(), os.cpu_count() or 0
-        if cores and logical and logical > cores and "--cpu-threads" not in base_args:
-            trials.append((f"{cores} CPU threads (one for each physical core)", lambda a, c=cores: with_flag(a, "--cpu-threads", str(c))))
-        if mode == "thorough" and cores:
-            trials.append(("every logical CPU thread", lambda a, c=logical: with_flag(a, "--cpu-threads", str(c))))
-        queue = list(trials)
-        while queue:
-            label, make = queue.pop(0)
-            if label == "a shorter draft block (3)":
-                if "on" != (best_args[best_args.index("--dspark") + 1] if "--dspark" in best_args else ""):
-                    continue                                       # only with the drafter on: with `auto` it may not even be loaded
-            cand = make(best_args)
-            say(f"  trying {label} ...")
-            v = measure_fn(exe, cand, f, n, timeout, env)
-            if v is None:
-                res["lines"].append(f"The test with {label} did not finish; that setting stays as it was.")
-                continue
-            res["speeds"][label] = v
-            say(f"    {v:.2f} tokens a second")
-            if v > best * GAIN:
-                best, best_args = v, cand
-                res["changed"].append(label)
+    base_args = [a for a in args if a != "--serve"]
+    say("Tuning DeepSeek: measuring the standard settings first ...")
+    base = measure_fn(exe, base_args, ids, n, timeout, env)
+    if base is None:
+        res["lines"].append("The standard settings did not finish a test run here, so nothing was tuned and they stay as they are.")
+        return res
+    res["speeds"]["standard"] = base
+    best, best_args = base, base_args
+    say(f"  standard settings: {base:.2f} tokens a second")
+    trials = [("the drafter on (DSpark)", lambda a: with_flag(with_flag(a, "--dspark", "on"), "--dspark-conf", "0.65"))]
+    trials.append(("a shorter draft block (3)", lambda a: with_flag(a, "--dspark-block", "3")))
+    cores, logical = physical_cores(), os.cpu_count() or 0
+    if cores and logical and logical > cores and "--cpu-threads" not in base_args:
+        trials.append((f"{cores} CPU threads (one for each physical core)", lambda a, c=cores: with_flag(a, "--cpu-threads", str(c))))
+    if mode == "thorough" and cores:
+        trials.append(("every logical CPU thread", lambda a, c=logical: with_flag(a, "--cpu-threads", str(c))))
+    queue = list(trials)
+    while queue:
+        label, make = queue.pop(0)
+        if label == "a shorter draft block (3)":
+            if "on" != (best_args[best_args.index("--dspark") + 1] if "--dspark" in best_args else ""):
+                continue                                       # only with the drafter on: with `auto` it may not even be loaded
+        cand = make(best_args)
+        say(f"  trying {label} ...")
+        v = measure_fn(exe, cand, ids, n, timeout, env)
+        if v is None:
+            res["lines"].append(f"The test with {label} did not finish; that setting stays as it was.")
+            continue
+        res["speeds"][label] = v
+        say(f"    {v:.2f} tokens a second")
+        if v > best * GAIN:
+            best, best_args = v, cand
+            res["changed"].append(label)
     tried = ", ".join(f"{k} {v:.1f}" for k, v in res["speeds"].items())
     if res["changed"]:
         new = [a for a in best_args]

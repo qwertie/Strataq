@@ -73,7 +73,6 @@ void print_usage() {
                  "                       --expert-profile; STRATA_KV_GROW=1/0 also). Default: the whole --max-context\n"
                  "                       allocated at start\n"
                  "  --stream-token       enqueue token work on the session stream (experimental)\n"
-                 "  --check-logits       copy and check all logits in the stream-token path\n"
                  "  --gr-fp32-activations  experimental CUDA-oracle GR activation precision\n"
                  "  --gr-native-mmvf      experimental pinned GR norm/projections; implies FP32 activations\n"
                  "  --native-bf16         experimental CUDA-oracle SSM/router/indexer BF16 projections\n"
@@ -115,7 +114,6 @@ void print_usage() {
                  "  --top-k N --top-p F --temperature F\n"
                  "  --dump-logits PATH   write one line of raw logits per position\n"
                  "  --logits-stride N    store every Nth row plus final input (default 1); N>1 requires --max-new 1\n"
-                 "  --dump-residual PATH write the final R (hc x n_embd, f32) for head bisection\n"
                  "  --dump-layers PATH   write R after EVERY layer, per position: the C1 bisection ladder\n"
                  "  --dump-halves PATH   write both halves' block_out and inject per layer: the half bisection\n"
                  "  --dump-routing PATH  write the routed expert ids and weights per layer per position (P0.S8)\n"
@@ -132,13 +130,6 @@ void print_usage() {
                  "  --memory-limit-mib N  --serve: the total RAM (MiB) this engine's container or cgroup may use, when\n"
                  "                       the container cannot see its real limit (also STRATA_MEMORY_LIMIT_MIB; the flag\n"
                  "                       wins; 0 = none). Parking and session save/restore keep their floor under it\n"
-                 "  --conversation-cache-min-tokens N  --serve: park only conversations of at least N tokens, so\n"
-                 "                       short side requests do not take the slots a long one needs (default 0 = park any)\n"
-                 "  --conversation-cache-park-gain N  --serve: park only after the conversation advanced N tokens past\n"
-                 "                       the copy it would supersede, so a turn that grew by a few hundred tokens does not\n"
-                 "                       write a whole snapshot that the next turn drops (default 0 = park every turn)\n"
-                 "  --session-min-free-mib N  --serve: disk space a SAVE must leave free (default 4096; 0 = no check)\n"
-                 "  --session-save-reclaim  --serve: reclaim unpinned host caches if SAVE needs RAM (opt-in)\n"
                  "  --vram-elastic       --serve (#533, opt-in, NVIDIA): the expert cache in segments (--vram-segment-mib,\n"
                  "                       default 512), so the command `VRAM <reserve_mib>` (the server's POST /v1/vram) can\n"
                  "                       give VRAM back to other programs between requests and take it back later\n"
@@ -154,8 +145,6 @@ void print_usage() {
                  "                       with the GPUs overlapped - 1 = the prompt's short reads, 2 = decode as well\n"
                  "                       (stage 0 runs the next window while stage 1 verifies this one); docs/MULTI_GPU.md\n"
                  "  --prompt-cache-every N  --serve: also checkpoint every N fresh prompt tokens (default 16384, 0 = off)\n"
-                 "  --prompt-cache-tail  --serve, single GPU: one extra checkpoint near the prompt's end, at an existing\n"
-                 "                       chunk boundary (default off; requires --prompt-cache and --prompt-cache-every > 0)\n"
                  "  --prompt-cache-spread  --serve: keep the checkpoints spread back from the conversation's end (dense\n"
                  "                       near it, thinner further back) instead of the most recently used: a client that\n"
                  "                       rewrites its history N tokens back reads about N again, not the whole conversation\n"
@@ -169,9 +158,8 @@ void print_usage() {
                  "  --suffix-draft N     prompt lookup: draft from an earlier repeat of the last N+ tokens of context\n"
                  "                       when it pays (default 3; 0 = MTP only)\n"
                  "  --mtp-max-t M        cap the MTP's windows at M tokens (0 = --spec; longer ones come from suffixes)\n"
-                 "  --lookup-max-t N     prompt-lookup windows up to N (<= 16) tokens (default 12 on one GPU in the 8-row CUDA build, not Metal; 0 = off);\n"
+                 "  --lookup-max-t N     prompt-lookup windows up to N (<= 16) tokens (default 12 on one GPU in the 8-row CUDA build; 0 = off);\n"
                  "                       copy-heavy edits gain, each extra window size costs a graph (~20-35 MiB of VRAM)\n"
-                 "  --lookup-sizes A,B   the lookup window sizes past the MTP's (default: MTP+1, MTP+2 and N)\n"
                  "  --spec N             the MTP drafter's verify window: how many tokens it proposes per check (setup\n"
                  "                       writes 4; --suffix-draft lets it grow by 2, up to 8, where a repeat is likely)\n"
                  "  --spec-min-p P       how sure the draft layer must be to extend a verify window by another guess\n"
@@ -190,7 +178,7 @@ void print_usage() {
                  "                       (the MTP layer's ~0.9 GiB of VRAM goes to the expert cache; --mtp DIR is still needed for DIR/draft_vocab.bin)\n"
                  "  --draft-conf P       with --draft dflash2: end the window where the product of the selector's probabilities falls below P (default 0 = --spec-min-p)\n"
                  "  --draft auto         (serve) both drafters stay current; a request picks one: draft=mtp|dflash2, else --draft-rule df2|mtp|learn;\n"
-                 "                       MTP requests use --draft-mtp-spec N (default 4) and --draft-mtp-min-p P\n"
+                 "                       MTP requests use --draft-mtp-spec N (default 4)\n"
                  "  --draft-cap N        the widest verify window with --draft dflash2 (default by card: 8 on Strix Halo / iGPU and on Blackwell cc 12.0 with 48 GB or more, 6 on other Blackwell, --spec as given elsewhere)\n"
                  "  --control-vector-scaled FILE:SCALE[,...]  a control vector GGUF on the residual stream (llama.cpp's\n"
                  "                       format; --control-vector FILE = scale 1).  --serve: requests switch it (cvec=0|1)\n"
@@ -209,10 +197,8 @@ void print_usage() {
                  "                       the buffers' chunk count (STRATA_PREFILL_EQUAL's rule); 0 off (default; or\n"
                  "                       STRATA_PREFILL_PIPE)\n"
                  "  --no-pool            skip the CPU expert pool (the GPU-only floor)\n"
-                 "  --sync-every-layer   debug: synchronise after every layer\n"
                  "  --ple-gguf PATH      the n-gram/PLE shard.  WITHOUT IT LAYER 1's PLE IS SILENTLY SKIPPED,\n"
                  "                       which changes every number downstream - pass it for any real run\n"
-                 "  --dump-mixed PATH    write the post-attention residual (n_embd, f32)\n"
                  "  --stage-timing       per-stage KERNEL-COUNT shares.  NOT a time profile: an uncaptured\n"
                  "                       event interval includes host gaps, so run with --gpu-only-full first\n"
                  "  --graph-only         MEASURE: replay the 48 `pre` graphs only.  OMITS the 48 `post` graphs\n"
@@ -220,21 +206,14 @@ void print_usage() {
                  "  --gpu-only-full      MEASURE: replay pre+post for all 48 layers plus the LM head, no pool.\n"
                  "                       THE TRUE PER-TOKEN GPU FLOOR.  Quote this one, not --graph-only.\n"
                  "  --stats              print the per-stage breakdown\n"
-                 "  --spec-follow PATH   benchmarks: emit this continuation (token ids) instead of the argmax and\n"
-                 "                       accept the drafts that match it, so speculation settings compare on the\n"
-                 "                       same text (with --spec; not --serve)\n"
-                 "  --window-hashes PATH per verify window, a line with its index, position, size, a 64-bit hash of\n"
-                 "                       its final residual rows and its argmaxes: two builds that do the same\n"
-                 "                       arithmetic write the same file (use with --spec-follow, --adapt-every 0)\n"
                  "  --gpu-stages         R0.9: capture the layer as three graphs (mixer / ffn+router / post)\n"
                  "                       and time them from OUTSIDE the capture.  The per-stage table on the\n"
                  "                       real graph that --stage-timing cannot give.  Prints and exits.\n"
                  "  --expert-profile P   R4.2e: pre-load the VRAM tier from a `profile.bin` (see\n"
                  "                       tools/make_profile.py) instead of admitting on first use.\n"
                  "  --expert-profile-save P  --serve, #477: save what the adaptive tier learned (the experts in\n"
-                 "                       VRAM, then the routing counted since the start) as a profile at P, on\n"
-                 "                       QUIT and every --expert-profile-save-every MIN minutes (default 10;\n"
-                 "                       0 = on QUIT only) between requests; start from it with --expert-profile P\n"
+                 "                       VRAM, then the routing counted since the start) as a profile at P;\n"
+                 "                       start from it with --expert-profile P\n"
                  "  --no-hit-poke        R4.2d's A/B arm.  The hit path pokes the driver once right after its\n"
                  "                       launch so the GPU starts while the CPU pool runs; without it the work\n"
                  "                       waits for the next driver entry and does not overlap at all.\n"
@@ -256,8 +235,6 @@ void print_usage() {
                  "  --peer-reserve-mib N  VRAM the peer tier leaves free on its card (default 600)\n"
                  "  --peer-slots N       expert slots on the peer (default: what fits)\n"
                  "  --peer-adapt-swaps N  peer cache swaps per adaptation step (default: --adapt-swaps)\n"
-                 "  --peer-prefill-rows N  prompt rows per layer the peer computes (default half of chunk x top-k;\n"
-                 "                       0 = the prompt path stays on the primary)\n"
                  "  --expert-cache-per-layer  R4.2g: give each layer its OWN slots instead of letting the first\n"
                  "                       position take all of them.  The default policy fills in arrival order\n"
                  "                       from one shared counter, so 256 slots went to ~26 layers of position 0\n"
@@ -328,34 +305,6 @@ void print_usage() {
                  "                       blocking tier always (also STRATA_ADAPT_ASYNC=0); 1 = always on.\n");
 }
 
-unsigned lookup_size_mask(const Options& o) {
-    if (o.lookup_max_t <= 0) return ~0u;
-    const int s_mtp = o.mtp_max_t > 0 ? std::min(o.mtp_max_t, o.spec) : o.spec;
-    unsigned m = 0;
-    for (int t = 1; t <= s_mtp; ++t) m |= 1u << t;
-    if (o.lookup_sizes.empty()) {
-        for (int t : {s_mtp + 1, s_mtp + 2, o.spec})
-            if (t <= o.spec) m |= 1u << t;
-    } else {
-        size_t at = 0;
-        while (at < o.lookup_sizes.size()) {
-            const int t = std::atoi(o.lookup_sizes.c_str() + at);
-            if (t >= 2 && t <= o.spec) m |= 1u << t;
-            const size_t c = o.lookup_sizes.find(',', at);
-            if (c == std::string::npos) break;
-            at = c + 1;
-        }
-    }
-    return m;
-}
-
-std::string size_list(unsigned m, int max_t) {
-    std::string r;
-    for (int t = 1; t <= max_t; ++t)
-        if ((m >> t) & 1u) r += (r.empty() ? "" : ",") + std::to_string(t);
-    return r;
-}
-
 int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
     bool have_logits_stride = false;
     bool ram_keep_by_flag = false;
@@ -411,8 +360,6 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
             }
             have_logits_stride = true;
         }
-        else if (a == "--dump-residual") o.dump_residual = next("--dump-residual");
-        else if (a == "--dump-mixed") o.dump_mixed = next("--dump-mixed");
         else if (a == "--dump-layers") o.dump_layers = next("--dump-layers");
         else if (a == "--dump-halves") o.dump_halves = next("--dump-halves");
         else if (a == "--dump-routing") o.dump_routing = next("--dump-routing");
@@ -428,7 +375,6 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         else if (a == "--kv-grow") o.kv_grow = true;
         else if (a == "--no-kv-grow") o.kv_grow = false;
         else if (a == "--stream-token") o.stream_token = true;
-        else if (a == "--check-logits") o.check_logits = true;
         else if (a == "--gr-fp32-activations") o.gr_fp32_activations = true;
         else if (a == "--gr-native-mmvf") o.gr_native_mmvf = true;
         else if (a == "--native-bf16") o.native_bf16 = true;
@@ -449,7 +395,6 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         else if (a == "--native-dense-gguf") o.native_dense_gguf.push_back(next("--native-dense-gguf"));
         else if (a == "--no-capture") o.no_capture = true;
         else if (a == "--no-pool") o.no_pool = true;
-        else if (a == "--sync-every-layer") o.sync_every_layer = true;
         else if (a == "--stage-timing") o.stage_timing = true;
         else if (a == "--graph-only") o.graph_only = true;
         else if (a == "--gpu-only-full") o.gpu_only_full = true;
@@ -546,8 +491,6 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         else if (a == "--no-prefill-borrow") o.no_prefill_borrow = true;
         else if (a == "--vram-elastic") o.vram_elastic = true;
         else if (a == "--vram-segment-mib") o.vram_segment_mib = std::atoll(next("--vram-segment-mib"));
-        else if (a == "--prefill-until") o.prefill_until = std::atoll(next("--prefill-until"));
-        else if (a == "--dump-final-r") o.dump_final_r = next("--dump-final-r");
         else if (a == "--spec") o.spec = std::atoi(next("--spec"));
         else if (a == "--batch") o.batch = std::atoi(next("--batch"));
         else if (a == "--trim-stage-weights") {}   // accepted for older run configs: every split now loads only each card's layers
@@ -558,17 +501,13 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
             else o.batch_groups = std::atoi(bgv);
         }
         else if (a == "--batch-mtp") o.batch_mtp = true;
-        else if (a == "--spec-oracle") o.spec_oracle = next("--spec-oracle");
-        else if (a == "--spec-corrupt") o.spec_corrupt = std::atoi(next("--spec-corrupt"));
-        else if (a == "--spec-follow") o.spec_follow = next("--spec-follow");
-        else if (a == "--window-hashes") o.window_hashes = next("--window-hashes");
         else if (a == "--mtp") o.mtp = next("--mtp");
         else if (a == "--mtp-window") o.mtp_window = std::atoll(next("--mtp-window"));
         else if (a == "--pcie-frac") o.pcie_frac = std::atof(next("--pcie-frac"));
         else if (a == "--adapt-every") { o.adapt_every = std::atoi(next("--adapt-every")); o.adapt_every_given = true; }
         else if (a == "--adapt-decay") o.adapt_decay = strata::program::adapt_decay_checked(std::atof(next("--adapt-decay")));   // #1284: outside 0..1 -> 0.7, said
         else if (a == "--adapt-min-gain") o.adapt_min_gain = (float) std::atof(next("--adapt-min-gain"));
-        else if (a == "--adapt-async") { o.adapt_async = std::atoi(next("--adapt-async")) != 0 ? 1 : 0; o.adapt_async_given = o.adapt_async; }
+        else if (a == "--adapt-async") o.adapt_async = std::atoi(next("--adapt-async")) != 0 ? 1 : 0;
         else if (a == "--spec-min-p") o.spec_min_p = std::atof(next("--spec-min-p"));
         else if (a == "--stop-eos") o.stop_eos = true;
         else if (a == "--spec-split") o.spec_split = true;
@@ -578,31 +517,22 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         else if (a == "--pcie-mode") o.pcie_mode = next("--pcie-mode");
         else if (a == "--serve") o.serve = true;
         else if (a == "--vision") o.vision = true;
-        else if (a == "--session-save-reclaim") o.session_save_reclaim = true;
         else if (a == "--prompt-cache") o.prompt_cache = std::max(0, std::atoi(next("--prompt-cache")));
         else if (a == "--conversation-cache-mib" || a == "--conversation-cache-slots" ||
-                 a == "--conversation-cache-min-free-mib" || a == "--conversation-cache-min-tokens" ||
-                 a == "--conversation-cache-park-gain" ||
-                 a == "--session-min-free-mib" || a == "--memory-limit-mib") {
+                 a == "--conversation-cache-min-free-mib" || a == "--memory-limit-mib") {
             const std::string value = next(a.c_str());
             int64_t number = 0;
             const auto result = std::from_chars(value.data(), value.data() + value.size(), number);
-            const int64_t limit = (a == "--conversation-cache-slots" || a == "--conversation-cache-min-tokens" ||
-                                   a == "--conversation-cache-park-gain")
-                                      ? INT32_MAX : INT64_MAX / (1024 * 1024);
+            const int64_t limit = a == "--conversation-cache-slots" ? INT32_MAX : INT64_MAX / (1024 * 1024);
             if (result.ec != std::errc{} || result.ptr != value.data() + value.size() || number < 0 || number > limit) {
                 std::fprintf(stderr, "%s needs a nonnegative integer within range\n", a.c_str());
                 return 2;
             }
             if (a == "--conversation-cache-mib") o.conversation_cache_mib = number;
             else if (a == "--conversation-cache-min-free-mib") o.conversation_cache_min_free_mib = number;
-            else if (a == "--conversation-cache-min-tokens") o.conversation_cache_min_tokens = number;
-            else if (a == "--conversation-cache-park-gain") o.conversation_cache_park_gain = number;
-            else if (a == "--session-min-free-mib") o.session_min_free_mib = number;
             else if (a == "--memory-limit-mib") o.memory_limit_mib = number;
             else o.conversation_cache_slots = (int) number;
         }
-        else if (a == "--prompt-cache-tail") o.prompt_cache_tail = true;
         else if (a == "--prompt-cache-spread") o.prompt_cache_spread = true;
         else if (a == "--prompt-cache-every") o.prompt_cache_every = std::max(0LL, std::atoll(next("--prompt-cache-every")));
         else if (a == "--prompt-cache-root") o.prompt_cache_root = std::max(0LL, std::atoll(next("--prompt-cache-root")));
@@ -614,7 +544,6 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         else if (a == "--suffix-draft") o.suffix_draft = std::max(0, std::atoi(next("--suffix-draft")));
         else if (a == "--mtp-max-t") o.mtp_max_t = std::max(0, std::atoi(next("--mtp-max-t")));
         else if (a == "--lookup-max-t") o.lookup_max_t = std::max(0, std::atoi(next("--lookup-max-t")));
-        else if (a == "--lookup-sizes") o.lookup_sizes = next("--lookup-sizes");
         else if (a == "--lookup-chain") o.lookup_chain = std::clamp(std::atoi(next("--lookup-chain")), 0, 7);
         else if (a == "--lookup-chain-min") o.lookup_chain_min = std::max(3, std::atoi(next("--lookup-chain-min")));
         else if (a == "--mtp-hnorm") {
@@ -643,7 +572,6 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         }
         else if (a == "--draft-rule") o.draft_rule = next("--draft-rule");
         else if (a == "--draft-mtp-spec") { o.draft_mtp_spec = std::max(2, std::atoi(next("--draft-mtp-spec"))); o.draft_mtp_spec_set = true; }
-        else if (a == "--draft-mtp-min-p") o.draft_mtp_min_p = std::clamp(std::atof(next("--draft-mtp-min-p")), 0.0, 1.0);
         else if (a == "--draft-model") o.draft_model = next("--draft-model");
         else if (a == "--draft-fallback") {
             o.draft_fallback = next("--draft-fallback");
@@ -699,16 +627,13 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         else if (a == "--peer-reserve-mib") o.peer_reserve_mib = std::atoi(next("--peer-reserve-mib"));
         else if (a == "--peer-slots") o.peer_slots = std::atoll(next("--peer-slots"));
         else if (a == "--peer-adapt-swaps") o.peer_adapt_swaps = std::atoi(next("--peer-adapt-swaps"));
-        else if (a == "--peer-prefill-rows") o.peer_prefill_rows = std::atoll(next("--peer-prefill-rows"));
         else if (a == "--no-hit-poke") o.no_hit_poke = true;
         else if (a == "--expert-profile") o.expert_profile = next("--expert-profile");
         else if (a == "--expert-profile-save") o.expert_profile_save = next("--expert-profile-save");
-        else if (a == "--expert-profile-save-every")
-            o.expert_profile_save_min = std::atof(next("--expert-profile-save-every"));
         else if (a == "--gpu-stages") o.gpu_stages = true;
         else if (a == "--mmap-experts") o.mmap_experts = true;
         else if (a == "--shared-expert-arena") o.shared_expert_arena = next("--shared-expert-arena");
-        else if (a == "--resident-cpu-experts") o.resident_cpu_experts = o.resident_cpu_explicit = true;
+        else if (a == "--resident-cpu-experts") o.resident_cpu_experts = true;
         else if (a == "--resident-experts") take_resident_experts(o);
         else if (a == "--ram-keep-gib") {
             const double gib = std::atof(next("--ram-keep-gib"));
@@ -827,13 +752,12 @@ int apply_device_defaults(Options& o, bool paged) {
                 const char* pd = std::getenv("STRATA_GFX1151_DEFAULTS");
                 if (!(pb != nullptr && pb[0] == '1') && !(pd != nullptr && pd[0] == '0')) {
                     o.no_prefill_borrow = true;
-                    o.prefill_own_keep_chunk = true;
                 }
             }
         } else (void) cudaGetLastError();
     }
 #endif
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && !defined(STRATA_GPU_METAL) && !defined(_WIN32)
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && !defined(_WIN32)
     // Linux CUDA, 2 or more batch slots: the exact parallel-request stack is the engine's own default (QUAL-PAR bit-exact; it was the launcher's
     // PARALLEL_STACK_ENV).  Each switch keeps =0 as its off switch and a value the user set is kept.  Before any engine code reads them.
     if (!paged) {
@@ -846,7 +770,7 @@ int apply_device_defaults(Options& o, bool paged) {
                              "on Windows HIP (RX 7900 XTX: the commit charge jumped ~70 GB, exit code 0xC0000409, "
                              "#1630); 7500 and below were stable. Kept as asked; a bare --prefill auto stops at %lld\n",
                      o.prefill_cap_warn.c_str(), (long long) strata::platform::host_limits::kWinHipAutoChunkCap);
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_GPU_METAL)
+#if !defined(STRATA_USE_HIP)
     {   // CUDA sm_86 / sm_60: the switches that are exact AND faster there are on by default (strata/core/nv_defaults.hpp), when every
         // visible card has that one compute capability; before any engine code reads its switches, the user's own settings are kept
         int nd = 0;
@@ -873,7 +797,7 @@ int apply_device_defaults(Options& o, bool paged) {
         (void) cudaGetLastError();
     }
 #endif
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_GPU_METAL)
+#if !defined(STRATA_USE_HIP)
     if (o.prefill_auto_bare && o.prefill_auto_cap == 0) {
         // NVIDIA, compute capability 8.0 and up (round 0212, owner 11-03 "after the full test suite passes on it"): a bare `--prefill auto` may reach
         // 32768 instead of 8192, by the gfx12 rule below.  The fit scan still picks a smaller chunk when the expert cache cannot lend the buffers, and
@@ -892,8 +816,6 @@ int apply_device_defaults(Options& o, bool paged) {
             if (strata::core::nv_chunk_card_ok(lo_major)) {
                 o.prefill_auto_max = top;
                 o.prefill_chunk = top;
-                o.prefill_gfx12_16k = true;
-                o.prefill_raise_who = "NVIDIA";
                 std::fprintf(stderr, "strata generate: NVIDIA: --prefill auto may take chunks up to %lld (STRATA_NV_CHUNK=0 keeps 8192, =16 keeps 16384)\n", (long long) top);
             }
         }
@@ -918,7 +840,6 @@ int apply_device_defaults(Options& o, bool paged) {
             const int64_t top = strata::core::gfx12_chunk_ceiling(c0);
             o.prefill_auto_max = top;
             o.prefill_chunk = top;
-            o.prefill_gfx12_16k = true;
             std::fprintf(stderr, "strata generate: gfx12: --prefill auto may take chunks up to %lld (STRATA_GFX12_CHUNK=16 keeps 16384, =0 keeps 8192)\n", (long long) top);
         }
         (void) cudaGetLastError();

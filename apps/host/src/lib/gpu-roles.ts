@@ -38,7 +38,7 @@ export const NO_CARD_LINE = 'This engine needs a graphics card to start. Turn on
 
 const mem = (c: RoleCard) => Number(c.vram_gb) || 0;
 const speed = (c: RoleCard) => (typeof c.speed === 'number' && c.speed > 0 ? c.speed : 0);
-const shares = (c: RoleCard) => !!(c.integrated || c.uma || c.unified_gb || c.vendor === 'apple');
+const shares = (c: RoleCard) => !!(c.integrated || c.uma || c.unified_gb);
 const canRun = (c: RoleCard) => c.usable !== false;
 const rnd = (n: number) => Math.round(n);
 

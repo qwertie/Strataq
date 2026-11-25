@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-// The AVX2 / AVX-512 units (tq_avx2.cpp, tq_avx512.cpp) exist on x86-64 builds only; anything else (arm64: the Metal build)
+// The AVX2 / AVX-512 units (tq_avx2.cpp, tq_avx512.cpp) exist on x86-64 builds only; anything else (arm64)
 // runs the scalar kernel.
 #if defined(__x86_64__) || defined(_M_X64)
 #define STRATA_TQ_X86 1
@@ -160,7 +160,7 @@ bool tq_isa_ok(TqIsa isa) {
         default: return true;
     }
 #else
-    return isa == TqIsa::scalar;   // arm64 (the Metal build): the AVX units are not compiled, the scalar kernel runs
+    return isa == TqIsa::scalar;   // arm64: the AVX units are not compiled, the scalar kernel runs
 #endif
 }
 
@@ -247,7 +247,7 @@ void rows_on(TqIsa isa, int kb, const int16_t* tab, const uint8_t* w, size_t row
 }
 
 // The pair layout (types 147-149): AVX2 and AVX-512 both take the AVX2 pair kernel; scalar, and any build without the
-// x86 units (arm64: the Metal build), the scalar one.
+// x86 units (arm64), the scalar one.
 void rows_pair_on(TqIsa isa, int kb, const uint8_t* w, size_t row_bytes, int n, const tq_detail::TqAct* const* a, int nt,
                   float* const* out, int r0, int r1) {
 #if defined(STRATA_TQ_X86)

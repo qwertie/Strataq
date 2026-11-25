@@ -734,7 +734,7 @@ class CardsScreen(Base):
 
     def is_cpu_engine(self) -> bool:
         try:
-            return (self.ctx.catalog.installed_backend() or "") in ("cpu", "metal")
+            return self.ctx.catalog.installed_backend() == "cpu"
         except Exception:                                    # noqa: BLE001
             return False
 
@@ -918,7 +918,7 @@ class ContextScreen(Base):
         s = self.ctx.settings
         cat = self.ctx.catalog
         fam, model = s.family, s.model
-        self.rec = cat.max_context(fam, model, self.ctx.computer.raw) if fam and model else 32768
+        self.rec = cat.max_context(fam, model) if fam and model else 32768
         if s.context is None:
             s.context = self.rec
         self.build()

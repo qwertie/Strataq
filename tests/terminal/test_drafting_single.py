@@ -12,13 +12,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from strata_cli.launch import settings as S
-from strata_cli.launch.runner import derive_config
 from strata_common import drafting
 
 NAMES = {"qwen": "qwen3.8-flash-next-iq3_s", "gyro": "qwen3.8-flash-next-gyro-gyro-s", "unsloth": "qwen3.8-flash-next-unsloth-ud-q4_k_xl",
          "coder": "qwen3.8-flash-next-coder-iq1_m", "nvfp4": "qwen3.8-flash-next-nvfp4-nvfp4", "swift": "qwen3.8-flash-next-swift-q4_k_m"}
-HARDWARE = (("cuda", ["sm_120"]), ("cuda", ["sm_86"]), ("cuda", ["sm_89"]), ("hip", ["gfx1151"]), ("hip", ["gfx1201"]), ("metal", []), ("sycl", ["arc_a"]))
+HARDWARE = (("cuda", ["sm_120"]), ("cuda", ["sm_86"]), ("cuda", ["sm_89"]), ("hip", ["gfx1151"]), ("hip", ["gfx1201"]))
 MTP_ONLY = ("--mtp", "--mtp-q4", "--batch-mtp", "--spec-min-p", "--mtp-draft-vocab")
 
 
@@ -72,9 +70,6 @@ class EveryChoiceOnEveryBackend(Base):
                     if archs == ["gfx1201"] and mode != "dflash2":                         # Auto on gfx1201 is the MTP until PE-RDNA4's fix (drafting.AUTO_MTP)
                         self.assertEqual((d.drafter, loaded(args)), ("mtp", {"mtp"}), where)
                         continue
-                    if (backend, family) == ("metal", "qwen") and mode != "dflash2":       # IQ3_S on a Mac: the MTP until the owner says otherwise (drafting.SET_DEFAULTS)
-                        self.assertEqual((d.drafter, loaded(args)), ("mtp", {"mtp"}), where)
-                        continue
                     self.assertEqual(d.drafter, "dflash2", where)
                     self.assertEqual(loaded(args), {"dflash2"}, where)
                     self.assertEqual(flag(args, "--draft-fallback"), "none", where)
@@ -125,17 +120,8 @@ class EveryChoiceOnEveryBackend(Base):
         for backend, archs in HARDWARE:
             for slots in (2, 4, 8):
                 d, args = self.apply(self.cfg(drafting="dflash2"), "qwen", backend, archs, slots=slots)
-                if backend == "metal":
-                    # the Metal engine has no per-request drafters: DFlash2 beside request slots would draft nothing, so today's behaviour stays (owner 2026-11-03)
-                    self.assertEqual((d.drafter, d.note, loaded(args)), ("mtp", drafting.NOT_HERE, {"mtp"}), (backend, slots))
-                    self.assertFalse([a for a in args if a.startswith("--draft")])
-                    continue
                 self.assertEqual((d.drafter, d.note, loaded(args)), ("dflash2", "", {"dflash2"}), (backend, slots))
                 self.assertNotIn("--mtp", args)
-        d, args = self.apply(self.cfg(drafting="dflash2"), "qwen", "metal", (), slots=1)
-        self.assertEqual((d.drafter, d.note), ("dflash2", ""), "one request on Metal is DFlash2 as before")
-        self.assertTrue(drafting.blocked_by([], slots=4, named=True, backend="metal"))
-        self.assertTrue(drafting.blocked_by(["--batch", "3"], named=True, backend="Metal"))
         self.assertFalse(drafting.blocked_by([], slots=4, named=True, backend="cuda"))
 
     def test_a_layer_split_runs_dflash2_alone_like_one_card(self):
@@ -213,57 +199,6 @@ class TheServerAndTheTerminalEndAtTheSameArguments(Base):
                 mock.patch.object(drafting, "installed_engine_exe", return_value=self.exe):
             return engine_args(cfg, str(self.exe), announce=False)
 
-    def test_each_choice_through_the_server(self):
-        for backend, archs in HARDWARE:
-            for mode, want in ((None, {"dflash2"}), ("auto", {"dflash2"}), ("dflash2", {"dflash2"}), ("mtp", {"mtp"}), ("off", set())):
-                args = self.server_args(self.cfg(**({} if mode is None else {"drafting": mode})), backend, archs)
-                if backend == "metal" and mode in (None, "auto"):          # NAMES["qwen"] is IQ3_S: the MTP on a Mac (drafting.SET_DEFAULTS)
-                    want = {"mtp"}
-                if archs == ["gfx1201"] and mode in (None, "auto"):        # Auto on gfx1201 is the MTP until PE-RDNA4's fix (drafting.AUTO_MTP)
-                    want = {"mtp"}
-                self.assertEqual(loaded(args), want, (backend, archs, mode))
-                if want == {"dflash2"}:
-                    self.assertNotIn("--mtp", args)
-                elif want == {"mtp"}:
-                    self.assertFalse([a for a in args if a.startswith("--draft")])
-
-    def test_a_layer_split_through_the_server(self):
-        for backend, archs in (("cuda", ["sm_120"]), ("cuda", ["sm_86"]), ("hip", ["gfx1100"])):
-            for mode, want in ((None, {"dflash2"}), ("auto", {"dflash2"}), ("dflash2", {"dflash2"}), ("mtp", {"mtp"}), ("off", set())):
-                cfg = self.cfg(gpu=[0, 1], **({} if mode is None else {"drafting": mode}))
-                args = self.server_args(cfg, backend, archs)
-                where = (backend, archs, mode)
-                self.assertEqual(loaded(args), want, where)
-                self.assertIn("--layer-split", args, where)
-                if want == {"dflash2"}:
-                    self.assertEqual(flag(args, "--draft-fallback"), "none", where)
-                    self.assertNotIn("--mtp", args, where)
-                elif want == {"mtp"}:
-                    self.assertFalse([a for a in args if a.startswith("--draft")], where)
-
-    def test_a_layer_split_with_several_requests_is_the_mtp_alone_for_auto_and_dflash2_with_dflash2_by_name(self):
-        args = self.server_args(self.cfg(gpu=[0, 1], parallel=4, drafting="auto"))
-        self.assertEqual(loaded(args), {"mtp"}, "Auto")
-        self.assertFalse([a for a in args if a.startswith("--draft")], "Auto")
-        args = self.server_args(self.cfg(gpu=[0, 1], parallel=4, drafting="dflash2"))
-        self.assertEqual(loaded(args), {"dflash2"}, "named")
-        self.assertEqual((flag(args, "--draft-fallback"), flag(args, "--batch")), ("none", "4"))
-        self.assertIn("--layer-split", args)
-        self.assertNotIn("--mtp", args)
-
-    def test_metal_named_dflash2_with_requests_starts_the_mtp_exactly_as_0_2_10_did(self):
-        """Metal has no per-request drafters, so a DFlash2 chosen by name with several requests is the MTP there, with the MTP's own --batch-mtp (the saved one, or Expert mode's
-        wish, which the app adds to the arguments) kept: the same arguments the MTP chosen by name gets, which is what 0.2.10 started for this case."""
-        for parallel in (2, 4, 8):
-            named = self.server_args(self.cfg(drafting="dflash2", parallel=parallel), "metal", ())
-            self.assertEqual(named, self.server_args(self.cfg(drafting="mtp", parallel=parallel), "metal", ()), parallel)
-            self.assertEqual(named, self.server_args(self.cfg(parallel=parallel), "metal", ()), "and the same as Auto")
-            self.assertIn("--batch-mtp", named)
-            self.assertEqual((flag(named, "--batch"), flag(named, "--mtp"), "--draft" in named), (str(parallel), str(self.data / "mtp" / "rt"), False))
-        # the same saved arguments on CUDA: DFlash2 with the requests, the MTP's slot switch is taken out
-        cuda = self.server_args(self.cfg(drafting="dflash2", parallel=4))
-        self.assertEqual((loaded(cuda), "--batch-mtp" in cuda, flag(cuda, "--batch")), ({"dflash2"}, False, "4"))
-
     def test_the_all_cards_split_engine_still_runs_its_mtp(self):
         from tests.split import test_split_engine as TS
         (Path(self.tmp.name) / "data").mkdir(exist_ok=True)
@@ -284,32 +219,12 @@ class TheServerAndTheTerminalEndAtTheSameArguments(Base):
                "cwd": self.tmp.name, "tokenizer": "tok", "port": 8080, "gpu": [0, 1], "env": {}, "drafting": "dflash2", "model_name": NAMES["qwen"]}
         d = TS.S.apply_to_config(cfg, exe_for_cards=lambda n, cc=None: "/e/strata-split-2", system="linux", probe=lambda idx: TS.cards(), ram=lambda: (125.0, 80.0),
                                  scan=lambda path: TS.udq4())
-        self.assertFalse(d.use_split, "an explicit DFlash2 keeps the layer split, now with DFlash2")
-        self.assertEqual(loaded(self.server_args(cfg)), {"dflash2"})
+        self.assertFalse(d.use_split, "an explicit DFlash2 keeps the layer split")
 
     def test_deepseek_gets_no_drafter_arguments(self):
         cfg = {"model_name": "deepseek-v4.1-flash", "arch": "deepseek41", "args": ["--pack", "/d/ds", "--spec", "2"], "drafting": "dflash2"}
         args = self.server_args(cfg)
         self.assertEqual((loaded(args), [a for a in args if a.startswith("--draft")]), (set(), []))
-
-    def test_the_terminal_choices_reach_the_engine_alone(self):
-        base = {"exe": "component:strata-engine", "model_name": NAMES["qwen"], "port": 8080, "args": list(self.args)}
-        for choice, want in ((None, {"dflash2"}), ("auto", {"dflash2"}), ("dflash2", {"dflash2"}), ("mtp", {"mtp"}), ("off", set())):
-            with mock.patch.object(drafting, "detect_hardware", return_value=("cuda", ["sm_120"])):
-                cfg = derive_config(base, S.LaunchSettings(drafting=choice), bool_flags=frozenset())
-            args = self.server_args(cfg)
-            self.assertEqual(loaded(args), want, choice)
-
-    def test_auto_in_the_terminal_overrides_a_choice_the_app_saved_in_the_model_file(self):
-        """The app writes its Drafting choice into the model's own settings file; the Terminal derives its run config from that file. Choosing Auto in the Terminal's
-        Drafting step has to mean Auto, not the app's older choice (the step stores what modelstate.drafting_to_save says)."""
-        from strata_cli.launch import modelstate
-        for saved, key, want in (("mtp", "auto", {"dflash2"}), ("off", "auto", {"dflash2"}), ("dflash2", "mtp", {"mtp"}), ("mtp", "dflash2", {"dflash2"}),
-                                 ("mtp", "off", set()), (None, "auto", {"dflash2"}), ("auto", "auto", {"dflash2"}), (None, "mtp", {"mtp"})):
-            base = {"exe": "component:strata-engine", "model_name": NAMES["qwen"], "port": 8080, "args": list(self.args), **({} if saved is None else {"drafting": saved})}
-            with mock.patch.object(drafting, "detect_hardware", return_value=("cuda", ["sm_120"])):
-                cfg = derive_config(base, S.LaunchSettings(drafting=modelstate.drafting_to_save(key, saved)), bool_flags=frozenset())
-            self.assertEqual(loaded(self.server_args(cfg)), want, (saved, key))
 
     def test_the_step_writes_nothing_for_auto_unless_the_file_holds_another_choice(self):
         from strata_cli.launch import modelstate

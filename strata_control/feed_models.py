@@ -327,23 +327,6 @@ def _flash_next(setup, model) -> None:
         for key in keys.values():                        # its min_engine is about that engine, which the feed carries: the app must not compare it with the Strata engine
             setup.MODELS[key].pop("engine", None)
     setup.FAMILIES[model.id] = fam
-    _mac_entries(model, keys)
-
-
-def _mac_entries(model, keys: dict) -> None:
-    """The Mac (Metal) tables: a size of one or two files is offered like the Qwen GSQ-RCO sizes (no repack), "not measured on a Mac". More files: not offered on a Mac."""
-    try:
-        from strata_control import mac_fit
-    except Exception:                                    # noqa: BLE001
-        return
-    if any(len(q.files) > 2 for q in model.quants):
-        return
-    for q in model.quants:
-        key = keys[q.name]
-        mac_fit.MAC_MODELS[key] = {"shard1_gb": round(q.download_bytes / 1e9, 1), "tested": False, "family": model.id, "shards": len(q.files), "no_mtp": model.drafter == "none"}
-        mac_fit.MAC_ABOUT[key] = q.about or f"{q.name} quantization"
-    if model.id not in mac_fit.FEED_FAMILIES:
-        mac_fit.FEED_FAMILIES.append(model.id)
 
 
 def _own_path(setup, model) -> None:

@@ -52,7 +52,6 @@ KNOWN_UPWARD_LOADS = {
     "strata_control/calibration.py": "calls setup.py's hardware_key, runs tools/calibrate.py and strata_tokenizer.py",
     "strata_control/drafting_fetch.py": "runs tools/dflash2_pack.py to pack the downloaded drafter",
     "strata_control/engine_update.py": "upstream's engine update: reads the Terminal's launch folder, access and settings (strata_cli/launch)",
-    "strata_control/intel_app.py": "upstream's Intel app install: adopts the model with strata_cli/launch/adopt.py and its card list",
     "strata_control/setup_config.py": "setup.py's run-config lines (moved by upstream): applies tools/calibrate.py's tuned settings",
     "strata_common/engine_component.py": "upstream's engines of model shapes: strata_control/shape_engine.py (it needs "
                                           "the feed and the updater); the saved backend choice: discovery.py's settings file",

@@ -34,7 +34,8 @@ void fused_gdn_step_norm(float* state, const float* q, const float* k, const flo
                          void* stream);
 
 /// The same step with the SiLU output gate, y = rmsnorm(o) * gamma * silu(z): Qwen3.6-35B-A3B's (qwen35moe) GDN
-/// (CUDA / HIP; the SYCL port has no qwen35moe path).
+/// (CUDA / HIP).
+
 void fused_gdn_step_norm_silu(float* state, const float* q, const float* k, const float* v, const float* gate,
                               const float* beta, const float* z, const float* gamma, float eps, float* y, int h_k,
                               int h_v, void* stream);
