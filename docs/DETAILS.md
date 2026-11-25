@@ -1255,6 +1255,41 @@ What follows:
   SSD; two +46%, +56%, +24%. Each conversation is slower than alone (story 14.9 against 32.4 tok/s on the GPU), the
   total higher (52.0 against 32.4).
 
+Measured again on 2026-11-25 with every expert on the GPU (engine 0.1.59.1, a 48.75-50.74 GiB GPU pool,
+`--ram-mib 2048`, the same Strix Halo and settings otherwise). The engine reported a 1.03 GiB RAM pool after its
+other allocations. Each conversation decoded 1,024 tokens instead of 160, from
+prompts whose answers run longer than that: a five-chapter story, "Print out a JS-based game of Tetris in HTML" and a
+ten-day trip plan. **Greedy** is temperature 0, where a guess is kept only when it is the most likely token, whatever
+the draft rule. **Sampled** is `temperature=0.7 seed=1` with `--draft-rule typical`. Three rounds, medians; raw
+results in [bench/results/2026-11-25-q38-rows](../bench/results/2026-11-25-q38-rows/).
+
+| Conversations x rows | Greedy, tok/s* | Guesses kept | Sampled, tok/s* | Guesses kept |
+|---|---|---|---|---|
+| 1 x 1 (no guesses) | 28.9 / 29.2 / 28.2 | - | 30.8 / 31.1 / 31.1 | - |
+| 1 x 3 | 41.4 / 52.7 / 47.8 | 72% | 48.6 / 57.0 / 52.1 | 80% |
+| 1 x 4 | 44.1 / 58.4 / 48.4 | 65% | 49.2 / 62.1 / 55.2 | 77% |
+| 1 x 8 | 39.9 / 60.2 / 44.7 | 52% | 46.8 / 67.9 / 54.0 | 68% |
+| 2 x 2 (no guesses) | 47.8 together | - | 48.3 together | - |
+| 2 x 6 | 65.0 | 69% | 67.5 | 81% |
+| 3 x 3 (no guesses) | 60.4 | - | 59.0 | - |
+| 3 x 8 | 68.1 | 69% | 69.8 | 80% |
+
+One conversation is story / code / chat. In the greedy run's third round most configurations were 5-35% slower
+than the mean of the first two rounds. Windows Setup was running at the time. Each median uses the middle of
+three values, so the third round still supplies some of the reported values.
+
+- Without guesses, two conversations decoded 1.6-1.7 times as many tokens a second as one, and three 1.9-2.1 times.
+  A rough size estimate puts each token at about 3.5-4 GiB of dense weights (the shared expert among
+  them) and about 1 GB of routed experts (480 of about 2 MB at IQ3_S), and other conversations' tokens route to
+  experts of their own (462 different ones a row, above). Two conversations then read about 5.8 GB a step instead of
+  2 x 4.8 GB (1.7 times), three about 6.8 GB instead of 3 x 4.8 GB (2.1 times). This is an estimate from sizes,
+  not a measured byte count.
+- One conversation already reads several rows a step: its token and its guesses. Against the default of 4 rows,
+  more conversations add less: 1.1-1.5 times with two (6 rows), depending on the prompt, and hardly more with three
+  (8 rows: 68.1 against 65.0 greedy, 69.8 against 67.5 sampled).
+- With `typical`, 8-16 more guesses in a hundred are kept than greedy keeps, and one conversation with guesses was
+  6-21% faster. The runs also differed without guesses (1 x 1): the sampled run was 6-10% faster there.
+
 The defaults chosen from this: rows per step 8; lookahead 3 when the engine has the drafter (`--mtp`; before, it was 0
 unless `--lookahead` was given, so no guesses), which gives one conversation the 4 rows that measured best and several
 conversations the 8; conversations at once, initially `--batch` (or 1 without it).

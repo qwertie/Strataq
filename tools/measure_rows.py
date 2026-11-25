@@ -61,6 +61,8 @@ def main() -> None:
     ap.add_argument("--case", default="default", help="a name for where the experts live, kept in the results")
     ap.add_argument("--rounds", type=int, default=3)
     ap.add_argument("--tokens", type=int, default=1024, help="maximum tokens each conversation decodes")
+    ap.add_argument("--keys", default="", help='sampling keys every request carries, e.g. "temperature=0.7 seed=1" '
+                                               "(default: none, so greedy)")
     ap.add_argument("--only", help="configurations to run, comma-separated (default: all)")
     ap.add_argument("--out", help="the results' path without .json; the engine's output goes beside it")
     ap.add_argument("--report", nargs="+", metavar="JSON", help="print the medians of these results and exit")
@@ -86,10 +88,11 @@ def measure(a, configs: dict, extra: list[str]) -> None:
     prompts = {k: tok.encode(f"<|im_start|>user\n{text}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
                              parse_special=True) for k, text in PROMPTS.items()}
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
-    e = Engine([a.exe or cfg["exe"], "--serve", *args], cfg.get("cwd"), env, a.out)
+    e = Engine([a.exe or cfg["exe"], "--serve", *args], cfg.get("cwd"), env, a.out, a.keys.split())
     e.until("READY")
     wait_for_experts(e.ask_memory)
-    out = {"case": a.case, "args": args, "tokens": a.tokens, "memory_at_start": e.ask_memory(), "rounds": []}
+    out = {"case": a.case, "args": args, "keys": a.keys, "tokens": a.tokens,
+           "memory_at_start": e.ask_memory(), "rounds": []}
     print("warm-up", flush=True)
     for name in configs:
         run_config(e, prompts, configs[name], 24)
@@ -184,7 +187,8 @@ class Engine:
     """An engine started with --serve: its stdout lines one by one (copied to <out>.out), its stderr in
     <out>.out.stderr."""
 
-    def __init__(self, cmd: list[str], cwd: str | None, env: dict, out: str):
+    def __init__(self, cmd: list[str], cwd: str | None, env: dict, out: str, keys: list[str]):
+        self.keys = keys   # the sampling keys (key=value) every RUN carries
         self.err_path = out + ".out.stderr"
         self.p = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=open(self.err_path, "w", encoding="utf-8"), text=True, encoding="utf-8",
@@ -273,7 +277,7 @@ class Engine:
     def run(self, ids: list[int], n: int) -> str:
         """Sends a RUN of up to `n` tokens after the prompt `ids` and gets its request id."""
         rid = f"r{next(self.ids)}"
-        self.send(f"RUN {rid} {n} {','.join(map(str, ids))}")
+        self.send(" ".join(["RUN", rid, str(n), *self.keys, ",".join(map(str, ids))]))
         return rid
 
     def err_size(self) -> int:

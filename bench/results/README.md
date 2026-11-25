@@ -4,7 +4,7 @@ Raw results and short reports from measurement runs, one folder per run, named b
 the Strata version, hardware and method of its own day, and none is a statement about a later release. Current numbers are in the
 [docs](../../docs/README.md) and the [README](../../README.md); how to measure is in [BENCHMARK_PROTOCOL.md](../../docs/BENCHMARK_PROTOCOL.md).
 
-This page is built by `python tools/bench_results_index.py` (`--check` fails when a folder is missing from it). 142 folders and 3 loose files, 2185 files in all.
+This page is built by `python tools/bench_results_index.py` (`--check` fails when a folder is missing from it). 148 folders and 3 loose files, 2270 files in all.
 
 
 ## 2026-09
@@ -158,6 +158,22 @@ This page is built by `python tools/bench_results_index.py` (`--check` fails whe
 | [2026-10-12-p40-sm61-kernels](2026-10-12-p40-sm61-kernels/) | Tesla P40 (sm_61): wide dequantization, the dense GEMMs as cublasSgemm (opt-in), expert mode 8 and a matvec table (2026-10-12) | 16 |
 | [2026-10-20-0.2.1-bench](2026-10-20-0.2.1-bench/) | First real strata bench run on the released 0.2.1 (terminal 0.2.1, engine 0.1.46 cuda12 Linux packages) | 43 |
 | [2026-10-20-0.2.1-idle-gpu](2026-10-20-0.2.1-idle-gpu/) | The idle GPUs (proposal 2507-0): what the existing switches do on NVIDIA | 15 |
+
+## 2026-11
+
+| Folder | What | Files |
+| --- | --- | ---: |
+| [2026-11-03-q38-realistic](2026-11-03-q38-realistic/) | Qwen3.8 IQ3_S with all experts on the GPU | 13 |
+| [2026-11-04-ds41-realistic](2026-11-04-ds41-realistic/) | DeepSeek realistic pools, 4 November 2026 | 4 |
+| [2026-11-05-ds41-drafting](2026-11-05-ds41-drafting/) | DeepSeek batched DSpark drafting, 5 November 2026 | 4 |
+| [2026-11-05-old-local-vs-new](2026-11-05-old-local-vs-new/) | Old local versus new engines, 5 November 2026 | 7 |
+| [2026-11-25-q38-rows](2026-11-25-q38-rows/) | strata-q38: conversations at once and rows per step, 25 November 2026 | 3 |
+
+## undated
+
+| Folder | What | Files |
+| --- | --- | ---: |
+| [ds41-groups-20261104](ds41-groups-20261104/) | DeepSeek shared pipeline groups, 4 November 2026 | 54 |
 
 ## Loose files
 
