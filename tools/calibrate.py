@@ -234,11 +234,14 @@ def run(cfg: dict, say=print, start_engine=None, *, progress=None, cancel_event=
     import strata_tokenizer as ST
     tok = ST.load_folder(cfg["tokenizer"])
     ids_list = [chat_ids(tok, p) for p in PROMPTS]
+    from strata_common import paged_launch
+    measure_workers = not paged_launch.is_paged_engine(cfg)
     if progress is None and cancel_event is None:
         return measure(engine_args(cfg), ids_list, start_engine, say, host_worker_extras(), doc_prompt(tok),
-                       hip=cfg.get("backend") == "hip")
+                       hip=cfg.get("backend") == "hip", measure_workers=measure_workers)
     return measure(engine_args(cfg), ids_list, start_engine, say, host_worker_extras(), doc_prompt(tok),
-                   hip=cfg.get("backend") == "hip", progress=progress, cancel_event=cancel_event)
+                   hip=cfg.get("backend") == "hip", measure_workers=measure_workers,
+                   progress=progress, cancel_event=cancel_event)
 
 
 def engine_args(cfg: dict) -> list[str]:
@@ -295,7 +298,11 @@ def sweep(s, values: list, base_tune: dict, key: str, label: str, say,
 
 
 def measure(base_args: list[str], ids_list, start_engine, say=print, extra_workers=(), long_prompt=None, hip: bool = False,
-            *, progress=None, cancel_event=None) -> dict:
+            *, progress=None, cancel_event=None, measure_workers: bool = True) -> dict:
+    """Compares hardware settings against the default using interleaved trials.
+
+    `measure_workers` is false for paged engines, which ignore --pool-workers.
+    """
     t0 = time.time()
     report: dict = {}
     _check_cancel(cancel_event)
@@ -307,7 +314,7 @@ def measure(base_args: list[str], ids_list, start_engine, say=print, extra_worke
         info = dict(getattr(eng, "info", {}) or {})
         d_pcie = float(info.get("pcie_frac", 0.55))
         d_minp = float(info.get("spec_min_p", 0.5))
-        d_workers = int(info.get("pool_workers", 0)) or None
+        d_workers = (int(info.get("pool_workers", 0)) or None) if measure_workers else None
         s = Session(eng, ids_list, cancel_event)
         s.warm_up()
         _progress(progress, "loading", 1, 1)

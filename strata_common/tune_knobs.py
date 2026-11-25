@@ -50,8 +50,7 @@ BOOL_FLAGS = frozenset({"--kv-grow", "--no-host-worker", "--no-pool", "--mmap-ex
                         "--resident-experts", "--prompt-cache-tail", "--vram-elastic", "--split-skip-if-fits",
                         "--resident-cpu-experts", "--no-hit-poke", "--expert-cache-per-layer", "--batch-mtp"})
 
-#: Flags of BOOL_FLAGS that strata-dsv41 (DeepSeek) reads with a word: ``--mmap-experts on|off|auto`` (src/dsv41/ds4_main.cpp). A bare one there takes the
-#: next argument as its word, or stops the engine ("--mmap-experts needs a value") when it is last. Qwen's engine takes it as a bare switch (#5027).
+#: DeepSeek mmap choices are words when merging saved configs; paged launch filters unsupported flags.
 DSV41_WORD_FLAGS = frozenset({"--mmap-experts"})
 
 

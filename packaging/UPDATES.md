@@ -232,9 +232,8 @@ package) under their absolute upstream URLs. The desktop app is not part of the 
   upstream's for the same reason. `--sequence` must be above every sequence a PC may have accepted from upstream's feed (124 on
   2026-11-09): the fork's first feed uses 1000 and counts up. A PC that accepted the fork's feed refuses upstream's afterwards (a lower
   sequence).
-* **Packages.** Rebuilt Qwen3.8 packages carry strata and strata-q38; rebuilt DeepSeek packages carry strata-dsv41
-  and strata-ds41. Setup asks which one runs a model (`--engine original|new`), defaulting to New. Packages without a new
-  program keep the original. Windows AMD: `tools\hip\build_release.py` per variant
+* **Packages.** Qwen packages carry strata-q38 and strata-q36; DeepSeek packages carry strata-ds41.
+  Setup selects the program for the chosen model family. Windows AMD: `tools\hip\build_release.py` per variant
   (`STRATA_HIP_ARCHS`: rdna3 = gfx1100;gfx1101;gfx1102;gfx1151, rx9070 = gfx1200;gfx1201, rdna2 = gfx1030;gfx1031), then
   `package_engine.py --variant <name>`; the rdna3 build also yields the Windows AMD DeepSeek package. Linux: `packaging/build_hip_linux.sh`
   and `build_cuda_linux.sh` in an Ubuntu 22.04 environment (the packages must run on 22.04's glibc), `build_dsv41_*.sh` for DeepSeek.

@@ -293,8 +293,8 @@ _test_start = dsv41_paths.test_start       # (a module attribute of its own: tes
 def upgrade(dest: Path, source: str, *, installed: Path | None = None, hardware: dict | None = None,
             emit: Callable[[str], None] = print, cancel=None) -> Path | None:
     """The installed DeepSeek engine package in `dest` (engine-dsv41/) is older than the signed feed's `dsv41` member for this PC: fetch the newer one,
-    check it as `install` does (signature, hashes, every file), put it NEXT TO the old one, start it once (`--version`), and only then use it (the older
-    packages are kept).  Returns the new strata-ds41, or None: nothing newer, the feed cannot be read (silent: a launch never waits on the
+    check it as `install` does (signature, hashes, every file), put it NEXT TO the old one, start it once without model
+    arguments, and only then use it (the older packages are kept).  Returns the new strata-ds41, or None: nothing newer, the feed cannot be read (silent: a launch never waits on the
     network), or the newer one could not be installed (one plain line, the installed engine keeps running).  Versions compare numerically
     (0.1.49 < 0.1.49.1).  Older packages stay installed until the person deletes them (Settings > Engine)."""
     from strata_control import feed as feedmod, updater

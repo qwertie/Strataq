@@ -8501,9 +8501,7 @@ def install_dsv41(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopted, 
                  (f"the files in {folder} look cut short or were changed while the pack was made: run setup again (it checks them), or copy the whole files in again"
                   if "missing or too short" in reason else f"delete {pack} and run setup again"))
         ok(f"pack: {pack} (checked: every file the engine needs is there)")
-        # TODO(delete-old-engines): setup asked the model a short test question here through strata-dsv41's one-shot
-        # --ids mode (tools/dsv41/smoke.py), which strata-ds41 does not have; a test through the serve protocol could
-        # replace it.
+        # Pack checks validate file layout only. Inference validation needs a test through the serve protocol.
     else:
         ok(f"pack: {pack}")
     if dsv41_context.problem(ctx, dsv41_context.read_limit(pack)):       # the pack's own limit (ds4.txt) is the last word; no file, no limit

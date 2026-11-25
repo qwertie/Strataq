@@ -21,7 +21,6 @@ from strata_cli.launch import settings as S
 from strata_cli.launch import store
 from strata_cli.launch.catalog import Catalog
 from strata_cli.launch.runner import Runner
-from strata_common import dsv41_flags
 from strata_control import dsv41_parallel
 from tests.terminal.launch_support import HW_12, Home, catalog, run_cli
 
@@ -183,50 +182,6 @@ class RiskyPicksWarnNeverRefuse(Base):
         self.assertEqual(w, [])
 
 
-class TheEngineInUse(Base):
-    def _cfg(self):
-        return {"arch": "deepseek41", "exe": "/x/engine-dsv41/0.1.55-linux/strata-dsv41", "args": ["--pack", "/p"], "parallel": 4}
-
-    def _runner(self, parallel):
-        s = S.LaunchSettings(family="deepseek41", model="IST-DAS-2.25bpw", context=8192, tune="skip", parallel=parallel)
-        return s, Runner(s, catalog=catalog(self.hw))
-
-    def test_an_engine_from_before_the_flag_is_asked_and_the_launch_goes_on_one_at_a_time(self):
-        s, r = self._runner(4)
-        with mock.patch.object(dsv41_flags, "takes_parallel", return_value=False):
-            r.gate_parallel(self._cfg())
-        self.assertTrue(r.parallel_dropped)
-        self.assertTrue(any("is from before --parallel" in n for n in r.notices), r.notices)
-        self.assertEqual(s.parallel, 4)                              # the person's choice stays in the preset
-
-    def test_a_current_engine_or_an_engine_that_cannot_be_asked_goes_on(self):
-        for answer in (True, None):
-            _s, r = self._runner(4)
-            with mock.patch.object(dsv41_flags, "takes_parallel", return_value=answer):
-                r.gate_parallel(self._cfg())
-            self.assertFalse(r.parallel_dropped, answer)
-            self.assertEqual(r.notices, [])
-
-    def test_without_the_flag_the_engine_is_not_even_asked(self):
-        _s, r = self._runner(None)
-        with mock.patch.object(dsv41_flags, "takes_parallel", side_effect=AssertionError("asked")):
-            r.gate_parallel(self._cfg())
-        self.assertFalse(r.parallel_dropped)
-
-    def test_takes_parallel_reads_the_usage_text(self):
-        usage_old = "maya-ds4 --pack <model>/maya-ds4 [--gpus 0,1] (--ids I,J | --serve | --pack-info)\n"
-        usage_new = usage_old.replace("(--ids", "[--parallel N] (--ids")
-        for n, (text, want) in enumerate(((usage_old, False), (usage_new, True), ("segfault", None))):
-            exe = Path(self.home.base) / f"e{n}" / "strata-dsv41"
-            exe.parent.mkdir()
-            exe.write_text("x" * (n + 1), encoding="utf-8")
-            with mock.patch("subprocess.run", return_value=mock.Mock(stdout="", stderr=text, returncode=0)) as run:
-                self.assertIs(dsv41_flags.takes_parallel(exe), want, text)
-                self.assertIs(dsv41_flags.takes_parallel(exe), want, text)
-                self.assertEqual(run.call_count, 1)                  # asked once per file
-                self.assertEqual(run.call_args[0][0], [str(exe), "--help"])
-        self.assertIsNone(dsv41_flags.takes_parallel(Path(self.home.base) / "no" / "such" / "strata-dsv41"))
-
 class SavedAndRestarted(Base):
     def test_a_saved_preset_keeps_the_number(self):
         store.save(S.LaunchSettings(name="Agents", family="deepseek41", model="IST-DAS-2.25bpw", context=32768, parallel=4, tune="skip"))
@@ -273,16 +228,6 @@ class SavedAndRestarted(Base):
             prof, _rev = profiles.load(r.profile)
             self.assertEqual((prof.get("overrides") or {}).get("parallel"), want)
 
-    def test_an_old_engine_leaves_the_override_out_of_the_profile(self):
-        from strata_common import profiles
-        cfgfile = Path(self.home.base) / "cfg.json"
-        cfgfile.write_text(json.dumps({"arch": "deepseek41", "exe": "/x/strata-dsv41", "tokenizer": "/p/tokenizer", "args": ["--pack", "/p"], "model_name": "m"}), encoding="utf-8")
-        s = S.LaunchSettings(family="deepseek41", model="IST-DAS-2.25bpw", context=8192, tune="skip", parallel=4)
-        r = Runner(s, catalog=catalog(self.hw))
-        r.parallel_dropped = True
-        r.ensure_profile(cfgfile)
-        prof, _rev = profiles.load(r.profile)
-        self.assertNotIn("parallel", prof.get("overrides") or {})
 
 
 if __name__ == "__main__":

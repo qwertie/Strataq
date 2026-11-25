@@ -343,8 +343,8 @@ class Calibrate(unittest.TestCase):
     def test_run_measures_with_the_servers_args(self):
         seen = []
         saved = CAL.measure
-        CAL.measure = lambda args, ids_list, start_engine, say=print, extra=(), long_prompt=None, hip=False: (
-            seen.append((args, hip)) or {})
+        CAL.measure = lambda args, *a, **kw: (
+            seen.append((args, kw.get("hip"), kw.get("measure_workers"))) or {})
         fake = type("ST", (), {"load_folder": lambda *a: type("T", (), {"encode": lambda s, t, **k: [0]})()})
         try:
             with mock.patch.dict(sys.modules, {"strata_tokenizer": fake}):
@@ -352,7 +352,17 @@ class Calibrate(unittest.TestCase):
                 CAL.run({"tokenizer": "tok", "args": list(BASE), "gpu": [0], "backend": "hip"}, start_engine=lambda a: None)
         finally:
             CAL.measure = saved
-        self.assertEqual(seen, [(BASE, False), (BASE, True)])         # the shared-expert step runs on AMD only
+        self.assertEqual(seen, [(BASE, False, False), (BASE, True, False)])
+
+    def test_paged_engine_skips_unsupported_worker_trials(self):
+        starts = []
+        result = CAL.measure(
+            BASE, [[1, 2, 3]] * 3,
+            lambda args: FakeEngine(args, lambda f, p, w: 50.0, starts=starts),
+            say=lambda *_: None, measure_workers=False)
+        self.assertNotIn("workers", result["report"])
+        self.assertNotIn("--pool-workers", result["settings"])
+        self.assertTrue(all("--pool-workers" not in args for args in starts))
 
     def test_engine_error(self):
         with tempfile.TemporaryDirectory() as d:

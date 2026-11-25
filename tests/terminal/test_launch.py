@@ -492,7 +492,11 @@ class AdoptRules(unittest.TestCase):
             self.assertEqual(a[a.index("--kv") + 1], "int8")
             self.assertIn("--ple-gguf", a)
             self.assertIn("--mtp", a)
-            self.assertEqual((cfg["exe"], cfg["backend"]), ("component:strata-engine", "cuda"))
+            from strata_common.engine_client import engine_args
+            argv = engine_args(cfg)
+            self.assertEqual(argv[argv.index("--lookahead") + 1], "4")
+            self.assertNotIn("--spec", argv)
+            self.assertEqual((cfg["exe"], cfg["backend"]), ("component:strata-engine/strata-q38", "cuda"))
             self.assertTrue(cfg["tokenizer"].endswith("tokenizer"))
 
     def test_plan_names_what_is_missing(self):

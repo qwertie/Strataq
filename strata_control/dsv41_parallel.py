@@ -1,19 +1,14 @@
-"""DeepSeek-V4.1-Flash `--parallel N`: several conversations answered at the same time.  What it does, what was measured, and what has not been run.
+"""Provides DeepSeek conversation-count guidance for the Terminal and app.
 
-Off by default: no flag means requests take turns, exactly as before.  The engine side is `strata-dsv41 --parallel N` (src/dsv41, from Project Maya's
-#332): N conversations each with their own attention memory, decoded together in one pass.  Strata's server maps the config key "parallel" to it
-(serve/server.py parallel_args); `strata launch --parallel N`, a saved preset, the app's Expert setting "Concurrent requests" and `strata serve
---parallel N` all end there.
-
-Pure functions, no I/O.  Recommend, never force: nothing here refuses a number or a computer; the engine itself runs fewer conversations when the
-graphics memory holds fewer (ds4_model.cu alloc_seqs, said in its log), and 8 is the most it takes.  Numbers only, no verdict words: they are
-measured figures and the person decides.
+The server maps the config's "parallel" key to strata-ds41's --batch option. Memory estimates and hardware
+warnings here use per-session engine measurements; they need validation against the paged engine before they
+can describe its capacity. These functions perform no I/O and recommend rather than enforce a limit.
 """
 
 from __future__ import annotations
 
 
-MAX_CONVERSATIONS = 8      # the engine's limit (ds4_main.cpp: --parallel takes 1 to 8)
+MAX_CONVERSATIONS = 8      # the largest conversation count covered by these measurements
 
 # Graphics memory one extra conversation keeps (its own window rings, compressor state and KV index), in GB: a + b * context tokens.
 # Measured from the engine's own line "ds4: --parallel N: ... (X GB more VRAM for the other N-1 ...)" on 2 RTX A6000, UD-IQ1_M pack:

@@ -1215,8 +1215,8 @@ def is_reference(value: object) -> bool:
 def expand(value: str, cfg: dict | None = None, *, root: Path | None = None, full: bool = True) -> str:
     """The engine path for `value`: unchanged when it is a path, resolved when it is a component reference. This is the
     start path, so every file's SHA-256 is checked (`full`): a changed file refuses the start instead of running.  A
-    reference to another program of the Strata engine's package ("component:strata-engine/strata-q38", setup's
-    --engine new) resolves to that program beside the entry point."""
+    reference to another program of the Strata engine's package ("component:strata-engine/strata-q36") resolves
+    to that program beside the entry point."""
     if not is_reference(value):
         return value
     name, separator, program = value[len(REFERENCE_PREFIX):].partition("/")
@@ -1241,8 +1241,8 @@ def expand(value: str, cfg: dict | None = None, *, root: Path | None = None, ful
     chosen = exe.with_name(program + exe.suffix)
     relative = chosen.relative_to(component.root).as_posix()
     if relative not in {rel for rel, _, _ in component.files}:
-        raise EngineMissing(f"the installed engine package has no {program}: `strata update` fetches one that has "
-                            "it, or set up the model again with --engine original", root or components_dir())
+        raise EngineMissing(f"the installed engine package has no {program}: run `strata update`",
+                            root or components_dir())
     return str(chosen)
 
 

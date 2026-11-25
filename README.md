@@ -10,12 +10,12 @@ on its own engine, as in upstream.
 
 ## What is new in Strataq
 
-- **One engine core for every model and GPU.** The code was reorganized into layers ([ARCHITECTURE.md](docs/ARCHITECTURE.md)),
-  so Qwen3.8 and DeepSeek V4.1 run on one shared engine (the "paged engine"), and NVIDIA (CUDA) and AMD (HIP) builds
-  compile the same sources. A fix in the shared part reaches every model.
+- **A shared engine core for Qwen3.8 and DeepSeek.** The code was reorganized into layers
+  ([ARCHITECTURE.md](docs/ARCHITECTURE.md)), so Qwen3.8 and DeepSeek V4.1 run on one shared engine (the "paged
+  engine"), and NVIDIA (CUDA) and AMD (HIP) builds compile the same sources. A fix in the shared part reaches every model.
 - **Conversations take memory as they grow.** Upstream reserves memory for a whole context window per conversation.
   Strataq's engines keep conversations in pages of a pool that they share with the experts. Several conversations
-  decode in one step, so the total speed rises with each one you add. On an AMD Ryzen AI Max+ 395 (Strix Halo, Windows,
+  decode in one step, which can increase total throughput. On an AMD Ryzen AI Max+ 395 (Strix Halo, Windows,
   Qwen3.8 IQ3_S, no drafting), one conversation decoded at 33.4 tokens/s and three at once at 63.7 tokens/s in total
   ([measurements](bench/results/2026-11-05-old-local-vs-new/README.md)).
 - **Conversations are paused, not dropped.** A conversation that is not decoding moves down to RAM and then the SSD,

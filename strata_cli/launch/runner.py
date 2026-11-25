@@ -1649,7 +1649,6 @@ class Runner:
         self.apply_four_card(cfg)
         self.use_own_dsv41_engine(cfg)
         self.apply_split_engine(cfg)
-        self.gate_parallel(cfg)
         apply_experts(cfg, self.experts_flag(cfg.get("exe")))   # after the engine is settled: only a 0.1.50+ engine is given --experts
         wait = self.start_wait()
         if wait > 600 and not cfg.get("engine_ready_s"):     # the server's own wait for the engine (900 s) must not end before the start's
@@ -1722,21 +1721,6 @@ class Runner:
         self.notices.append(text)
         self.emit("config", text, None)
 
-    def gate_parallel(self, cfg: dict) -> None:
-        """DeepSeek `--parallel N` and the engine this launch will run (settled just above, a self-upgrade included): an engine package from before the
-        flag stops at its start on it, so it is asked (`--help` names the flag) and, when it cannot, the launch goes on one at a time and says so in
-        one line.  The choice stays in the preset.  Unknown (the engine could not be asked): the flag is passed on, as for any engine."""
-        self.parallel_dropped = False
-        if cfg.get("arch") != "deepseek41" or not (self.s.parallel and self.s.parallel > 1):
-            return
-        from strata_common import dsv41_flags
-        if dsv41_flags.takes_parallel(cfg.get("exe")) is False:
-            self.parallel_dropped = True
-            text = (f"This DeepSeek engine ({Path(str(cfg.get('exe'))).parent.name or 'installed'}) is from before --parallel, so it answers one request at "
-                    f"a time and --parallel {self.s.parallel} is not used. Update the engine with `strata update` and start again to answer several at once.")
-            self.notices.append(text)
-            self.emit("config", text, None, level="warn")
-
     def apply_four_card(self, cfg: dict) -> None:
         """Four Radeon AI PRO R9700 cards and Qwen3.8-Flash-Next IQ3_S: the measured serving profile (strata_control/amd_four_card.py), filled
         in where the person chose nothing. Never stops a launch."""
@@ -1760,8 +1744,6 @@ class Runner:
         from strata_common import profiles
         name = self.profile
         parallel = self.s.parallel if self.s.parallel else (getattr(self, "four_card_parallel", None) or self.catalog_parallel())
-        if getattr(self, "parallel_dropped", False):         # DeepSeek: the engine in use is from before the flag (gate_parallel)
-            parallel = None
         if parallel and not self.s.parallel and self.one_request_for_dflash2(config):
             parallel = None                                  # the slots Strata fills in by itself would keep the MTP: DFlash2 answers one request at a time
         if parallel and self.run_config_owns_slots(config):

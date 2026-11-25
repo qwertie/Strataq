@@ -2,7 +2,8 @@
 
 When setup stops because its card probe did not answer, and the model's files AND its prepared pack are already on disk (a box that was
 prepared before, "use model files I already have"), the run config is simple enough to write here: the same arguments setup writes for the GSQ-RCO models,
-with the engine named as the component (`component:strata-engine`). Nothing is downloaded, prepared or compiled; if a file is missing the person is told which.
+with the engine named as `component:strata-engine/strata-q38`. Nothing is downloaded, prepared or compiled;
+if a file is missing the person is told which.
 
 Only the GSQ-RCO families (qwen, swift, coder) and Gyro (one GGUF with its n-gram table inside) are adopted this way; images stay off.
 """
@@ -49,7 +50,6 @@ def plan(*, family: str, model: str, model_dir: Path, data_dir: Path, src: Path,
     packs/ (default the model's name in lower case; Gyro's is its tag, gyro-gyro-s)."""
     problems: list[str] = []
     if family not in FAMILIES:
-        # no full stop: the caller joins the problems with "; " and ends the sentence (a "gyro.." came out of the old text, round 8, N11)
         return None, [f"Strata can write the settings itself only for the Qwen3.8-Flash-Next, Swift, Coder and Gyro files, not for {family}"]
     shards = find_single(model_dir) if family == "gyro" else find_shards(model_dir)
     if not shards:
@@ -70,11 +70,13 @@ def plan(*, family: str, model: str, model_dir: Path, data_dir: Path, src: Path,
     args = ["--pack", str(pack), "--native", str(shards[0])]
     if family != "unsloth" and (len(shards) > 1 or family == "gyro"):            # Gyro's one file holds the n-gram table too
         args += ["--ple-gguf", str(shards[-1])]      # (Unsloth's 3-6 shards: the engine finds the n-gram table by its tensor name, as setup.py writes the config; it is shard 2, 3 or the last one by set)
-    args += ["--expert-profile", str(profile), "--expert-cache", "auto", "--prefill", "auto", "--spec", "4", "--spec-min-p", "0.5"]
+    args += ["--expert-profile", str(profile), "--expert-cache", "auto", "--prefill", "auto",
+             "--lookahead", "4", "--spec-min-p", "0.5"]
     if mtp.exists():
         args += ["--mtp", str(mtp)]
     args += ["--max-context", str(context), "--kv", kv or ("int8" if context > 8192 else "fp16")]
-    cfg = {"exe": "component:strata-engine", "args": args, "cwd": str(src), "tokenizer": str(tokenizer), "model_name": model_name,
+    cfg = {"exe": "component:strata-engine/strata-q38", "args": args, "cwd": str(src),
+           "tokenizer": str(tokenizer), "model_name": model_name,
            "log": str(log), "lib_dirs": [], "port": 8080}
     if backend:
         cfg["backend"] = backend
