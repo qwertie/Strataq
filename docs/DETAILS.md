@@ -1272,9 +1272,16 @@ results in [bench/results/2026-11-25-q38-rows](../bench/results/2026-11-25-q38-r
 | 2 x 2 (no guesses) | 47.8 together | - | 48.3 together | - |
 | 2 x 6 | 65.0 | 69% | 67.5 | 81% |
 | 3 x 3 (no guesses) | 60.4 | - | 59.0 | - |
+| 3 x 6 | 66.7 | 77% | 71.5 | 88% |
 | 3 x 8 | 68.1 | 69% | 69.8 | 80% |
+| 4 x 6 | 70.4 | 81% | 70.9 | 87% |
+| 4 x 7 | 71.3 | 78% | 73.0 | 90% |
+| 4 x 8 | 73.2 | 77% | 75.1 | 88% |
 
-One conversation is story / code / chat. In the greedy run's third round most configurations were 5-35% slower
+One conversation is story / code / chat. The 3 x 6 row and the 4 x rows were measured later the same day in runs of
+their own, with a 48.75 GiB GPU pool. The 3 x 6 row's first greedy round ran before the computer's fans were back on
+full and was 9% slower than the other two. The 4 x rows add a fourth prompt, a beginner's guide to sourdough bread,
+and room for four conversations in VRAM (`--batch 4 --concurrent 4 --vram-conversations 4`). In the greedy run's third round most configurations were 5-35% slower
 than the mean of the first two rounds. Windows Setup was running at the time. Each median uses the middle of
 three values, so the third round still supplies some of the reported values.
 
@@ -1286,7 +1293,10 @@ three values, so the third round still supplies some of the reported values.
   not a measured byte count.
 - One conversation already reads several rows a step: its token and its guesses. Against the default of 4 rows,
   more conversations add less: 1.1-1.5 times with two (6 rows), depending on the prompt, and hardly more with three
-  (8 rows: 68.1 against 65.0 greedy, 69.8 against 67.5 sampled).
+  (66.7 greedy and 71.5 sampled at 6 rows, 68.1 and 69.8 at 8 rows, against 65.0 and 67.5 for two). Four reached
+  73.2 greedy and 75.1 sampled at 8 rows, 5-7% more than three's best and the most of any setup. With three
+  conversations, 6 rows gave each one guess a step, and more of them were kept than at 8 rows (77% against 69%
+  greedy, 88% against 80% sampled); sampled, that made 6 rows the faster of the two.
 - With `typical`, 8-16 more guesses in a hundred are kept than greedy keeps, and one conversation with guesses was
   6-21% faster. The runs also differed without guesses (1 x 1): the sampled run was 6-10% faster there.
 

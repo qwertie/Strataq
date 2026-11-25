@@ -4,7 +4,7 @@ Raw results and short reports from measurement runs, one folder per run, named b
 the Strata version, hardware and method of its own day, and none is a statement about a later release. Current numbers are in the
 [docs](../../docs/README.md) and the [README](../../README.md); how to measure is in [BENCHMARK_PROTOCOL.md](../../docs/BENCHMARK_PROTOCOL.md).
 
-This page is built by `python tools/bench_results_index.py` (`--check` fails when a folder is missing from it). 148 folders and 3 loose files, 2270 files in all.
+This page is built by `python tools/bench_results_index.py` (`--check` fails when a folder is missing from it). 148 folders and 3 loose files, 2274 files in all.
 
 
 ## 2026-09
@@ -167,7 +167,7 @@ This page is built by `python tools/bench_results_index.py` (`--check` fails whe
 | [2026-11-04-ds41-realistic](2026-11-04-ds41-realistic/) | DeepSeek realistic pools, 4 November 2026 | 4 |
 | [2026-11-05-ds41-drafting](2026-11-05-ds41-drafting/) | DeepSeek batched DSpark drafting, 5 November 2026 | 4 |
 | [2026-11-05-old-local-vs-new](2026-11-05-old-local-vs-new/) | Old local versus new engines, 5 November 2026 | 7 |
-| [2026-11-25-q38-rows](2026-11-25-q38-rows/) | strata-q38: conversations at once and rows per step, 25 November 2026 | 3 |
+| [2026-11-25-q38-rows](2026-11-25-q38-rows/) | strata-q38: conversations at once and rows per step, 25 November 2026 | 7 |
 
 ## undated
 

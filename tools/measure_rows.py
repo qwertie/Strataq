@@ -1,8 +1,8 @@
 """tools/measure_rows.py - strata-q38's decode speed by conversations at once and rows per step (docs/DETAILS.md,
 "Rows per step, lookahead and conversations at once"; docs/MEMORY_MANAGER_PLAN.md, step M7).
 
-One engine start runs every configuration (conversations at once x rows per step, with a lookahead) on story, code and
-chat prompts, changing the settings live between them (CHANGE_SETTINGS); each round runs them all, the order
+One engine start runs every configuration (conversations at once x rows per step, with a lookahead) on story, code,
+chat and guide prompts, changing the settings live between them (CHANGE_SETTINGS); each round runs them all, the order
 reversed every other round, after an unrecorded warm-up round that captures the verify windows' graphs.  Where the
 experts live is set by the engine's arguments: run it once per memory case.
 
@@ -10,8 +10,9 @@ experts live is set by the engine's arguments: run it once per memory case.
         --out results/rows-ram -- --gpu-mib 20480
 
 `--config`: a run config (strata-<model>.json: the model's arguments, the environment, the library folders, the
-tokenizer); its arguments are used as they are (they need --mtp, the drafter), with capacity for 3 conversations,
-8 rows and no suffix drafting added, and `--vision` left out.  The arguments after `--` go last (they win).
+tokenizer); its arguments are used as they are (they need --mtp, the drafter), with capacity for the configurations'
+most conversations, 8 rows and no suffix drafting added, and `--vision` left out.  The arguments after `--` go last
+(they win).
 `--report A.json B.json ...` prints the medians of earlier runs as Markdown tables instead.
 
 A conversation alone decodes each prompt (one RUN, its rate from the engine's DONE line); several are sent at once
@@ -46,12 +47,15 @@ PROMPTS = {
     "code": "Print out a JS-based game of Tetris in HTML.",
     "chat": "Plan a ten-day trip through Portugal by train, from Lisbon to Porto, day by day: where to stay, what to "
             "see, where to eat, travel times and a budget per day.",
+    "guide": "Write a beginner's guide to baking sourdough bread at home: making the starter, mixing, folding, "
+             "shaping, proofing and baking, a weekly schedule, and how to fix the ten most common problems.",
 }
 KINDS = list(PROMPTS)
-# Name: (conversations at once, rows per step, lookahead).  Several conversations take story, code and chat in turn;
+# Name: (conversations at once, rows per step, lookahead).  Several conversations take the first prompts in order;
 # 1x3 against 3x3 and 1x8 against 3x8 compare guesses with other conversations' tokens at the same rows.
 CONFIGS = {"1x1": (1, 1, 0), "1x3": (1, 3, 2), "1x4": (1, 4, 3), "1x8": (1, 8, 7),
-           "2x2": (2, 2, 0), "2x6": (2, 6, 7), "3x3": (3, 3, 0), "3x8": (3, 8, 7)}
+           "2x2": (2, 2, 0), "2x6": (2, 6, 7), "3x3": (3, 3, 0), "3x6": (3, 6, 7), "3x8": (3, 8, 7),
+           "4x6": (4, 6, 7), "4x7": (4, 7, 7), "4x8": (4, 8, 7)}
 
 
 def main() -> None:
@@ -81,7 +85,8 @@ def measure(a, configs: dict, extra: list[str]) -> None:
     """Starts the engine once, runs the warm-up and `a.rounds` rounds of `configs`, and writes `a.out`.json."""
     cfg = json.load(open(a.config, encoding="utf-8"))
     args = [x for x in cfg["args"] if x != "--vision"]
-    args += ["--suffix-draft", "0", "--batch", "3", "--concurrent", "3", "--rows", "8", "--lookahead", "3", *extra]
+    most = str(max(c for c, _, _ in configs.values()))
+    args += ["--suffix-draft", "0", "--batch", most, "--concurrent", most, "--rows", "8", "--lookahead", "3", *extra]
     env = dict(os.environ, **cfg.get("env", {}))
     env["PATH"] = os.pathsep.join(cfg.get("lib_dirs", [])) + os.pathsep + env["PATH"]
     tok = strata_tokenizer.load_folder(cfg["tokenizer"])
@@ -158,7 +163,7 @@ def print_report(runs: list[dict]) -> None:
         for name in run["rounds"][0]:
             rs = [x[name] for x in run["rounds"]]
             if "story" in rs[0]:
-                cells = [f"{med(x[k]['tok_s'] for x in rs):.2f}" for k in KINDS] + [""]
+                cells = [f"{med(x[k]['tok_s'] for x in rs):.2f}" if k in rs[0] else "" for k in KINDS] + [""]
             else:
                 each = ", ".join(f"{med(x['each'][i] for x in rs):.2f}" for i in range(len(rs[0]["each"])))
                 cells = [""] * len(KINDS) + [f"{med(x['tok_s'] for x in rs):.2f} ({each})"]

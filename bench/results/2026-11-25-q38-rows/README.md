@@ -13,9 +13,18 @@ other round.
 
 - `greedy.json`: no sampling keys (temperature 0). A guess is kept only when it is the most likely token.
 - `sampled.json`: `temperature=0.7 seed=1`, so `--draft-rule typical` applies.
+- `greedy-3x6.json`, `sampled-3x6.json`: 3 conversations with 6 rows, measured later the same day in runs of their
+  own (`--only 3x6`, `--gpu-mib 50000` for both: a 48.75 GiB pool), greedy and sampled as above.
+- `greedy-4x.json`, `sampled-4x.json`: 4 conversations with 6, 7 and 8 rows (`--only 4x6,4x7,4x8`), measured after
+  that in runs of their own with the same pool, `--vram-conversations 4` and room for four conversations
+  (`--batch 4 --concurrent 4`). The fourth conversation's prompt is a beginner's guide to baking sourdough bread.
+
+The computer's fans were on full in every run but the first greedy round of 3 x 6, which started before they were
+back on full and was 9% slower than its other two rounds.
 
 The tables and what follows from them are in [docs/DETAILS.md](../../../docs/DETAILS.md#rows-per-step-lookahead-and-conversations-at-once-strata-q38).
-`python tools/measure_rows.py --report greedy.json sampled.json` prints the medians.
+`python tools/measure_rows.py --report greedy.json sampled.json greedy-3x6.json sampled-3x6.json greedy-4x.json
+sampled-4x.json` prints the medians.
 
 Limits: one computer and one model pack. In the greedy run's third round most configurations were 5-35% slower
 than the mean of the first two rounds. Windows Setup was running at the time. The medians keep that round's values
