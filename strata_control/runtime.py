@@ -745,7 +745,8 @@ def stop(name: str, *, timeout: float = 330,
     if lost is not None:
         return lost
     result = _rpc(name, "stop", timeout=timeout, params=params)
-    if not result["ok"]:
+    # A stop response with state means the owner is exiting, even if the server failed.
+    if "state" not in result:
         return result
     owned = _STARTED_HOSTS.pop(name, None)
     if owned is not None:
