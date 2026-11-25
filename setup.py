@@ -68,7 +68,6 @@ from strata_base import tls
 tls.install()      # #3722: HTTPS checks the server against the operating system's certificates (what Chrome and curl.exe do)
 from strata_base import atomic, transfer
 from strata_base.hashing import sha256_file
-from strata_common import cfg_paths
 from strata_common import draft_layer
 from strata_common import engine_component as EC
 from strata_common.engine_component import AMD_IGPU_PCI
@@ -6042,7 +6041,7 @@ def data_folder_in_place() -> tuple:
 def write_config(path: Path, cfg: dict):
     """A run config, written whole or not at all (#459): to a temporary file first, then moved over the old one, so
     a setup stopped half-way (a closed window, a full disk) never leaves an empty strata-*.json behind."""
-    atomic.write_text(path, cfg_paths.dumps(cfg, path, indent=1))
+    atomic.write_text(path, json.dumps(cfg, indent=1))
 
 
 # #629: the run config's keys setup writes itself (and rewrites on every setup run); any other key is the user's - a
@@ -6232,7 +6231,7 @@ def write_setup_config(cfg_path: Path, cfg: dict, source: Path | None = None, ex
     old = None
     if old_path is not None and old_path.is_file():
         try:
-            old = cfg_paths.read_config(old_path)
+            old = json.loads(old_path.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             pass
         if not isinstance(old, dict):
@@ -6297,7 +6296,7 @@ def own_path_config(cfg: dict) -> bool:
 
 def choices_from_config(cfg_path: Path) -> dict:
     """The setup answers a config was written with (family, size, context, KV, images, projection, network)."""
-    cfg = cfg_paths.read_config(cfg_path)
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
     tag = cfg_path.stem[len("strata-"):]
     big = next((f for f, d in MULTI_FILE_FAMILIES.items() if tag.startswith(d["tag"])), None)
     if big is not None:                                # DeepSeek-V4.1-Flash: its own size; no KV / images / projection settings
@@ -6413,7 +6412,7 @@ def model_config(path: Path) -> bool:
     """#549: a model's run config (a JSON object with "exe" and "args"). Any other strata-*.json in the folder (a
     file of the user's own, a cut-off one) is skipped with a warning naming it instead of stopping setup."""
     try:
-        cfg = cfg_paths.read_config(path)
+        cfg = json.loads(path.read_text(encoding="utf-8-sig"))
         if isinstance(cfg, dict) and cfg.get("exe") and isinstance(cfg.get("args"), list):
             return True
         why = 'no "exe" or "args"'
@@ -6564,7 +6563,7 @@ def calibrate_config(cfg_path: Path) -> bool:
     config and remember them per PC and model in the settings file, so an update or a reinstall keeps them."""
     sys.path.insert(0, str(ROOT / "tools"))
     import calibrate as CAL
-    cfg = cfg_paths.read_config(cfg_path)
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
     say()
     say("  Tuning Strata for this PC: the output speed is measured with a few engine settings (the PCIe share, the")
     say("  draft depth, the CPU threads, the expert cache; on two or more cards also the prompt chunks). It takes")
@@ -6657,13 +6656,13 @@ def update_install(have: list, a) -> int:
         update_installed_engine(a.prebuilt)
     mtp_done: set = set()
     for cfg_path in have:
-        cfg = upgrade_config(cfg_path, cfg_paths.read_config(cfg_path))
+        cfg = upgrade_config(cfg_path, json.loads(cfg_path.read_text(encoding="utf-8-sig")))
         if not own_path_config(cfg):
             refresh_shared_draft_vocab(cfg, mtp_done)
         if cfg.get("backend") == "hip" and WIN:
             hip_runtime_beside_exe(Path(cfg["exe"]).parent)   # #468 #461
         ok(f"{cfg.get('model_name', cfg_path.stem)}: up to date")
-    ver = engine_version(Path(cfg_paths.read_config(have[0])["exe"]))
+    ver = engine_version(Path(json.loads(have[0].read_text(encoding="utf-8-sig"))["exe"]))
     say()
     start = "START-HERE.bat" if WIN else "./setup.sh"
     if any(ver) and tuple(ver) < MIN_ENGINE:             # #3653: the engine step failed above; "updated" would be untrue
@@ -6739,7 +6738,7 @@ def _start(cfg_path: Path, port: int | None, gpu: int | list | None = None, open
            layer_split=None, keep=None) -> int:
     """keep: settings given on this start that the model keeps from now on (--host, --api-key, --draft-vocab,
     --vram-reserve-mib)."""
-    cfg = upgrade_config(cfg_path, cfg_paths.read_config(cfg_path))
+    cfg = upgrade_config(cfg_path, json.loads(cfg_path.read_text(encoding="utf-8-sig")))
     component = EC.is_reference(cfg["exe"])
     # The server resolves and verifies component engines; the reference itself is not a file.
     files = ([] if component else [cfg["exe"]]) + [a for a in cfg["args"] if a.endswith(".gguf")]
@@ -6909,7 +6908,7 @@ def vision_tokens(asked: int | None, vision: str, earlier: Path | None) -> int:
     default = VISION[vision]["max_tokens"]
     if asked is None and earlier is not None:
         try:
-            v = cfg_paths.read_config(earlier).get("vision")
+            v = json.loads(earlier.read_text(encoding="utf-8-sig")).get("vision")
         except (OSError, ValueError, AttributeError):
             v = None
         mt = v.get("max_tokens") if isinstance(v, dict) and bool(v.get("gpu")) == (vision == "gpu") else None
@@ -7311,32 +7310,33 @@ def use_cuda12(cards, cfg_path: Path, cfg: dict, yes: bool) -> dict:
 
 
 def write_run_script(model, cfg_path, port, open_browser=True, server=None):
-    """run-<model>.bat / .sh: the server with this config; `open_browser` False (#609: --no-browser) leaves --open out, and `server`
-    is the server script to run (strata_server/server.py by default). Its paths start from the script's own folder, so the install
-    can be renamed or moved."""
-    anchor = "%~dp0" if WIN else "$here/"                # the shell script records its folder before it changes directory
-    at = lambda p: _from_script_folder(p, anchor)  # noqa: E731
-    serve = [at(sys.executable), at(server or ROOT / "strata_server" / "server.py"), "--engine", "strata", "--config", at(cfg_path),
-             "--port", str(port)] + (["--open"] if open_browser else [])
+    """run-<model>.bat / .sh: the server with this config; `open_browser` False (#609: --no-browser) leaves --open out,
+    and `server` is the server script to run (strata_server/server.py by default). The script names files in its own
+    folder from that folder, so the install can be renamed or moved."""
+    here = "%~dp0" if WIN else "$here/"                 # the .sh records its folder before it changes directory
+    root, python, server, config = (_from_script_folder(p, here) for p in
+                                    (ROOT, sys.executable, server or ROOT / "strata_server" / "server.py", cfg_path))
+    serve = [python, server, "--engine", "strata", "--config", config, "--port", str(port)] + (
+        ["--open"] if open_browser else [])
     if WIN:
         script = home() / f"run-{model.lower()}.bat"
-        script.write_text("@echo off\r\ntitle Strata " + model + "\r\ncd /d \"" + at(ROOT) + "\"\r\n" +
+        script.write_text("@echo off\r\ntitle Strata " + model + "\r\ncd /d \"" + root + "\"\r\n" +
                           " ".join(f'"{x}"' for x in serve) + "\r\nif errorlevel 1 pause\r\n", encoding="utf-8")
     else:
         script = home() / f"run-{model.lower()}.sh"
-        script.write_text("#!/bin/sh\nhere=$(cd \"$(dirname \"$0\")\" && pwd)\ncd \"" + at(ROOT) + "\"\nexec " + " ".join(f'"{x}"' for x in serve) + "\n",
-                          encoding="utf-8")
+        script.write_text("#!/bin/sh\nhere=$(cd \"$(dirname \"$0\")\" && pwd)\ncd \"" + root + "\"\nexec " +
+                          " ".join(f'"{x}"' for x in serve) + "\n", encoding="utf-8")
         script.chmod(0o755)
     return script
 
 
-def _from_script_folder(path, anchor: str) -> str:
-    """`path` as a generated script in home() names it: relative to that folder, behind `anchor` (the shell's way
-    to its own folder), or absolute when it lies outside the install's parent folder."""
-    rel = cfg_paths.relative_to_folder(path, home())
-    if os.path.isabs(rel):
-        return rel
-    return anchor if rel == "." else anchor + rel
+def _from_script_folder(path, here: str) -> str:
+    """Gets `path` as a run script in home() names it: behind `here` (the shell's way to the script's own folder) when
+    it lies in home(), else as it is."""
+    try:
+        return here + str(Path(path).relative_to(home()))
+    except ValueError:
+        return str(path)
 
 
 # ------------------------------------------------------------------------------------------------ the rope config
@@ -8403,7 +8403,7 @@ def earlier_card_kept(prev: Path) -> bool:
     DeepSeek model on AMD (strata_control/gpu_pick.py) is not a choice to carry over; every other config keeps its card exactly as before
     (no AMD listing is read for them, and nothing here can stop a setup)."""
     try:
-        earlier = cfg_paths.read_config(prev)
+        earlier = json.loads(Path(prev).read_text(encoding="utf-8-sig"))
         from strata_control import gpu_pick
         if WIN or not gpu_pick.is_deepseek_amd(earlier):
             return True
@@ -10276,7 +10276,7 @@ def start_installed(cfg_path: Path, a, gpu) -> int:
     """Starts the installed model of the run config `cfg_path` with this run's options `a`.  --build first compiles
     the engine program it runs again, in the CMake build folder that made it and with that folder's settings."""
     if a.build:
-        exe = Path(cfg_paths.read_config(cfg_path)["exe"])
+        exe = Path(json.loads(cfg_path.read_text(encoding="utf-8-sig"))["exe"])
         if get_configured_value(exe.parent, "CMAKE_COMMAND") is None:
             fail(f"--build compiles a model's engine in the folder it was built in, and {exe} was not built there",
                  f"to compile setup's own engine instead: {'START-HERE.bat' if WIN else './setup.sh'} --setup --build")

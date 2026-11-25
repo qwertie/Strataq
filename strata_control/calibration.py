@@ -22,7 +22,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from strata_common import cfg_paths, profiles
+from strata_common import profiles
 from strata_control.discovery import own_settings_file
 from strata_control.doctor import inspect as inspect_components
 from strata_common.profiles import ProfileError
@@ -90,7 +90,7 @@ def preview(ref: str) -> dict:
     path, profile, revision, cfg = _target(ref)
     components = inspect_components(path, profile_id=profile["id"] if profile else None)
     source_bytes = path.read_bytes()
-    if cfg_paths.to_absolute(json.loads(source_bytes.decode("utf-8-sig")), path.parent) != cfg:
+    if json.loads(source_bytes.decode("utf-8-sig")) != cfg:
         raise ProfileError("run config changed during calibration preview; retry", 6)
     return {"profile": profile["id"] if profile else None, "profile_revision": revision,
             "source_config": str(path), "source_sha256": hashlib.sha256(source_bytes).hexdigest(),

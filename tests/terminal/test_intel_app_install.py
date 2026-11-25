@@ -6,6 +6,7 @@ Terminal's own two steps (the pack, then the run config of strata_cli/launch/ado
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -17,7 +18,6 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 import setup  # noqa: E402
 import strata_mcp as M  # noqa: E402
-from strata_common import cfg_paths  # noqa: E402
 from strata_control import intel_app  # noqa: E402
 
 A750 = {"vendor": "intel", "name": "Intel Arc A750", "vram_gb": 8.0, "usable": True, "index": 0}
@@ -212,7 +212,7 @@ class SetupControlMode(unittest.TestCase):
             data.mkdir()
             self.assertEqual(self.run_setup(self.args(folder), data, home, driver="i915"), 0)
             self.assertEqual(self.packed, str(data / "packs" / "q2_0"))
-            cfg = cfg_paths.read_config(home / "strata-q2_0.json")
+            cfg = json.loads((home / "strata-q2_0.json").read_text(encoding="utf-8"))
         self.assertEqual((cfg["exe"], cfg["backend"], cfg["port"]), ("component:strata-engine", "sycl", 8080))
         a = cfg["args"]
         self.assertEqual(a[a.index("--pack") + 1], str(data / "packs" / "q2_0"))
@@ -231,7 +231,7 @@ class SetupControlMode(unittest.TestCase):
             home.mkdir()
             data.mkdir()
             self.run_setup(self.args(folder, port=8123), data, home, driver="xe")
-            cfg = cfg_paths.read_config(home / "strata-q2_0.json")
+            cfg = json.loads((home / "strata-q2_0.json").read_text(encoding="utf-8"))
         self.assertIn("--stream-experts", cfg["args"])
         self.assertEqual(cfg["port"], 8123)
 

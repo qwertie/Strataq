@@ -26,7 +26,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from strata_common.expert_fill import wait_for_http_experts  # noqa: E402
-from strata_common import cfg_paths  # noqa: E402
 PROMPTS = (
     "Write a Python function that merges two sorted lists into one sorted list, with a docstring and two tests.",
     "Explain in two paragraphs how a refrigerator moves heat from inside to outside.",
@@ -120,7 +119,7 @@ def main() -> int:
     ap.add_argument("--long-words", type=int, default=6000)
     ap.add_argument("--log", default="ab_engine.jsonl")
     a = ap.parse_args()
-    base = cfg_paths.read_config(a.config)
+    base = json.loads(Path(a.config).read_text())
     arms = parse_arms(a.arms)
     reqs = [(f"chat{i}", p) for i, p in enumerate(PROMPTS)] + [("long", long_prompt(a.long_words))]
     out = open(a.log, "a")

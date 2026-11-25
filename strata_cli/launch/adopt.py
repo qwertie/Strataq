@@ -10,10 +10,9 @@ Only the GSQ-RCO families (qwen, swift, coder) and Gyro (one GGUF with its n-gra
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
-
-from strata_common import cfg_paths
 
 SHARD = re.compile(r"^(?P<stem>.+)-(?P<i>\d{5})-of-(?P<n>\d{5})\.gguf$")
 FAMILIES = ("qwen", "swift", "coder", "gyro", "unsloth")      # the catalog offers Gyro-S / Gyro-M on an Arc card too (round 8, N11); Unsloth's sets since round 0214 (ENG-AMD: UD-IQ1_M ran on an Arc A750)
@@ -124,4 +123,4 @@ def plan(*, family: str, model: str, model_dir: Path, data_dir: Path, src: Path,
 
 def write(path: Path, cfg: dict) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(cfg_paths.dumps(cfg, path, indent=1) + "\n", encoding="utf-8")
+    Path(path).write_text(json.dumps(cfg, indent=1) + "\n", encoding="utf-8")

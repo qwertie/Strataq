@@ -17,7 +17,6 @@ sys.path[:0] = [str(ROOT), str(ROOT / 'tools')]
 from conversation_cache_parity import require
 from conversation_cache_soak import answer_text
 from strata_server.frontend import ChatTemplate
-from strata_common import cfg_paths  # noqa: E402
 import strata_tokenizer as ST
 from strata_common.engine_client import StrataEngine, child_env
 
@@ -112,7 +111,7 @@ def main():
     if not a.run:
         print('Dry run: upstream and disabled candidates; identical inputs/settings, known answers and state parity.')
         return
-    cfg = cfg_paths.read_config(a.config)
+    cfg = json.loads(a.config.read_text(encoding='utf-8'))
     tok_path = Path(cfg['tokenizer'])
     tok = ST.load_folder(tok_path)
     tpl_path = tok_path / 'chat_template.jinja'

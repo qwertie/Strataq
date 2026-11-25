@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from strata_common import acquisition, cfg_paths, drafting, user_args
+from strata_common import acquisition, drafting, user_args
 from strata_control.discovery import MTP_FETCH_GB
 
 
@@ -104,7 +104,7 @@ def _inputs(a) -> dict:
         a.config = _only_installed_config(a)
     if a.config:
         try:
-            cfg = cfg_paths.read_config(a.config)
+            cfg = json.loads(Path(a.config).read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             cfg = {}
     if a.data_dir:
@@ -131,7 +131,7 @@ def _inputs(a) -> dict:
 def _signals(a, want: dict) -> dict:
     """The arguments and the one card's memory drafting.tuned_applies reads (as the server reads them for the start); {} when there is no run config to read them from."""
     try:
-        cfg = cfg_paths.read_config(a.config) if a.config else {}
+        cfg = json.loads(Path(a.config).read_text(encoding="utf-8-sig")) if a.config else {}
         args = [str(x) for x in cfg.get("args") or []]
         if cfg.get("user_args"):
             from strata_common import user_args

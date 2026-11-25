@@ -22,7 +22,6 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import setup  # noqa: E402
-from strata_common import cfg_paths  # noqa: E402
 
 M = "UD-Q4_K_XL"
 REV = "38bb39ee97821de2c9009abb7e93950eec396e66"
@@ -219,7 +218,7 @@ class Base(unittest.TestCase):
                 st.enter_context(p)
             code, out = quiet(setup.main)
         cfg = self.t / f"strata-unsloth-{m.lower()}.json"
-        return code, out, (cfg_paths.read_config(cfg) if cfg.exists() else None)
+        return code, out, (json.loads(cfg.read_text()) if cfg.exists() else None)
 
 class Main(Base):
     """UD-Q4_K_XL."""
@@ -755,7 +754,7 @@ class LayerSplit(unittest.TestCase):
                     mock.patch.object(setup.subprocess, "call", call):
                 code, out, asked = run(setup.start, p, None, list(gpu) if gpu else None, False, offered is None,
                                        stdin=offered)
-            return code, out, cfg_paths.read_config(p), call.called
+            return code, out, json.loads(p.read_text()), call.called
 
     def test_start_with_gpus_drops_the_budget(self):
         code, out, cfg, started = self.start(165.0)

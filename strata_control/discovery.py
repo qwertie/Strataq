@@ -26,8 +26,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from strata_common import cfg_paths
-
 # What setup still has to fetch for an installed model whose helper files are gone (setup.py: tools/mtp_fetch.py reads the 31 MTP tensors of
 # the pinned checkpoint, 5.214 GB, and packs them into a 0.9 GB draft layer; the picture reader is one 0.9 GB file).
 MTP_FETCH_GB = 5.2
@@ -461,7 +459,7 @@ def run_config_for(gguf: Path, install_places: list[Place]) -> Path | None:
     want = os.path.normcase(str(Path(gguf)))
     for place in install_places:
         for cfg_path in config_files(place.path):
-            data = cfg_paths.to_absolute(_read_json(cfg_path), cfg_path.parent)
+            data = _read_json(cfg_path)
             args = [str(a) for a in data.get("args") or []]
             if any(os.path.normcase(a) == want for a in args if a.lower().endswith(".gguf")):
                 return cfg_path

@@ -19,7 +19,6 @@ from conversation_cache_disabled import SETTINGS, common_args
 from conversation_cache_soak import answer_text
 from strata_server.frontend import ChatTemplate
 from strata_common.engine_client import StrataEngine, child_env
-from strata_common import cfg_paths  # noqa: E402
 
 NAMES = ['A', 'B-0', 'A-grow-0', 'B-1', 'A-grow-1', 'B-2', 'A-grow-2',
          'B-rewind', 'A-rewind', 'B-branch', 'A-branch', 'B-final']
@@ -78,7 +77,7 @@ def main():
     if not a.run:
         print('Dry run: paired full/incremental captures; growth, interruption, rewind and branch; no model loaded.')
         return
-    cfg = cfg_paths.read_config(a.config)
+    cfg = json.loads(a.config.read_text(encoding='utf-8'))
     tok_path = Path(cfg['tokenizer'])
     tok = load_folder(tok_path)
     template = ChatTemplate(tok_path / 'chat_template.jinja')

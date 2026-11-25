@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "metal"))
 import setup  # noqa: E402
-from strata_common import cfg_paths  # noqa: E402
 import setup_mac as M  # noqa: E402
 
 
@@ -393,7 +392,8 @@ class ControlMode(unittest.TestCase):
         return rc, ran
 
     def config(self, tag="q2_0"):
-        return cfg_paths.read_config(self.home / f"strata-{tag}.json")
+        import json
+        return json.loads((self.home / f"strata-{tag}.json").read_text(encoding="utf-8"))
 
     def test_the_install_writes_a_run_config_for_the_engine_component(self):
         rc, ran = self.run_setup()

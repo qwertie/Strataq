@@ -26,8 +26,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import strata_tokenizer as ST  # noqa: E402
-sys.path.insert(0, str(ROOT))
-from strata_common import cfg_paths  # noqa: E402
 
 
 def drop(args, flag, with_value=False):
@@ -47,7 +45,7 @@ def main():
     ap.add_argument("--mode", choices=("usage", "routing"), default="usage")
     ap.add_argument("--only", help="comma-separated prompt numbers (default all)")
     a = ap.parse_args()
-    cfg = cfg_paths.read_config(a.config)
+    cfg = json.load(open(a.config, encoding="utf-8-sig"))
     tok = ST.load_folder(cfg["tokenizer"])
     corpus = json.load(open(a.corpus, encoding="utf-8"))
     out = Path(a.outdir)

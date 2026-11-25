@@ -35,8 +35,6 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-from strata_common import cfg_paths  # noqa: E402
 DEFAULT_CELLS = "512:0:256,4096:0:256,4096:0.7:256,16384:0:256,16384:0.7:256,32768:0:256,32768:0.7:256,4096:0:1024"
 WORDS = ("river stone market lantern copper winter garden signal harbor needle orbit velvet canyon ember ledger quartz "
          "meadow anchor violet thunder cedar marble piston ribbon cobalt falcon glacier hollow ivory juniper kernel "
@@ -142,7 +140,7 @@ def calibrate(port: int, target: int, max_tokens: int, temperature: float, log) 
 
 def run_arm(cfg_path: Path, tag: str, cells, rounds: int, port: int, env: dict, out: Path, warm: int,
             exe: str | None = None, xargs: list[str] | None = None) -> list[dict]:
-    base = cfg_paths.read_config(cfg_path)
+    base = json.loads(cfg_path.read_text())
     cfg = dict(base)
     if exe:
         cfg["exe"] = exe

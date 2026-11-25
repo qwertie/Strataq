@@ -30,8 +30,6 @@ Rules (paper):  mismatch = the scorer's argmax is not the forced token; margin =
               exposure-weighted).  (The paper also audits events stock reproduces on its own paths; that audit is not done here, events are counted raw.)
 """
 import argparse, json, math, os, random, signal, subprocess, sys, pathlib
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from strata_common import cfg_paths  # noqa: E402
 
 SCORER_DROP_VALUE = {"--draft", "--draft-model", "--draft-fallback", "--mtp-draft-vocab", "--spec", "--draft-conf", "--draft-cap", "--mtp", "--spec-min-p",
                      "--prompt-cache", "--max-context", "--prefill", "--short-read", "--prompt-cache-every", "--conversation-cache-mib", "--suffix-draft"}
@@ -132,7 +130,7 @@ def kv_env(lst):
 
 # ------------------------------------------------------------------------------------------------ gen / score
 def cmd_gen(a):
-    cfg = cfg_paths.read_config(a.config)
+    cfg = json.load(open(a.config, encoding="utf-8-sig"))
     rows = [json.loads(l) for l in open(a.corpus) if l.strip()]
     rows = [r for r in rows if r.get("split", "held") == "held"]
     kinds = a.kinds.split(",") if a.kinds else sorted({r["kind"] for r in rows})
@@ -157,7 +155,7 @@ def cmd_gen(a):
 
 
 def cmd_score(a):
-    cfg = cfg_paths.read_config(a.config)
+    cfg = json.load(open(a.config, encoding="utf-8-sig"))
     st = json.load(open(a.set))
     items = st["items"]
     total = max(len(i["prompt"]) + len(i["cont"]) for i in items)

@@ -10,7 +10,6 @@
  * Each issue is { level, code, key, line, params, message }: `code` and `params` are what the screen translates (src/lib/run-config-issues.ts),
  * `message` is the same sentence in English for logs and the Details of a refused start.
  */
-import { resolve } from 'node:path';
 import { NATIVE_FIELDS } from './native-settings.mjs';
 
 /** Every top-level key a run config may carry: what setup writes, what strata_server/server.py reads, the app's own fields. */
@@ -146,21 +145,4 @@ export function checkAndParseRunConfig(text, options) {
 /** The English lines of the issues, `Line 12: …`, for the Details of a refused start. */
 export function describeIssues(issues, level) {
   return issues.filter(i => !level || i.level === level).map(i => `${i.line ? `Line ${i.line}: ` : ''}${i.message}`);
-}
-
-/** The keys whose values (in their lists and objects too) Strata writes paths under: RUN_PATH_KEYS in strata_common/cfg_paths.py. */
-const PATH_KEYS = new Set(['exe', 'cwd', 'tokenizer', 'log', 'lib_dirs', 'args', 'args_written', 'env', 'vision']);
-/** How Strata marks a path written from the run config's own folder (./x, ../x, . or ..): _FROM_FOLDER in cfg_paths.py. */
-const FROM_FOLDER = /^\.\.?(?:[\\/]|$)/;
-
-/**
- * Gets `config` with each path that Strata wrote from the config's folder made absolute against `folder` (the folder the file is in),
- * for a copy of the config that is saved elsewhere (native-control.mjs: the start's copy in native-instances, the tuner's).
- */
-export function withAbsolutePaths(config, folder) {
-  const fix = value => typeof value === 'string' ? (FROM_FOLDER.test(value) ? resolve(folder, value) : value)
-    : Array.isArray(value) ? value.map(fix)
-    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, fix(item)]))
-    : value;
-  return Object.fromEntries(Object.entries(config).map(([key, value]) => [key, PATH_KEYS.has(key) ? fix(value) : value]));
 }

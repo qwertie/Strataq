@@ -21,7 +21,7 @@ import sys
 import threading
 import time
 from strata_base import atomic as _atomic_mod
-from strata_common import cfg_paths, user_args, vram_fit
+from strata_common import user_args, vram_fit
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -250,7 +250,7 @@ def runtime_max_wait() -> int:
 
 
 def read_config(path: Path) -> dict:
-    return cfg_paths.read_config(path)
+    return json.loads(Path(path).read_text(encoding="utf-8-sig"))
 
 
 def desc_matches(desc: dict, s: S.LaunchSettings) -> bool:

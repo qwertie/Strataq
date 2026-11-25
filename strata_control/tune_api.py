@@ -33,7 +33,6 @@ from pathlib import Path
 from typing import Any
 
 from strata_base import loopback
-from strata_common import cfg_paths
 from strata_control.tune_engine import EngineMeasurement, MeasurementError, process_tree_peak_mib
 
 
@@ -269,7 +268,7 @@ def make_api_measure(*, python: Path | str, serve_dir: Path, config_path: Path, 
 
     from strata_control.tune_apply import apply_args_to_config, args_to_argv
 
-    base = cfg_paths.read_config(config_path)
+    base = json.loads(Path(config_path).read_text(encoding="utf-8"))
 
     def measure(candidate) -> dict[str, float]:
         args = getattr(candidate, "args", candidate)

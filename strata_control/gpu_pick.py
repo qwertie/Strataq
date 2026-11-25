@@ -12,8 +12,6 @@ on one).  New configs say who chose in "gpus_by" ("person" or "setup").  A confi
 """
 from __future__ import annotations
 
-from strata_common import cfg_paths
-
 ASKED_BY_PERSON = "person"
 PICKED_BY_SETUP = "setup"
 
@@ -94,7 +92,7 @@ def remember(path, cards: list[int]) -> dict | None:
         cfg["gpus_asked"] = True
         cfg["gpus_by"] = ASKED_BY_PERSON
         tmp = p.with_name(p.name + ".tmp")
-        tmp.write_text(cfg_paths.dumps(cfg, p, indent=1), encoding="utf-8")
+        tmp.write_text(json.dumps(cfg, indent=1), encoding="utf-8")
         os.replace(tmp, p)
         return cfg
     except (OSError, ValueError, TypeError):

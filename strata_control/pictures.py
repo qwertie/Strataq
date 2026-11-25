@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from strata_common import acquisition, cfg_paths, vision_reader
+from strata_common import acquisition, vision_reader
 from strata_control import discovery
 from strata_base import transfer
 
@@ -310,7 +310,7 @@ def fetch(config_path: str | Path, *, engine_dir: str | Path, asked: str = "yes"
     report = progress or (lambda *_: None)
     config = Path(config_path)
     try:
-        cfg = cfg_paths.read_config(config)
+        cfg = json.loads(config.read_text(encoding="utf-8-sig"))
         if not isinstance(cfg, dict):
             raise ValueError("not an object")
     except (OSError, ValueError):

@@ -11,7 +11,6 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from strata_common import cfg_paths
 from strata_common.catalog import MMPROJ
 from strata_control import discovery
 from strata_control.discovery import MMPROJ_GB, MTP_FETCH_GB
@@ -158,7 +157,8 @@ def assess(catalog, family: str | None, model: str | None, *, vision: str = "off
     cfg = None
     if config is not None:
         try:
-            cfg = cfg_paths.read_config(Path(config))
+            import json
+            cfg = json.loads(Path(config).read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             cfg = None
     if cfg is not None:

@@ -20,7 +20,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from strata_common import cfg_paths, dsv41_paths  # noqa: E402
+from strata_common import dsv41_paths  # noqa: E402
 from strata_control import runtime, updater
 from strata_common import engine_component as ec, signing
 from tests.terminal import test_dsv41_upgrade as _up  # noqa: E402
@@ -50,7 +50,7 @@ class UpdatePath(_up.Upgrade):
                                           "lib_dirs": ["C:/other", str(Path(exe).parent)]}), encoding="utf-8")
 
     def exe_of(self, path):
-        return Path(cfg_paths.read_config(path)["exe"])
+        return Path(json.loads(Path(path).read_text(encoding="utf-8"))["exe"])
 
     def ctx(self):
         return updater.Context(components=self.root / "c", source=self.url, trusted=signing.load_trusted_keys(), hardware=self.hw,
@@ -72,7 +72,7 @@ class UpdatePath(_up.Upgrade):
         self.assertEqual(self.folders(), ["0.1.49", "0.1.49.1"], "the older package stays for Settings > Engine")
         self.assertEqual(self.exe_of(self.cfg1), new)
         self.assertEqual(self.exe_of(self.cfg2), new, "every saved run config, not one")
-        libs = cfg_paths.read_config(self.cfg1)["lib_dirs"]
+        libs = json.loads(self.cfg1.read_text(encoding="utf-8"))["lib_dirs"]
         self.assertEqual(libs[0], "C:/other")
         self.assertIn(str(new.parent), libs)
         self.assertEqual(r["profiles_repointed"], 2)

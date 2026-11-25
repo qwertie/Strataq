@@ -30,7 +30,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from batch_test import Engine, tokenizer  # noqa: E402
-from strata_common import cfg_paths  # noqa: E402
 
 LONG = ("The history of mathematics is long and full of surprising turns. Early civilizations counted with tally marks, "
         "then with symbols, and later with place-value systems that made arithmetic far easier. ")
@@ -81,7 +80,7 @@ def main():
                     help="7b: unrelated solo GENs between A in slot 1 and F, so only the slot holds A's start (0: off)")
     ap.add_argument("--dump", default="", help="write every solo and slot token list as JSON: an A/B of two builds")
     a = ap.parse_args()
-    cfg = cfg_paths.read_config(a.config)
+    cfg = json.loads(Path(a.config).read_text())
     tok = tokenizer(cfg["tokenizer"])
 
     def chat(q):

@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from strata_common import cfg_paths, user_args
+from strata_common import user_args
 from strata_base import atomic as _atomic_mod
 
 SCHEMA_VERSION = 1
@@ -55,11 +55,6 @@ class ApplyError(RuntimeError):
 
 def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
-
-
-def _config_bytes(cfg: dict, config_path: Path) -> bytes:
-    """Gets the bytes an apply saves at `config_path` for the run config `cfg` (after_sha256 is their hash)."""
-    return (cfg_paths.dumps(cfg, config_path, indent=1, ensure_ascii=False) + "\n").encode("utf-8")
 
 
 # --------------------------------------------------------------------------- args and configs
@@ -271,7 +266,7 @@ def review_apply(*, job: dict[str, Any], config_path: Path,
                 reasons.append("the sweep was measured against a different configuration: "
                                + ", ".join(differences))
 
-    after_bytes = _config_bytes(candidate, config_path)
+    after_bytes = (json.dumps(candidate, indent=1, ensure_ascii=False) + "\n").encode("utf-8")
     return ApplyPlan(
         job_id=job_id, config_path=config_path, before_args=before_args, after_args=after_args,
         added=added, removed=removed, before_sha256=_sha256(source), after_sha256=_sha256(after_bytes),
@@ -338,7 +333,7 @@ def apply_recommendation(*, job: dict[str, Any], config_path: Path,
     (directory / "candidate.json").write_bytes(
         (json.dumps(candidate, indent=1, ensure_ascii=False) + "\n").encode("utf-8"))
 
-    _atomic_mod.write_bytes(config_path, _config_bytes(candidate, config_path))
+    _atomic_mod.write_bytes(config_path, (json.dumps(candidate, indent=1, ensure_ascii=False) + "\n").encode("utf-8"))
 
     record = {
         "schema_version": SCHEMA_VERSION,

@@ -10,6 +10,7 @@ words instead of guessing.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 from dataclasses import dataclass, field
@@ -17,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from strata_cli.launch import settings as S
-from strata_common import cfg_paths, gpu_fit
+from strata_common import gpu_fit
 
 
 class CatalogUnavailable(RuntimeError):
@@ -580,7 +581,7 @@ class Catalog:
             if path is not None:
                 try:
                     from strata_control import discovery
-                    found = discovery.footprint(cfg_paths.read_config(path), path).data_dir
+                    found = discovery.footprint(json.loads(path.read_text(encoding="utf-8-sig")), path).data_dir
                     if found is not None:
                         return found
                 except (OSError, ValueError):

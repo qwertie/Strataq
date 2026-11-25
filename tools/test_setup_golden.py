@@ -22,7 +22,6 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import setup  # noqa: E402
-from strata_common import cfg_paths  # noqa: E402
 
 GOLDEN = Path(__file__).with_name("test_setup_golden.json")
 
@@ -146,7 +145,7 @@ def install(ram, found, argv, answers=None, extra=(), avx512=False, configs=()):
         written = sorted(t.glob("strata-*.json"), key=lambda p: p.stat().st_mtime)
         cfg = None
         if written and code == 0:
-            cfg = normalize(cfg_paths.read_config(written[-1]), t)
+            cfg = normalize(json.loads(written[-1].read_text(encoding="utf-8")), t)
             # "args_written" (strata_common/user_args.py): the arguments as setup wrote them, so a later hand edit can be told; the golden configs keep their own keys
             assert cfg.pop("args_written", cfg.get("args")) == cfg.get("args"), "args_written is not the written args"
         return code, out.getvalue(), cfg, asked

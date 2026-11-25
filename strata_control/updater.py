@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from strata_common import acquisition, cfg_paths, engine_component as ec, signing
+from strata_common import acquisition, engine_component as ec, signing
 from strata_control import components, feed as feedmod, preset_marks
 from strata_common import dsv41_paths
 from strata_base import longpath, loopback, transfer
@@ -1002,7 +1002,7 @@ def default_test_start(stage_root: Path, component: ec.EngineComponent, ctx: Con
     from strata_control import runtime
     sandbox = Path(tempfile.mkdtemp(prefix="t-", dir=stage_root))
     try:
-        cfg = cfg_paths.read_config(source)
+        cfg = json.loads(source.read_text(encoding="utf-8-sig"))
         cfg["exe"] = ec.REFERENCE_PREFIX + ec.COMPONENT_ID
         cfg["backend"] = component.backend
         cfg.pop("lib_dirs", None)

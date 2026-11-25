@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import Callable
 
 from strata_base import path_compare
-from strata_common import cfg_paths
 
 ITEMS = ("models", "packs", "mtp")
 STATE_FILE = "models-move.json"
@@ -324,7 +323,7 @@ def repoint_config(cfg_file: Path, old: Path, new: Path) -> bool:
     """A run config whose model files moved from ``old`` to ``new`` names them there (each path only when its file is now there and no longer
     at the old place). Returns whether the file changed."""
     try:
-        cfg = cfg_paths.read_config(cfg_file)
+        cfg = json.loads(cfg_file.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return False
 
@@ -348,7 +347,7 @@ def repoint_config(cfg_file: Path, old: Path, new: Path) -> bool:
     if fixed == cfg:
         return False
     tmp = cfg_file.with_name(cfg_file.name + ".move-tmp")
-    tmp.write_text(cfg_paths.dumps(fixed, cfg_file, indent=2) + "\n", encoding="utf-8")
+    tmp.write_text(json.dumps(fixed, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, cfg_file)
     return True
 

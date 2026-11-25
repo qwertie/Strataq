@@ -35,7 +35,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import setup as S  # noqa: E402
-from strata_common import cfg_paths, intel_spec, vram_fit  # noqa: E402
+from strata_common import intel_spec, vram_fit  # noqa: E402
 from strata_common.user_args import MODEL_FLAGS, find_model_file, flat, groups  # noqa: E402
 
 SYCL_WRAPPER = ROOT / "sycl" / "serve" / "strata-sycl.sh"
@@ -477,8 +477,8 @@ def install(argv) -> None:
 
     write = S.write_run_script
 
-    def write_run_script(model, cfg_path, port, open_browser=True):   # setup.write_run_script's signature (#870)
-        cfg = cfg_paths.read_config(cfg_path)
+    def write_run_script(model, cfg_path, port, open_browser=True, server=None):   # setup.write_run_script's (#870)
+        cfg = json.loads(Path(cfg_path).read_text(encoding="utf-8"))
         # the card setup selected (--gpu / the first usable), not intel[0]: on a PC with two Arcs the config must match
         # the chosen one (docs/INTEL.md, "Two cards"). intel_gpus() lists them in sysfs card order and cfg["gpu"] is
         # that index (setup.py's amd path); a layer split writes a list, and then every listed card is used.
@@ -525,8 +525,8 @@ def install(argv) -> None:
                                       sel.get("devid", ""))[1]
             if why:
                 S.say("  " + why)
-        S.write_config(Path(cfg_path), cfg)
-        return write(model, cfg_path, port, open_browser, server=SERVER)
+        Path(cfg_path).write_text(json.dumps(cfg, indent=1), encoding="utf-8")
+        return write(model, cfg_path, port, open_browser, server=server or SERVER)
     S.write_run_script = write_run_script
 
     start = S.start

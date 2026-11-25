@@ -10,7 +10,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from strata_common import cfg_paths
 from strata_control import models_move as mm
 
 
@@ -121,7 +120,7 @@ class MoveTests(MoveCase):
         for rel, data in self.files.items():
             self.assertEqual((self.new / rel).read_bytes(), data)
         self.assertEqual(self.tree(self.old), {"notes.txt"})                       # only what is not Strata's own is left
-        cfg = cfg_paths.read_config(self.config)
+        cfg = json.loads(self.config.read_text())
         self.assertEqual(Path(cfg["args"][1]), self.new / "models/gyro-s/a.gguf")
         self.assertEqual(Path(cfg["mtp"]), self.new / "mtp/rt")
         self.assertFalse((self.new / mm.STATE_FILE).exists())
@@ -158,7 +157,7 @@ class MoveTests(MoveCase):
             self.assertEqual((places[0] / rel).read_bytes(), data)
         self.assertTrue(summary["remaining"])
         # a model that moved whole now points at the new folder; one that did not stays where it is
-        cfg = cfg_paths.read_config(self.config)
+        cfg = json.loads(self.config.read_text())
         for value in (cfg["args"][1], cfg["args"][3], cfg["mtp"]):
             self.assertTrue(Path(value).exists(), value)
 
@@ -289,7 +288,7 @@ class MoveTests(MoveCase):
         self.assertTrue(theirs.exists())
         self.assertIsNone(mm.interrupted(self.old))
         self.assertFalse((self.new / mm.STATE_FILE).exists())
-        cfg = cfg_paths.read_config(self.config)
+        cfg = json.loads(self.config.read_text())
         self.assertTrue(all(str(self.new) not in str(v) for v in cfg.values()))
         self.assertIn(str(self.old / "models/gyro-s/a.gguf"), cfg["args"])
 
@@ -306,7 +305,7 @@ class MoveTests(MoveCase):
         self.config.write_text(json.dumps({"args": ["--native", str(self.old / "models/gone.gguf")]}))
         with self.copy_mode():
             self.run_move()
-        self.assertEqual(cfg_paths.read_config(self.config)["args"][1], str(self.old / "models/gone.gguf"))
+        self.assertEqual(json.loads(self.config.read_text())["args"][1], str(self.old / "models/gone.gguf"))
 
     @unittest.skipUnless(os.environ.get("STRATA_TEST_OTHER_VOLUME"), "set STRATA_TEST_OTHER_VOLUME to a folder on another volume (e.g. a subst or USB drive)")
     def test_a_real_second_volume(self):

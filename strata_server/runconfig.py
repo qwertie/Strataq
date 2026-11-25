@@ -14,7 +14,7 @@ import re
 import shutil
 from pathlib import Path
 
-from strata_common import cfg_paths, user_args
+from strata_common import user_args
 from strata_base import atomic as _atomic_mod
 
 # (key, kind, help).  kind: "bool", "int>=0", "num>=0", ("enum", values), "names", or ("sampling", check) for a key
@@ -295,7 +295,7 @@ def save(path: str | Path, cfg: dict) -> Path:
     path = Path(path)
     bak = path.with_name(path.name + ".bak")
     shutil.copyfile(path, bak)
-    _atomic_mod.write_text(path, cfg_paths.dumps(cfg, path, indent=1))
+    _atomic_mod.write_text(path, json.dumps(cfg, indent=1))
     return bak
 
 

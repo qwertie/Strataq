@@ -19,7 +19,7 @@ import { createEngineStep } from './engine-step.mjs';
 import { dataFolderFromPick, isDriveRoot, makeFolder, rememberDataFolder, syncDataFolder, terminalSettingsFile } from './model-folder.mjs';
 import { createAutoTune, writeTuneConfig } from './native-autotune.mjs';
 import { plainError, PHASE_TEXT } from './update-messages.mjs';
-import { checkAndParseRunConfig, checkRunConfig, describeIssues, withAbsolutePaths } from './run-config-check.mjs';
+import { checkAndParseRunConfig, checkRunConfig, describeIssues } from './run-config-check.mjs';
 import { openTextFile } from './open-text-file.mjs';
 import { markEngine, engineRefusal } from './engine-version.mjs';
 import { friendlyModelName } from './model-names.mjs';
@@ -161,8 +161,8 @@ export function createNativeControl({directory,requests=()=>[],changed=()=>{},sp
  /* The text file a power user edits by hand: where it is and what is wrong in it (run-config-check.mjs). */
  function settingsFile(model){const {path}=recordFile(model);return {model,path,name:basename(path),...checkRunConfig(readFileSync(path,'utf8')),note:'Changes you make in the file apply the next time the model starts.'};}
  async function openSettingsFile(model,options={}){const info=settingsFile(model);await openTextFile(info.path,options);return info;}
- /* Reads the run config at `path` for a start, its paths absolute (the start runs a copy of it elsewhere). A mistake in the file holds the start back with the line, instead of an engine that dies on it. Warnings (an unknown key) never do. */
- function startConfig(path){const check=checkAndParseRunConfig(readFileSync(path,'utf8'));if(!check.ok)throw new Error(`The settings file for this model has a mistake, so the model was not started. ${describeIssues(check.issues,'error').join(' ')}`);return withAbsolutePaths(check.config,dirname(path));}
+ /* A mistake in the file holds the start back with the line, instead of an engine that dies on it. Warnings (an unknown key) never do. */
+ function checkedSettingsConfig(text){const check=checkAndParseRunConfig(text);if(!check.ok)throw new Error(`The settings file for this model has a mistake, so the model was not started. ${describeIssues(check.issues,'error').join(' ')}`);return check.config;}
  function settings(model){const {entry,config}=record(model);const values=Object.fromEntries(NATIVE_FIELDS.map(f=>[f.id,config[f.id]??null]));if(typeof values.aliases==='string')values.aliases=values.aliases.split(',').map(v=>v.trim()).filter(Boolean);values.sampling=config.sampling??{};values.args=config.args??[];values.env=publicNativeEnv(config.env??{});return {model,values,mcp:publicMcpServers(config.mcp_servers??config.mcpServers??{}),restartNeeded:true,capabilities:{dsExperts:ownEngine(config)&&dsExpertsSupported(config)},speedSwitches:speedSwitchRows(config.env??{},{deepseek:ownEngine(config),arch:config.arch??null,backend:config.backend??entry?.backend??snapshot.installed?.engine?.backend??null,gpus:snapshot.hardware?.gpus??[]})};}
  /* The Drafting hint of this model's settings: the size of the drafter DFlash2 would fetch for it (Control's plan with the choice DFlash2); the generic hint when Control does not say. */
  async function settingsHints(model){try{if(!packaged||typeof control.draftingPlan!=='function')return {};const {path}=recordFile(model),d=await control.draftingPlan({configPath:path,mode:'dflash2'});return Number(d?.drafter_gb)>0?{drafting:draftingHint(d.drafter_gb)}:{};}catch{return {};}}
@@ -434,7 +434,7 @@ return {summary:result.summary??'Deleted',removed:result.plan?.gb??null};}
  /* "Download picture-reading files": the same step without a load. */
  async function picturesOnly(job,args){
   await refresh(true);if(job.state!=='running')return;
-  const {path:configFile}=recordFile(args.model);const config=startConfig(configFile);
+  const {path:configFile}=recordFile(args.model);const config=checkedSettingsConfig(readFileSync(configFile,'utf8'));
   if(!packaged)throw new Error('The picture files are downloaded by the installed app.');
   if(ownEngine(config))throw new Error('This model reads pictures with its own files.');
   const {entry}=recordFile(args.model);
@@ -445,14 +445,14 @@ return {summary:result.summary??'Deleted',removed:result.plan?.gb??null};}
   return {summary:'The picture files are ready.'};
  }
  async function loadEngine(job,args){
-  await refresh(true);if(job.state!=='running')return;const {entry,path:configFile}=recordFile(args.model);let config=startConfig(configFile);if(packaged){const engine=await control.engine();if(!engine.usable)throw new Error(ENGINE_NOT_RECOGNISED+(engine.notice?` ${engine.notice}`:''));}if(!entry.ready){const error=missingFilesError(args.model,entry.missing);append(args.model,error.details[0]);throw error;}
+  await refresh(true);if(job.state!=='running')return;const {entry,path:configFile}=recordFile(args.model);let config=checkedSettingsConfig(readFileSync(configFile,'utf8'));if(packaged){const engine=await control.engine();if(!engine.usable)throw new Error(ENGINE_NOT_RECOGNISED+(engine.notice?` ${engine.notice}`:''));}if(!entry.ready){const error=missingFilesError(args.model,entry.missing);append(args.model,error.details[0]);throw error;}
   if(externalRunning().length)throw new Error('A Strata server is already running outside this UI. Stop it before loading here, or connect its API in Settings → Models.');
   if(args.multiple&&instances.size>=8)throw new Error('Unload an instance before adding another. Up to eight native instances can run here.');
   /* Read pictures is on and the picture files are not here: the Load fetches those files (about 0.9 GB, once) and nothing else of the model, then goes on. No internet: the model loads without pictures and the page says so. */
   let picturesNote=null;{const got=await ensurePictures(job,args,configFile,config,{missing:entry.picturesMissing===true});if(job.state!=='running')return;config=got.config;args=got.args;picturesNote=got.note;}
   /* One drafter per run (strata_control/drafting.py): switching to the MTP on a model set up for DFlash2 fetches the layer once, here; DFlash2 is fetched below. */
   let drafts=await draftPlan(args,configFile),noSplit=false;
-  if(drafts?.mtp_needed===true&&(args.values?.drafting!==undefined||drafts.split===true&&(config.drafting==null||String(config.drafting).toLowerCase()==='auto'))){/* the Models screen's own Load carries the choice; a plain Auto load fetches the layer too when Control says the all-cards split engine will take the start (it runs the MTP and nothing else): the same as the Terminal */await installMtpLayer(job,args,config);if(job.state!=='running')return;await refresh(true);config=startConfig(recordFile(args.model).path);drafts=await draftPlan(args,configFile);
+  if(drafts?.mtp_needed===true&&(args.values?.drafting!==undefined||drafts.split===true&&(config.drafting==null||String(config.drafting).toLowerCase()==='auto'))){/* the Models screen's own Load carries the choice; a plain Auto load fetches the layer too when Control says the all-cards split engine will take the start (it runs the MTP and nothing else): the same as the Terminal */await installMtpLayer(job,args,config);if(job.state!=='running')return;await refresh(true);config=checkedSettingsConfig(readFileSync(recordFile(args.model).path,'utf8'));drafts=await draftPlan(args,configFile);
    /* The draft layer for the split could not be had (no internet, disk): the load goes on as the 0.2.10 app did, the normal layer split with the plan DFlash2's again (the Models screen's own Load fetches that drafter below). One plain line says so. */
    if(drafts?.split===true&&drafts.mtp_needed===true){noSplit=true;job.drafterNote=job.drafterNote??'The MTP drafter could not be downloaded.';job.summary='Loading the model…';emit();drafts=await draftPlan(args,configFile,{noSplit:true});}}
   /* A plain load (the Models screen's own Load carries its choice and fetches below): Auto on a set that has the tuned drafter fetches it now, so the start uses it. Not on this computer and not reachable: the MTP or the stock drafter runs as before. */
@@ -709,7 +709,7 @@ return {summary:result.summary??'Deleted',removed:result.plan?.gb??null};}
   return {...loaded,...measured,summary:'Your model is tuned and ready.',profile:args.profile};
  }
  /* What the tuner measures is what a load would start: the saved model config with the user's choices and the resource profile. */
- function tuneConfig(args){const {config,entry,path}=record(args.model);if(!entry.ready)throw new Error('Prepare the model before tuning it.');const {cfg}=buildConfig({model:args.model,vision:args.vision,resourceProfile:args.resourceProfile,gpus:args.gpus,values:args.values},withAbsolutePaths(config,dirname(path)));return {path:writeTuneConfig(directory,args.model,cfg),entry};}
+ function tuneConfig(args){const {config,entry}=record(args.model);if(!entry.ready)throw new Error('Prepare the model before tuning it.');const {cfg}=buildConfig({model:args.model,vision:args.vision,resourceProfile:args.resourceProfile,gpus:args.gpus,values:args.values},config);return {path:writeTuneConfig(directory,args.model,cfg),entry};}
  async function tuneStatus(args){await refresh();const {path}=tuneConfig(args);return autotuner.status(path);}
  async function tuneEffective(args){await refresh();const {path}=tuneConfig(args);return autotuner.effective(path);}
  async function tuneOff(args){await refresh();const {path}=tuneConfig(args);return autotuner.off(path);}

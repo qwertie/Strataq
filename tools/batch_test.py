@@ -13,7 +13,6 @@ import strata_tokenizer as ST  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from strata_common.expert_fill import wait_for_protocol_experts  # noqa: E402
-from strata_common import cfg_paths  # noqa: E402
 
 QUESTIONS = [
     "Explique en detail le fonctionnement d'un B-tree.",
@@ -90,7 +89,7 @@ def main():
     ap.add_argument("--pad", type=int, default=0, help="PAR-H: every prompt gets about this many tokens of its own filler text first")
     ap.add_argument("--mt-min", default="1", help="STRATA_IQ_MT_MIN for the engine (1: exact; empty: the default)")
     a = ap.parse_args()
-    cfg = cfg_paths.read_config(a.config)
+    cfg = json.loads(Path(a.config).read_text())
     tok = ST.load_folder(cfg["tokenizer"])
     prompts = []
     for q in QUESTIONS[: a.n]:

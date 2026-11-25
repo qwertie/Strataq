@@ -12,7 +12,6 @@ import threading
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / 'tools')]
 from strata_common.engine_client import StrataEngine, child_env
-from strata_common import cfg_paths  # noqa: E402
 from strata_server.frontend import ChatTemplate
 import strata_tokenizer as ST
 
@@ -163,7 +162,7 @@ def main():
         print(f'Dry run: {a.scenario}; paired baseline/candidate; fixed residency, greedy output.')
         print('No model loaded. Use --run only with a separately available GPU/test window.')
         return
-    cfg = cfg_paths.read_config(a.config)
+    cfg = json.loads(a.config.read_text(encoding='utf-8'))
     p = Path(cfg['tokenizer'])
     tok = ST.load_folder(p)
     tpl = ChatTemplate(p / 'chat_template.jinja')

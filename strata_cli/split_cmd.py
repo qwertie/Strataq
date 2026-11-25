@@ -12,8 +12,6 @@ import os
 import sys
 from pathlib import Path
 
-from strata_common import cfg_paths
-
 
 def add_parser(sp) -> None:
     p = sp.add_parser("split-engine", help="the all-cards split engine for a run config (the app's start asks it; the Terminal does the same in `strata launch`)")
@@ -35,7 +33,7 @@ def run(a) -> int:
         return 5
 
     try:
-        cfg = cfg_paths.read_config(a.config)
+        cfg = json.loads(Path(a.config).read_text(encoding="utf-8-sig"))
         if not isinstance(cfg, dict):
             raise ValueError("not an object")
     except (OSError, ValueError) as exc:

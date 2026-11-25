@@ -28,7 +28,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ab_engine import arm_server, parse_arms  # noqa: E402
-from strata_common import cfg_paths  # noqa: E402
 
 SYSTEM = ("You are an autonomous coding agent working in the user's repository. You can read files, search the code, "
           "edit files and run commands with the tools below. Work step by step: read the code you need before changing "
@@ -146,7 +145,7 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=1234)
     ap.add_argument("--log", default="agent_turns_bench.jsonl")
     a = ap.parse_args()
-    base = cfg_paths.read_config(a.config)
+    base = json.loads(Path(a.config).read_text())
     arms = parse_arms(a.arms)
     work = turns()
     if a.max_turns:

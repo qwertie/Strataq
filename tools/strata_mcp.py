@@ -41,7 +41,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from strata_base.memory import read_ram                             # noqa: E402
 from strata_base.path_compare import nearest_existing               # noqa: E402
-from strata_common import catalog, cfg_paths                        # noqa: E402
+from strata_common import catalog                                  # noqa: E402
 from strata_control.discovery import config_files, own_settings_file  # noqa: E402
 
 PROTOCOL = "2025-06-18"
@@ -586,7 +586,7 @@ class Strata:
     @staticmethod
     def read_config(path: Path) -> dict:
         try:
-            cfg = cfg_paths.read_config(path)
+            cfg = json.loads(path.read_text(encoding="utf-8-sig"))
             return cfg if isinstance(cfg, dict) else {}
         except (OSError, ValueError):
             return {}

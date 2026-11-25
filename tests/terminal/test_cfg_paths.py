@@ -148,13 +148,11 @@ class StaleConfigPaths(UpdaterCase):
         return path
 
     def cfg_of(self, path):
-        return cfg_paths.read_config(path)              # the paths as the readers see them (the file holds them relative)
+        return json.loads(Path(path).read_text(encoding="utf-8"))
 
     def without_output_path(self, path):
-        """The config as its readers see it, as text, without the one path the engine WRITES (--expert-profile-save), which is
-        deliberately not looked for."""
-        text = json.dumps(cfg_paths.read_config(path), indent=2)
-        return text.replace(json.dumps(str(self.control / "0.1.44" / "data" / "learned.bin"))[1:-1], "")
+        """The config's text without the one path the engine WRITES (--expert-profile-save), which is deliberately not looked for."""
+        return Path(path).read_text(encoding="utf-8").replace(json.dumps(str(self.control / "0.1.44" / "data" / "learned.bin"))[1:-1], "")
 
     def host_log_lines(self, name, word="config:"):
         _, _, log_path = runtime._paths(name)

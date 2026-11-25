@@ -2043,7 +2043,7 @@ not establish that the replacement engine matches or beats the original engine a
 
 The saved source-setup config inspected on 3 November 2026, `strata-iq3_s.json`, selects Windows HIP,
 native IQ3_S from `Strata-data`, `--expert-cache auto --resident-experts --prefill auto --spec 4
---spec-min-p 0.5 --mtp ../Strata-data/mtp/rt --max-context 204800 --kv int8 --vision
+--spec-min-p 0.5 --mtp C:/AI-models/Strata-data/mtp/rt --max-context 204800 --kv int8 --vision
 --vram-reserve-mib 700`, with server `parallel: 2`. Its existing `strata-iq3_s.log` records 24,576 GPU
 expert slots using 46.84 GiB, 2.69 GiB of resident RAM experts and no file blob reads in the reported requests.
 These are historical configuration and residency records, not a new throughput measurement or proof of stable
@@ -2463,7 +2463,7 @@ that an arbitrary model export has the required dense tensors, geometry or metad
 
 Local inventory: `Strata-data/models/IQ3_S`, `Strata-data/packs/iq3_s`, and the IST-DAS 2.00 pack under
 `Strata-data/packs/deepseek-v4.1-flash-ist-das-2.00bpw`. Its original model and DSpark files are in
-`../DeepSeek-V4.1-Flash`; tests use copied pack manifests and profiles, never modify those files.
+`C:/AI-models/DeepSeek-V4.1-Flash`; tests use copied pack manifests and profiles, never modify those files.
 Qwen3.6 UD-Q4_K_XL files are also present; that family is outside this replacement task.
 
 Evidence and limits: Windows HIP on Strix Halo; temporary scripts and logs in `%TEMP%/quant-compat`.

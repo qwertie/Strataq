@@ -2,8 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { build } from 'esbuild';
-import { resolve } from 'node:path';
-import { KNOWN_KEYS, checkAndParseRunConfig, checkRunConfig, describeIssues, nearestKey, withAbsolutePaths } from '../server/run-config-check.mjs';
+import { KNOWN_KEYS, checkAndParseRunConfig, checkRunConfig, describeIssues, nearestKey } from '../server/run-config-check.mjs';
 import { NATIVE_FIELDS } from '../server/native-settings.mjs';
 import { openTextFile, textEditorCommand } from '../server/open-text-file.mjs';
 
@@ -148,15 +147,4 @@ test('every issue sentence exists in all nine languages and keeps its slots', as
 
 test('the notes the app itself writes into the file (ui_resource_baseline, ui_vision_device, ...) are not reported', () => {
   assert.deepEqual(checkRunConfig('{"ui_resource_baseline": {"parallel": 2}, "ui_vision_device": "cpu", "ui_resource_profile": "work"}'), { ok: true, issues: [] });
-});
-
-test('paths written from the config folder are made absolute for a copy saved elsewhere', () => {
-  const folder = resolve('/install/Strata');
-  const config = { exe: './build/strata', cwd: '.', args: ['--pack', '../Strata-data/packs/x', 'auto', 'owner/repo'],
-    vision: { exe: './engine/strata-vision', gpu: true }, env: { A: '../tuning.txt', B: '1' }, sampling: { x: './kept' } };
-  assert.deepEqual(withAbsolutePaths(config, folder), {
-    exe: resolve(folder, 'build/strata'), cwd: folder, args: ['--pack', resolve(folder, '../Strata-data/packs/x'), 'auto', 'owner/repo'],
-    vision: { exe: resolve(folder, 'engine/strata-vision'), gpu: true }, env: { A: resolve(folder, '../tuning.txt'), B: '1' },
-    sampling: { x: './kept' },
-  });
 });

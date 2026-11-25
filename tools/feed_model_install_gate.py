@@ -48,7 +48,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "packaging"))
-from strata_common import cfg_paths  # noqa: E402
 
 REV = "0123456789abcdef0123456789abcdef01234567"
 REPO = "gate-test/Qwen4-Gate-GGUF"
@@ -356,7 +355,7 @@ def _is_run_config(p: Path) -> bool:
 
 def config_problems(config: Path, data: Path, install: Path, out: str) -> list[str]:
     problems = []
-    d = cfg_paths.read_config(config)
+    d = json.loads(config.read_text(encoding="utf-8-sig"))
     args = [str(a) for a in d.get("args", [])]
     text = " ".join(args)
     if not any(a.endswith(".gguf") or ".gguf" in a for a in args) and "--model" not in args:
@@ -378,7 +377,7 @@ def config_problems(config: Path, data: Path, install: Path, out: str) -> list[s
 def start_engine(config: Path, engine: Path, work: Path, log) -> list[str]:
     """Step 5: the engine of the run config, one request. The engine folder replaces the config's `component:` engine."""
     problems: list[str] = []
-    d = cfg_paths.read_config(config)
+    d = json.loads(config.read_text(encoding="utf-8-sig"))
     exe = next((p for p in (engine / "strata", engine / "strata.exe", engine / "bin" / "strata", engine / "bin" / "strata.exe") if p.is_file()), None)
     if exe is None:
         return [f"no strata engine program in {engine}"]

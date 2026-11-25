@@ -15,7 +15,6 @@ sys.path[:0] = [str(ROOT), str(ROOT / 'tools')]
 from conversation_cache_parity import STATE_KEYS, engine_args, require, state_hashes
 from strata_tokenizer import load_folder
 from strata_common.engine_client import StrataEngine, child_env
-from strata_common import cfg_paths  # noqa: E402
 from strata_server.frontend import ChatTemplate
 
 
@@ -80,7 +79,7 @@ def main():
         print(f'Dry run: {args.cycles} known-answer A/B/A cycles; approximate lengths {lengths}.')
         print('No model loaded or files created. Use --run only in an exclusive GPU test window.')
         return
-    cfg = cfg_paths.read_config(args.config)
+    cfg = json.loads(args.config.read_text(encoding='utf-8'))
     path = Path(cfg['tokenizer'])
     tok = load_folder(path)
     template = ChatTemplate(path / 'chat_template.jinja')
