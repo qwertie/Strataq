@@ -2324,7 +2324,9 @@ Switching the drafter on pushes the card's least ranked experts out to make room
 steps; switching it off gives their pages back. A guess whose step routes to a draft expert that is not in VRAM
 leaves it out when `--route-tail-skip` would leave out such an expert of the model itself; otherwise the guesses end
 before that step. `--route-prior-pct` also makes the draft layer prefer its experts in VRAM. Neither changes the
-answers: every guess is still checked. A draft layer that does not load at start is switched off with a warning.
+answers: every guess is still checked. The draft layer's routings count toward its experts' popularity as the
+model's own do, so the adaptive tier (`--adapt-every`) swaps its popular experts back in; switching the drafter off
+clears those counts. A draft layer that does not load at start is switched off with a warning.
 Measured on Strix Halo (Radeon 8060S, Windows, HIP), the IQ3_S pack, one greedy request of 160 tokens, twice each:
 123 of 169 to 170 guesses accepted with the experts in the pool, 3.9 to 4.3 s of decode against 6.3 to 6.8 s with
 the drafter off; switching it on again loaded its experts in 2.1 s.

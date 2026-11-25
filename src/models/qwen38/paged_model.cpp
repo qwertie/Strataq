@@ -476,8 +476,8 @@ int run_paged_engine(int argc, char** argv) {
         return 2;
     }
     m.finish_expert_tiers();
-    if (o.adapt_every > 0 && o.adapt_swaps > 0)   // the routings the engine's adaptive tier counts
-        m.drive.d.usage.assign((size_t) (m.g.n_layers * m.g.n_expert), 0.0f);
+    if (o.adapt_every > 0 && o.adapt_swaps > 0)   // the routings the engine's adaptive tier counts (the drafter's last)
+        m.drive.d.usage.assign((size_t) ((m.g.n_layers + (drafting ? 1 : 0)) * m.g.n_expert), 0.0f);
     std::string err;
     strata::core::ExpertFiles files;
     strata::core::RamExperts ram;
@@ -1381,12 +1381,13 @@ int PagedQwen::propose(strata::serve::PagedPart& last, int session, int32_t, int
     const int got = drafter_->propose(session, part.pages, part.ss, conv_.ver.final_R_all(), n, out, err, draft);
     if (got < 0)
         (void) wait_state(err);
-    else if (n > 0) {
-        // Only resident experts gain recency here. Missing experts still follow the fixed refill ranking, so a
-        // size-class cap can leave a demanded draft expert outside the pool until the ranking or capacity changes.
-        for (const int32_t expert : m_.mtp.get_routed())
-            pcards_.back().experts.note_use({(int32_t) m_.g.n_layers, expert});
-    }
+    else if (n > 0)   // the draft's routings count as the model's do, so the adaptive tier brings in the popular ones
+        for (const int32_t expert : m_.mtp.get_routed()) {
+            if (std::vector<float>& usage = m_.drive.d.usage; !usage.empty())
+                usage[(size_t) (m_.g.n_layers * m_.g.n_expert + expert)] += 1.0f;
+            else
+                pcards_.back().experts.note_use({(int32_t) m_.g.n_layers, expert});
+        }
     return got;
 }
 
@@ -1432,6 +1433,8 @@ bool PagedQwen::get_row_coordinates(const std::vector<strata::spec::StepRow>& ro
 bool PagedQwen::switch_drafter(bool on, std::string& err) {
     if (!on) {
         m_.unload_drafter();
+        if (std::vector<float>& usage = m_.drive.d.usage; !usage.empty())   // (or the adaptive tier brings them back)
+            std::fill(usage.begin() + m_.g.n_layers * m_.g.n_expert, usage.end(), 0.0f);
     } else {
         m_.mtp.set_kv_in_pages(true);
         m_.mtp.set_pool_experts(pool_experts_);
