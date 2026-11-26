@@ -81,6 +81,10 @@ public:
 
 private:
     void* handle_ = nullptr;
+    /// The GPU that was current when handle_ was made.  cuBLAS answers some shapes with CUBLAS_STATUS_INTERNAL_ERROR
+    /// while another GPU is current, and new streams, events and buffers belong to the current GPU, so the public
+    /// calls that reach cuBLAS or make those make this one current (strata::core::OnDevice).
+    int device_ = -1;
     void* stream_ = nullptr;
     uint16_t* scratch_ = nullptr;
     int64_t scratch_elems_ = 0;

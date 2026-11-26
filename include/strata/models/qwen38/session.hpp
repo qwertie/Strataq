@@ -113,6 +113,8 @@ void session_set_layers(SessionState& s, const ModelGeometry& g, int64_t layer_l
 /// recurrent state (`gdn_state` stays null for the pool's owner to set) and without the QSA layers' K/V
 /// (qsa_set_kv_units).  Set before sizing and initializing a session.
 void session_set_pool_state(bool enabled);
+/// Whether sessions are carved for a page pool (session_set_pool_state)
+bool session_pool_state();
 /// Before the memory `session_init` carved is freed: forgets what points into it from outside the session (the
 /// rope kernels' registered angle table, #280), so a later session never rotates by freed memory.
 void session_release(SessionState& s);

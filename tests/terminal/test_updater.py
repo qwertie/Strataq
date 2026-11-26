@@ -553,6 +553,13 @@ class LazyModel(UpdaterCase):
 
 
 class OtherComponents(UpdaterCase):
+    def setUp(self):
+        """Uses an older installed Control for the component upgrade scenarios."""
+        super().setUp()
+        patch = mock.patch.object(ec, "runtime_version", return_value="0.1.0")
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def build_with_app(self, version="0.2.0", tamper=False):
         public, secret = fx.minisign_pair()
         installer = os.urandom(5000)

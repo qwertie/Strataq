@@ -204,7 +204,8 @@ class ModelPathWins(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 r.ensure_model()
         self.assertFalse(any("already installed with these choices" in x for x in said))
-        self.assertTrue(any("uses the folder you gave" in x for x in said))
+        self.assertTrue(any("Preparing the installed model with the engine and folders you chose." in x
+                            for x in said))
         self.assertIn(str(self.mine), r.setup_args())
 
     def test_without_a_path_the_installed_copy_is_still_reused(self):

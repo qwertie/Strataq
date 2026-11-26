@@ -27,7 +27,8 @@ class WorkerKey(unittest.TestCase):
             seen["env"], seen["argv"] = dict(kw["env"]), argv
             raise OSError("not started in this test")
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, env, clear=False), \
-                mock.patch("serve.lifeline.popen", popen), mock.patch.object(tune_session.tune_machine, "gpu_used_mib", return_value=None):
+                mock.patch("strata_common.lifeline.popen", popen), \
+                mock.patch.object(tune_session.tune_machine, "gpu_used_mib", return_value=None):
             if "STRATA_API_KEY" not in env:
                 os.environ.pop("STRATA_API_KEY", None)
             s = WorkerSession(base_config={"args": [], "api_key": "from-the-preset"}, serve_dir=tmp, workdir=tmp)

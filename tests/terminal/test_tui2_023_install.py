@@ -60,7 +60,8 @@ class WindowsInstaller(unittest.TestCase):
                           f"try {{ Invoke-Expression (Get-Content -Raw -LiteralPath '{INSTALL_PS1}') }} catch {{ Write-Host \"STOPPED\" }}\n",
                           encoding="utf-8-sig")
         done = subprocess.run([POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(runner)], capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=300)
+                              encoding="utf-8", errors="replace", timeout=300,
+                              env={k: v for k, v in os.environ.items() if k.lower() != "psmodulepath"})
         return done.stdout + done.stderr
 
     def test_a_folder_with_accented_letters_is_unpacked(self):

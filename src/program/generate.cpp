@@ -1189,63 +1189,6 @@ private:
 };
 
 
-/// The ceiling of the CPU/PCIe miss share the auto rules use (PcieAuto, its start value and the later stages of a layer split) and the pool factor k
-/// of the rule (strata/core/pcie_share_rule.hpp).  0.2.10.1 defaults on a discrete card: ceiling 0.95 and k falling with the pool rate (2 workers
-/// 31 -> 63 tok/s, 4 workers 56 -> 79, a strong pool unchanged: k is 1.85 from 30 GB/s of expert bytes and the shares stay below 0.60); an integrated
-/// GPU (Strix Halo and the other APUs, whose "link" is the shared memory) and STRATA_DEFAULTS=026 keep 0.60 and 1.85.  STRATA_PCIE_SHARE_MAX /
-/// STRATA_PCIE_K_RULE=0 or 1 set either by hand.
-static double pcie_share_max() {
-    static const double v = strata::pcie_share_ceiling(spill_discrete_gpu(), strata::defaults_026(), std::getenv("STRATA_PCIE_SHARE_MAX"));
-    return v;
-}
-static double pcie_pool_k(double r) {
-    static const bool on = strata::pcie_k_rule_default(spill_discrete_gpu(), strata::defaults_026(), std::getenv("STRATA_PCIE_K_RULE"));
-    return strata::pcie_pool_k(r, on);
-}
-
-// 0.1.42, CUDA single-GPU serve, no --pcie-frac: the share refined from what the CPU pool measures in the first decode
-// windows.  The balance share of the missed experts is link / (link + CPU rate).  The link is the start-up probe; the CPU
-// rate is the expert bytes over the pool's wall time per missed expert (ExpertDispatch::ms_run / multi_misses), which the
-// engine already times.  The best shares measured with the route tail skip on (RTX 3060 0.15-0.20, Tesla P100 0.20, RTX
-// A4000 flat from 0.15 to 0.40; the 0.1.41 rule gave 0.55, 0.29, 0.30) lie within one 0.05 step of link / (link + 1.85 x pool rate).
-// Three updates at most (after 48, then 96 and 96 more windows), each rounded to 0.05, so a noisy window cannot move
-// the share by less than a step and it stops moving after the third.  STRATA_PCIE_FRAC_DEFAULT=old keeps the 0.1.41 rule.
-struct PcieAuto {
-    static constexpr double kPoolFactor = 1.85;
-    bool on = false;
-    double link_gbps = 0.0, blob_bytes = 0.0;
-    double mark_ms = 0.0;
-    int64_t mark_jobs = 0;
-    double acc_ms = 0.0;
-    int64_t acc_jobs = 0;
-    int acc_win = 0, updates = 0;
-    void mark(double ms_run, int64_t jobs) { mark_ms = ms_run; mark_jobs = jobs; }
-    /// After a decode window: the new share, or -1 while there is nothing to change.  `tc_us`/`rate` get the reading.
-    double window(double ms_run, int64_t jobs, double cur, double* tc_us, double* rate) {
-        if (!on) return -1.0;
-        acc_ms += ms_run - mark_ms;
-        acc_jobs += jobs - mark_jobs;
-        mark(ms_run, jobs);
-        ++acc_win;
-        if (acc_win < (updates == 0 ? 48 : 96)) return -1.0;
-        if (acc_jobs < 300) {          // too few missed experts to read the pool's speed (everything hits): look again
-            if (acc_win >= 2000) on = false;
-            return -1.0;
-        }
-        const double tc = acc_ms * 1000.0 / (double) acc_jobs;
-        acc_ms = 0.0;
-        acc_jobs = 0;
-        acc_win = 0;
-        if (++updates >= 3) on = false;
-        if (!(tc > 1.0) || !(blob_bytes > 0.0) || !(link_gbps > 0.0)) return -1.0;
-        const double r = blob_bytes / (tc * 1e-6) / 1e9;
-        const double f = std::min(pcie_share_max(), std::max(0.10, std::round(link_gbps / (link_gbps + pcie_pool_k(r) * r) * 20.0) / 20.0));
-        *tc_us = tc;
-        *rate = r;
-        return std::fabs(f - cur) < 0.025 ? -1.0 : f;
-    }
-};
-
 }  // namespace
 
 // STRATA_SPEC_PROB=1 with the default (pick) gate: a draft that fails the confidence gate is still a proposal attempt, and the
@@ -4584,7 +4527,7 @@ int main(int argc, char** argv) {
 #endif
             if (new_start) {
                 const double r = std::min(65.0, 4.0 * (double) pool.workers());
-                const double f0 = std::min(pcie_share_max(), std::max(0.10, std::round(o.pcie_probe_gbps / (o.pcie_probe_gbps + pcie_pool_k(r) * r) * 20.0) / 20.0));
+                const double f0 = get_pcie_share(o.pcie_probe_gbps, r);
                 std::fprintf(stderr, "strata serve: PCIe share: start %.2f from %d pool workers (assumed %.0f GB/s of expert bytes) and the %.1f GB/s link (was %.2f)\n",
                              f0, pool.workers(), r, o.pcie_probe_gbps, o.pcie_frac);
                 o.pcie_frac = f0;
@@ -4628,8 +4571,7 @@ int main(int argc, char** argv) {
             for (int st = 1; st < n_stages; ++st) {
                 GpuStage& gs = *stages[(size_t) st - 1];
                 if (!(gs.link_gbps > 0.0)) continue;
-                gs.pcie_frac = std::min(pcie_share_max(), std::max(0.10, std::round(gs.link_gbps / (gs.link_gbps +
-                                   pcie_pool_k(rate) * rate) * 20.0) / 20.0));
+                gs.pcie_frac = get_pcie_share(gs.link_gbps, rate);
                 split_drive.pcie_num[st] = get_pcie_num(gs.pcie_frac);
                 split_drive_b.pcie_num[st] = split_drive.pcie_num[st];
                 std::fprintf(stderr, "strata serve: PCIe share: stage %d (link %.1f GB/s) -> pcie_frac %.2f\n", st + 1,

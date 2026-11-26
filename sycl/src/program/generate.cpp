@@ -7928,7 +7928,6 @@ int main(int argc, char **argv) try {
                 c.backend = "cuda";
 #endif
                 c.kv = o.kv;
-                c.max_context = o.max_context;
                 c.kv_resident = o.kv_resident;
                 c.mtp_window = o.mtp.empty() ? -1 : o.mtp_window;
                 const char* rot = std::getenv("STRATA_KV_ROT");

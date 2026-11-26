@@ -111,7 +111,18 @@ SplitPlan plan_layer_split(const SplitProblem& p, const char* log_prefix) {
     std::vector<int64_t> stage_floors;   // #2644: each card's share of the room (empty: off)
     // #1428: 2 and 3 cards - every placement priced, so the near tie can name a really different one
     std::vector<std::pair<double, std::vector<int64_t>>> priced;
+    // a hard rule (SplitProblem::can_run): every card must be able to run its range, whatever the gate says
+    const auto runnable = [&](const std::vector<int64_t>& cuts) {
+        if (!p.can_run) return true;
+        for (int i = 0; i < ns; ++i) {
+            const int64_t lb = i == 0 ? 0 : cuts[(size_t) i - 1], le = i + 1 < ns ? cuts[(size_t) i] : L;
+            if (!p.can_run(lb, le)) return false;
+        }
+        return true;
+    };
     const auto consider = [&]() {
+        if (!runnable(at))
+            return;
         if (min_stage_layers > 1 && rules::smallest_stage(at, L) < min_stage_layers)
             return;
         if (!stage_floors.empty() && rules::below_floors(at, L, stage_floors))
@@ -188,6 +199,8 @@ SplitPlan plan_layer_split(const SplitProblem& p, const char* log_prefix) {
                                           (double) (k3 - k2) * p.cards[2].layer_ms +
                                           (double) (L - k3) * p.cards[3].layer_ms;
                         if (min_stage_layers > 1 && rules::smallest_stage({k1, k2, k3}, L) < min_stage_layers)
+                            continue;
+                        if (!runnable({k1, k2, k3}))
                             continue;
                         if (!stage_floors.empty() && rules::below_floors({k1, k2, k3}, L, stage_floors))
                             continue;

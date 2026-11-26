@@ -43,6 +43,9 @@ struct SplitProblem {
     std::function<int64_t(int card, int64_t lb, int64_t le)> room;
     /// Tells whether the engine can start on a placement (the old engine: its prompt path's buffers); null: always
     std::function<bool(const std::vector<SplitFill>&)> can_start;
+    /// Tells whether a card can run layers [lb, le) at all (the paged engine: a GDN and a QSA layer each); a hard
+    /// rule, kept even when no placement can start and the search falls back to decode time alone; null: always
+    std::function<bool(int64_t lb, int64_t le)> can_run;
     /// When no placement can start: true chooses one by decode time alone (SplitPlan::start_unchecked), false gives
     /// no placement (the old engine first tries a smaller K/V window, split_walk.hpp)
     bool choose_unchecked = true;

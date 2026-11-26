@@ -1,5 +1,6 @@
 // src/common/kernels/prefill/gemm.cu - see include/strata/common/kernels/prefill/gemm.hpp.
 #include "strata/base/gpu/managed_memory.hpp"
+#include "strata/base/gpu/on_device.hpp"
 #include "strata/base/platform/env.hpp"
 #include "strata/common/kernels/prefill/gemm.hpp"
 #include "strata/common/kernels/dequant_bf16.hpp"
@@ -698,6 +699,7 @@ bool Gemm::init_external(void* stream, uint16_t* scratch, int64_t scratch_elems,
         return false;
     }
     handle_ = h;
+    cudaGetDevice(&device_);
     stream_ = stream;
     external_ = true;
     note(cublasSetStream(h, (cudaStream_t) stream), "cublasSetStream");
@@ -716,6 +718,7 @@ bool Gemm::init_external(void* stream, uint16_t* scratch, int64_t scratch_elems,
 }
 
 void Gemm::rebind(uint16_t* scratch, int64_t scratch_elems, void* workspace, size_t ws_bytes) {
+    const strata::core::OnDevice on(device_);
     scratch_ = scratch;
     scratch_elems_ = scratch_elems;
     workspace_ = workspace;
@@ -730,6 +733,7 @@ void Gemm::rebind(uint16_t* scratch, int64_t scratch_elems, void* workspace, siz
 }
 
 bool Gemm::set_dequant_side(uint16_t* scratch2, std::string& err) {
+    const strata::core::OnDevice on(device_);
     side_scratch_ = scratch2;
     side_cur_ = 0;
     if (scratch2 == nullptr) return true;
@@ -769,6 +773,7 @@ bool Gemm::init(void* stream, int64_t scratch_elems, std::string& err) {
         return false;
     }
     handle_ = h;
+    cudaGetDevice(&device_);
     stream_ = stream;
     note(cublasSetStream(h, (cudaStream_t) stream), "cublasSetStream");
     // A fixed workspace so the handle never allocates on the way (and graphs could capture it later).
@@ -1061,6 +1066,7 @@ __global__ void f16_to_bf16_kernel(const __half* __restrict__ in, uint16_t* __re
 }
 void Gemm::bf16(const uint16_t* X, const uint16_t* W, float* Y, int64_t T, int64_t N, int64_t K, int64_t ldy,
                 float beta, int64_t ldx, bool x_f16) {
+    const strata::core::OnDevice on(device_);
     if (T <= 0 || N <= 0) return;
     if (ldy <= 0) ldy = N;
     if (ldx <= K) ldx = 0;
@@ -1189,6 +1195,7 @@ void Gemm::bf16(const uint16_t* X, const uint16_t* W, float* Y, int64_t T, int64
 
 void Gemm::f16(const uint16_t* X, const uint16_t* W, float* Y, int64_t T, int64_t N, int64_t K, int64_t ldy,
                float beta) {
+    const strata::core::OnDevice on(device_);
     if (T <= 0 || N <= 0) return;
     if (ldy <= 0) ldy = N;
 #ifdef STRATA_USE_HIP
@@ -1372,6 +1379,7 @@ void Gemm::f16_inplace(const uint16_t* X, const uint16_t* W, float* Y, int64_t T
 
 void Gemm::native(const uint16_t* X, int ggml_type, const void* W_blocks, float* Y, int64_t T, int64_t N, int64_t K,
                   int64_t ldy, float beta, int64_t ldx) {
+    const strata::core::OnDevice on(device_);
 #ifdef STRATA_USE_HIP
     // S23 (opt-in STRATA_PF_PAD=1, with STRATA_PF_GEMM=1 on chunks of STRATA_PF_SWITCH_MIN_T+ tokens): the weight
     // dequantized into the scratch with row stride K + 64 halves, so no 4 KB-multiple stride camps on the memory

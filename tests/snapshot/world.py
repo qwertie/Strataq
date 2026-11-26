@@ -234,7 +234,7 @@ class World:
                 from strata_common import telemetry
                 st.enter_context(mock.patch.object(telemetry, "gpu_reader", lambda *a, **k: Reader()))
             try:
-                from strata_server import server
+                from strata_common import engine_client as server
                 st.enter_context(mock.patch.object(server, "_CARD_CLASS", [drafting.card_class(archs)]))
                 st.enter_context(mock.patch.object(server, "gpu_vram_mib", lambda gl, hip=False: {} if m.unified or vram is None else {int((gl or [0])[0]): vram}))
             except ImportError:                                  # serve needs its packages: a world without them still plans

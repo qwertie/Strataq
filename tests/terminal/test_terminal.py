@@ -623,6 +623,10 @@ except ImportError:
 
 @unittest.skipIf(MonitorApp is None, "optional Textual dependency absent")
 class HeadlessMonitorTests(unittest.TestCase):
+    def setUp(self):
+        """Uses the Unicode terminal expected by these layout checks."""
+        self.enterContext(mock.patch("strata_cli.consoleinfo.legacy_console", return_value=False))
+
     def test_live_monitor_marks_activity_gaps_after_freeze_and_resets_on_restart(self):
         from rich.console import Console
 

@@ -349,7 +349,7 @@ test('#4783 the composer acts on the choice, the default keeps today\'s behaviou
   assert.match(chat, /if \(!session \|\| streaming \|\| !parked\?\.length\)\s*return;\s*const next = takeParked\(session\.id\);/);
   const store = src('lib/store.ts');
   assert.match(store, /whileBusy: validWhileBusy\(parsed\.whileBusy\) \? parsed\.whileBusy : 'wait'/, 'an old or invalid saved value reads as Wait');
-  assert.match(store, /\n  whileBusy: 'wait',\n/);
+  assert.match(store, /\r?\n  whileBusy: 'wait',\r?\n/);
   assert.match(src('screens/Settings.tsx'), /setWhileBusy\(value as typeof prefs\.whileBusy\)/);
 });
 

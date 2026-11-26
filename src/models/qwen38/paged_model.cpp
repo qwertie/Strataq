@@ -242,13 +242,20 @@ public:
     bool lay_out_prompt(const PagedCard& card, int64_t chunk, uint8_t* device, uint8_t* host,
                         std::string& err) override;
     bool read_prompt(const PagedParts& parts, const std::vector<int64_t>& ids, int64_t from, int64_t n, bool drafting,
-                     const PromptControl& control, int64_t& took, std::string& err) override;
+                     const PromptControl& control, int64_t& took, std::string& err) override {
+        const bool ok = read_prompt_core(parts, ids, from, n, drafting, control, took, err);
+        pcie_auto_.mark(m_.drive.d.ms_run, m_.drive.d.multi_misses);   // the prompt's windows are not the decode's
+        return ok;
+    }
     void set_step_histories(const std::vector<const std::vector<int32_t>*>& histories) override {
         histories_ = histories;
     }
     bool run_rows(const std::vector<strata::spec::StepRow>& rows, std::vector<int32_t>& picks,
                   std::string& err) override {
-        return run_rows(rows, histories_, picks, err);
+        if (!run_rows(rows, histories_, picks, err))
+            return false;
+        refine_pcie_shares();
+        return true;
     }
     int get_pipeline_stages() const override { return (int) cards_.size(); }
     int get_route_tail_skip() const override { return strata::core::tail_skip_rank(); }
@@ -335,6 +342,13 @@ private:
     std::vector<int32_t> picks_;       ///< the last step's token after each row, for the drafter
     std::vector<const std::vector<int32_t>*> histories_; ///< consumed tokens for the current step
     std::vector<int> history_lengths_; ///< each session's penalty window
+    strata::qwen38::PcieAuto pcie_auto_;   ///< refines the cards' PCIe shares in the first decode windows
+    /// Feeds a finished decode window to pcie_auto_ and, when it picks a new share, gives every card its own share
+    /// for its link against the CPU pool's measured rate (as the older engine's layer split does).
+    void refine_pcie_shares();
+    /// Does read_prompt's work; read_prompt then keeps the prompt's missed experts out of pcie_auto_'s readings.
+    bool read_prompt_core(const PagedParts& parts, const std::vector<int64_t>& ids, int64_t from, int64_t n,
+                          bool drafting, const PromptControl& control, int64_t& took, std::string& err);
     /// Each layer's dense weights on a card of the split (Model::get_layer_bytes), read once a cut is planned
     mutable std::vector<uint64_t> layer_dense_;
     /// Prevents a cut move when pack metadata could not establish its memory cost.
@@ -344,6 +358,7 @@ private:
 std::string get_split_hop_refusal(const Options& o);
 std::vector<uint64_t> get_blob_bytes(const Model& m, bool drafter);
 bool has_drafter(const Model& m, const ModelCard& card);
+int64_t get_pool_max_experts(const Model& m);
 PagedCard& add_card(Model& m, Conversation& conv, PagedCards& cards, ModelCards& model_cards, GpuStage* stage);
 bool open_pages(Model& m, PagedCard& card, ModelCard& mc, const PagedSettings& s, int64_t max_experts,
                 std::string& err);
@@ -446,11 +461,12 @@ int run_paged_engine(int argc, char** argv) {
     ModelCards model_cards;
     m.open_expert_pages = [&](int64_t max_experts, std::string& err) {
         PagedCard& card = add_card(m, conv, cards, model_cards, nullptr);
-        return open_pages(m, card, model_cards[card.index], settings, max_experts, err);
+        return open_pages(m, card, model_cards[card.index], settings,
+                          m.auto_cache ? get_pool_max_experts(m) : max_experts, err);
     };
     m.open_stage_pages = [&](GpuStage& st, std::string& err) {
         PagedCard& card = add_card(m, conv, cards, model_cards, &st);
-        return open_pages(m, card, model_cards[card.index], settings, o.expert_cache, err);
+        return open_pages(m, card, model_cards[card.index], settings, get_pool_max_experts(m), err);
     };
     if (const int status = m.load(); status != 0) return status;
     drafting = drafting && !o.mtp.empty();   // (Model::load clears --mtp when the drafter does not load)
@@ -487,6 +503,9 @@ int run_paged_engine(int argc, char** argv) {
         return 1;
     }
     m.use_expert_source(ram);
+    // With --expert-cache auto the pools take as many experts as their pages fit (get_pool_max_experts), a number not
+    // known here; the old engine's auto slot count, sized from CUDA0's free VRAM, stands in for it, so the "nearly
+    // every expert is cached" exception can miss pools that hold more.
     set_tail_skip_default(m, std::max(o.expert_cache, 0), kProgram.c_str());
     m.set_prompt_pinned_share();
     m.arm_prompt_cpu_share();
@@ -550,15 +569,50 @@ PagedQwen::PagedQwen(Model& m, Conversation& conv, PagedCards& cards, ModelCards
     facts.expert_bytes = get_blob_bytes(m, false);
     if (drafter != nullptr)
         facts.drafter_expert_bytes = strata::kernels::cpu::BLOB * (uint64_t) m.g.n_expert;
-    for (size_t i = 0; i < m.profile_all.size() && (int64_t) i < o.expert_cache; ++i)
+    const int64_t pool_experts = get_pool_max_experts(m);
+    for (size_t i = 0; i < m.profile_all.size() && (int64_t) i < pool_experts; ++i)
         facts.split_ranking.push_back({m.profile_all[i].first, m.profile_all[i].second});
-    facts.gpu_experts = o.expert_cache;
+    facts.gpu_experts = pool_experts;
     facts.adapt_every = o.adapt_every;
     facts.adapt_swaps = o.adapt_swaps;
     facts.adapt_min_gain = o.adapt_min_gain;
     facts.adapt_decay = o.adapt_decay;
     facts.row_bytes = (uint64_t) strata::kernels::cpu::H * sizeof(float);
     facts.cpu_expert_ms = kCpuExpertMs;
+    const bool cards_refined = model_cards.size() == 1 || pcie_auto_split_ok();
+    if (o.pcie_frac_auto && o.pcie_probe_gbps > 0.0 && o.peer_device < 0 && cards_refined) {
+        pcie_auto_.on = true;
+        pcie_auto_.link_gbps = o.pcie_probe_gbps;
+        double sum = 0.0;
+        for (const uint64_t b : facts.expert_bytes)
+            sum += (double) b;
+        pcie_auto_.blob_bytes = sum / (double) facts.expert_bytes.size();
+    }
+}
+
+void PagedQwen::refine_pcie_shares() {
+    Options& o = m_.o;
+    double tc_us = 0.0, rate = 0.0;
+    const double nf = pcie_auto_.window(m_.drive.d.ms_run, m_.drive.d.multi_misses, o.pcie_frac, &tc_us, &rate);
+    if (nf < 0.0)
+        return;
+    std::fprintf(stderr, "%s: PCIe share: the CPU pool takes %.0f us per missed expert (%.1f GB/s of expert bytes), "
+                         "the link %.1f GB/s -> pcie_frac %.2f (was %.2f; --pcie-frac N fixes it)\n",
+                 kProgram.c_str(), tc_us, rate, pcie_auto_.link_gbps, nf, o.pcie_frac);
+    o.pcie_frac = nf;
+    m_.drive.d.pcie_num = get_pcie_num(nf);
+    if (cards_.size() < 2)
+        return;
+    split_.pcie_num[0] = m_.drive.d.pcie_num;
+    for (size_t k = 1; k < cards_.size(); ++k) {
+        GpuStage* stage = cards_[k].stage;
+        if (stage == nullptr || !(stage->link_gbps > 0.0))
+            continue;
+        stage->pcie_frac = get_pcie_share(stage->link_gbps, rate);
+        split_.pcie_num[k] = get_pcie_num(stage->pcie_frac);
+        std::fprintf(stderr, "%s: PCIe share: %s (link %.1f GB/s) -> pcie_frac %.2f\n", kProgram.c_str(),
+                     pcards_[k].id.c_str(), stage->link_gbps, stage->pcie_frac);
+    }
 }
 
 PagedParts PagedQwen::make_parts(PagedCard& card, size_t first, size_t count, std::string& err) {
@@ -627,6 +681,17 @@ std::vector<uint64_t> get_blob_bytes(const Model& m, bool drafter) {
 /// Gets whether `card` runs `m`'s MTP drafter (--mtp), which Model::load_drafter puts on a layer split's last card.
 bool has_drafter(const Model& m, const ModelCard& card) {
     return !m.o.mtp.empty() && card.stage == m.get_drafter_stage();
+}
+
+/// Gets the most experts the GPUs' page pools admit together: --expert-cache N as given, and with --expert-cache auto
+/// every profiled expert, so that each pool takes as many as its pages fit.  The auto slot count the load computes is
+/// the old engine's cache, sized from CUDA0's free VRAM in slots of the largest blob before the pools open; used as
+/// the pools' cap it left them nearly empty whatever --gpu-mib gave them (546 slots: ~1.5 GiB of 6.6 + 9.5 GiB).
+int64_t get_pool_max_experts(const Model& m) {
+    if (!m.auto_cache)
+        return m.o.expert_cache;
+    const int64_t all = m.profile_all.empty() ? (int64_t) m.profile.size() : (int64_t) m.profile_all.size();
+    return std::max<int64_t>(all, m.o.expert_cache);
 }
 
 /// Tells whether `m`'s MTP drafter is loaded (switched on), so that its card's pool wants the drafter's experts.
@@ -1160,8 +1225,8 @@ bool PagedQwen::keep_restore_point(const PagedParts& parts, const std::vector<in
     return true;
 }
 
-bool PagedQwen::read_prompt(const PagedParts& parts, const std::vector<int64_t>& ids, int64_t from, int64_t n,
-                           bool drafting, const PromptControl& control, int64_t& took, std::string& err) {
+bool PagedQwen::read_prompt_core(const PagedParts& parts, const std::vector<int64_t>& ids, int64_t from, int64_t n,
+                                 bool drafting, const PromptControl& control, int64_t& took, std::string& err) {
     get_part(*parts.front()).read_from = from;
     took = n;
     const auto& on_chunk = control.on_chunk;
@@ -1326,6 +1391,7 @@ bool PagedQwen::finish_group(int group, std::vector<int32_t>& picks, std::string
         return false;
     g.picks = picks;
     note_row_logprobs(verifier, g, picks);
+    refine_pcie_shares();
     return true;
 }
 
@@ -1447,7 +1513,7 @@ bool PagedQwen::switch_drafter(bool on, std::string& err) {
     // or leave it.  On a layer split with hops this drops the experts the card held for other cards until the engine
     // places them again (its next pool resize or cut move).
     PagedCard& card = pcards_.back();
-    int64_t most = m_.o.expert_cache;
+    int64_t most = get_pool_max_experts(m_);
     const auto ranking = get_card_ranking(card.lb, card.le, most);
     card.experts.set_ranking(ranking, on ? std::min(most, card.experts.count_fitting(ranking)) : most);
     return true;

@@ -46,8 +46,8 @@ def slow_wait(*a, **k):                        # the model is still loading when
     Path(ready).write_text("x")
     time.sleep(120)
 
-patches = [mock.patch("strata_cli.cli._source", return_value=(Path("p.json"), None, None, {})),
-           mock.patch("strata_cli.cli._launch_plan", return_value=(plan, [])),
+patches = [mock.patch("strata_control.launch_plan.read_source", return_value=(Path("p.json"), None, None, {})),
+           mock.patch("strata_control.launch_plan.make_launch_plan", return_value=(plan, [])),
            mock.patch.object(bs.Target, "get", lambda self, path, timeout=10: None)]
 if mode == "loading":                          # the REAL start_engine, with the child it would start and a wait that never ends
     patches += [mock.patch.object(bs.subprocess, "Popen", lambda *a, **k: kid), mock.patch.object(bs, "_start_wait", slow_wait)]

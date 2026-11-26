@@ -41,7 +41,7 @@ def run_cli(argv: list[str]) -> tuple[int, str, str]:
 
 def engine_start(world: World, cfg: dict) -> dict:
     """What serve/server.py hands to the engine for this run config: the arguments (engine_args) and the variables child_env adds to the environment."""
-    from strata_server import server
+    from strata_common import engine_client as server
     baseline = dict(os.environ)
     notes = io.StringIO()
     with contextlib.redirect_stdout(notes):

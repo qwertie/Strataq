@@ -177,7 +177,9 @@ class Install(unittest.TestCase):
             self.cfg = cfg
             self.calls.append(("config", path.name))
 
-        patches = [mock.patch.object(setup, "download", lambda url, dst, what=None: self.calls.append(("get", url, dst))),
+        patches = [mock.patch.object(sys, "platform", "win32" if setup.WIN else "linux"),
+                   mock.patch.object(setup, "download",
+                                     lambda url, dst, what=None: self.calls.append(("get", url, dst))),
                    mock.patch.object(setup, "verify_sha256", lambda s, size, sha, own=False, also=None: self.calls.append(("sha", s.name, own))),
                    mock.patch.object(setup, "free_gb", lambda p: 900.0),
                    mock.patch.object(setup, "github_reachable", lambda timeout=10.0: self.github_up),
@@ -237,7 +239,7 @@ class Install(unittest.TestCase):
         self.assertIn("n-gram table", out)
 
     def test_no_engine_stops_before_the_download(self):
-        with mock.patch.object(setup, "get_dsv41_engine", lambda *a: None):   # the feed has no package for this card
+        with mock.patch.object(setup, "get_dsv41_engine", lambda *a, **kw: None):
             rc, out = self.install(engine=False)
         self.assertEqual(rc, 1, out)
         self.assertIn("DeepSeek's engine is not available for this computer yet", out)

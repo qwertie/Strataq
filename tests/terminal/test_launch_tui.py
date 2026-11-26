@@ -85,6 +85,8 @@ async def typed(pilot, text):
 
 class Base(unittest.TestCase):
     def setUp(self):
+        """Uses the Unicode terminal expected by these layout checks."""
+        self.enterContext(mock.patch("strata_cli.launch.widgets.unicode_ok", return_value=True))
         self.home = Home().__enter__()
         self.addCleanup(self.home.__exit__, None, None, None)
         FakeRunner.instances.clear()

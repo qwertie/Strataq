@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -20,6 +21,10 @@ def last_line(app) -> str:
 
 
 class Help(unittest.TestCase):
+    def setUp(self):
+        """Uses the Unicode terminal expected by these layout checks."""
+        self.enterContext(mock.patch("strata_cli.consoleinfo.legacy_console", return_value=False))
+
     def _run(self, view_key: str):
         async def go():
             # a one-second poll in real use; 0.2 s here so several polls pass while the help is up

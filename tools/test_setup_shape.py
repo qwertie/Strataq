@@ -170,6 +170,7 @@ class Launch(unittest.TestCase):
         from strata_cli.launch import runner as R
         fake = mock.Mock()
         fake.s.family = "q4lite-test"
+        fake.s.extra = {}
         fake.catalog.strata.setup_module.return_value = mock.Mock(FAMILIES=families)
         fake.multi_file.return_value = False
         return R, fake

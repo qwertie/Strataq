@@ -482,7 +482,7 @@ class TablesMatchTheSources(unittest.TestCase):
         self.assertEqual(py.family, "qwen4exp")
 
     def test_layout_tables_name_the_same_tensors(self):
-        text = _read("include/strata/core/family_layout.hpp")
+        text = _read("include/strata/models/common/family_layout.hpp")
         cpp = set(re.findall(r'add\("([^"]+)"', text)) | set(re.findall(r'push_back\(\{"([^"]+)"', text))
         py = set()
         g4, g35 = Q.Geometry(), Q.Geometry(family="qwen35moe", hc=0, hc_lr=0, idx_q_heads=0, idx_key_dim=0, n_mtp_layers=1, n_layers=40)
@@ -494,20 +494,20 @@ class TablesMatchTheSources(unittest.TestCase):
         self.assertEqual(py, cpp)
 
     def test_family_names_and_runs(self):
-        text = _read("include/strata/artifact/model_family.hpp")
+        text = _read("include/strata/common/artifact/model_family.hpp")
         self.assertIn('arch == "qwen4exp"', text)
         self.assertIn('arch == "qwen35moe"', text)
         self.assertIn("model_family_runs(ModelFamily f) { return f == ModelFamily::Qwen4Exp; }", text)
 
     def test_qwen35_limits_and_required_keys(self):
-        text = _read("src/qwen35/q36_engine.cu")
+        text = _read("src/models/qwen36/q36_engine.cu")
         self.assertIn("g.head_dim != 256 || g.ssm_state_size != 128 || g.ssm_d_conv != 4 || g.n_expert > 512 || m.top_k > 15", text)
-        hpp = _read("include/strata/artifact/gguf_reader.hpp")
+        hpp = _read("include/strata/common/artifact/gguf_reader.hpp")
         body = _func(hpp, "inline std::string check_architecture_qwen35moe")
         self.assertEqual(set(re.findall(r'"qwen35moe\.([a-z_.]+)"', body)), set(Q.QWEN35_REQUIRED))
 
     def test_qwen4_geometry_keys(self):
-        hpp = _read("include/strata/artifact/gguf_reader.hpp")
+        hpp = _read("include/strata/common/artifact/gguf_reader.hpp")
         body = _func(hpp, "inline std::string read_geometry")
         cpp = {m.group(1): m.group(3) == "true" for m in re.finditer(r'\{"([^"]+)", &core::ModelGeometry::(\w+), (true|false)\}', body)}
         self.assertEqual(cpp, {k: r for k, f, r in Q.QWEN4_KEYS})
@@ -516,7 +516,7 @@ class TablesMatchTheSources(unittest.TestCase):
                          {k for k, _ in Q.PINNED} - {"expert_shared_feed_forward_length"})
 
     def test_cuda_and_hip_lists(self):
-        iq = _read("src/kernels/cuda/iq_kernels.cu")
+        iq = _read("src/common/kernels/cuda/iq_kernels.cu")
         L = Q.BACKEND_LISTS["cuda"]
         self.assertEqual(_define(iq, "STRATA_GU_FMTS"), L["gu"])
         self.assertEqual(_define(iq, "STRATA_D_FMTS"), L["down"])
@@ -529,12 +529,13 @@ class TablesMatchTheSources(unittest.TestCase):
         self.assertRegex(_read("CMakeLists.txt"), r'option\(STRATA_Q6K_EXPERTS "[^"]*" ON\)')
 
     def test_mmvq_lists(self):
-        for rel in ("src/kernels/cuda/native_mmvq.cu", "sycl/src/kernels/cuda/native_mmvq.dp.cpp", "metal/src/engine/mmvq_host.cpp"):
+        for rel in ("src/common/kernels/cuda/native_mmvq.cu",
+                    "sycl/src/common/kernels/cuda/native_mmvq.dp.cpp", "metal/src/engine/mmvq_host.cpp"):
             with self.subTest(rel):
                 self.assertEqual(_ints(_func(_read(rel), "bool native_mmvq_supported"), r"ggml_type == (\d+)"), Q.MMVQ)
 
     def test_sycl_lists(self):
-        text = _read("sycl/src/kernels/cuda/iq_kernels.dp.cpp")
+        text = _read("sycl/src/common/kernels/cuda/iq_kernels.dp.cpp")
         L = Q.BACKEND_LISTS["sycl"]
         self.assertEqual(_define(text, "STRATA_GU_FMTS"), L["gu"])
         self.assertEqual(_define(text, "STRATA_D_FMTS"), L["down"])
@@ -556,7 +557,7 @@ class TablesMatchTheSources(unittest.TestCase):
                     self.assertGreater(Q.block_elems(t), 0)
 
     def test_expert_pair_rule_matches_the_cuda_function(self):
-        iq = _read("src/kernels/cuda/iq_kernels.cu")
+        iq = _read("src/common/kernels/cuda/iq_kernels.cu")
         body = _func(iq, "bool native_expert_supported")
         for frag in ("n_embd % qg == 0", "n_ff % qd == 0", "n_embd % 256 == 0", "(n_ff * n_embd) % 256 == 0", "is_iq(gu_type) && is_iq(d_type)"):
             self.assertIn(frag, body)
@@ -582,7 +583,8 @@ class TablesMatchTheSources(unittest.TestCase):
 
 def serve_template_hash() -> str:
     import hashlib
-    return hashlib.sha256((ROOT / "strata_server" / "chat_template.jinja").read_bytes()).hexdigest()
+    template = (ROOT / "strata_server" / "chat_template.jinja").read_bytes().replace(b"\r\n", b"\n")
+    return hashlib.sha256(template).hexdigest()
 
 
 if __name__ == "__main__":

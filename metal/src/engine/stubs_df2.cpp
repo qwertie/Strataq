@@ -1,8 +1,8 @@
-// metal/src/engine/stubs_df2.cpp - the DFlash2 tap kernels of the CUDA / HIP verifier and prefill (src/kernels/dflash2.hpp).
+// metal/src/engine/stubs_df2.cpp - the DFlash2 tap kernels of the CUDA / HIP verifier and prefill.
 // Verifier::record_window and Prefill::run_impl call them, but on Metal neither runs: the decode window and the prompt chunks are
 // metal/src/engine/window.cpp, which writes the taps itself (dflash2.inc).  They exist so the shared host files link.
 
-#include "strata/kernels/dflash2.hpp"
+#include "strata/models/qwen38/kernels/dflash2.hpp"
 
 namespace strata::metal_engine { void missing(const char* name); }
 

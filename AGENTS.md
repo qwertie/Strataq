@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Version 0.2.13, engine 0.1.59. The public model families are DeepSeekV4.1-Flash-1017,
+Version 0.2.13, engine 0.1.59.1. The public model families are DeepSeekV4.1-Flash-1017,
 Qwen3.8-Flash-Next and Qwen3.6-35B-A3B. DeepSeek V4.1-Flash runs in the app and in the Terminal
 (`strata launch --family deepseek41 --model ist-das-2.00bpw`; sets in
 [docs/MODELS.md](docs/MODELS.md#deepseek-v41-flash)). Read **[docs/AI_REFERENCE.md](docs/AI_REFERENCE.md)** for model availability, APIs, hardware limits and
@@ -34,8 +34,8 @@ short version is:
 1. Install the Terminal. It needs no administrator rights.
 
    ```sh
-   curl -fsSL https://github.com/Niko1221/Strata/releases/latest/download/install.sh -o install.sh && sh install.sh                  # Linux, Mac
-   irm https://github.com/Niko1221/Strata/releases/latest/download/install.ps1 | iex                         # Windows PowerShell
+   curl -fsSL https://github.com/qwertie/Strataq/releases/latest/download/install.sh -o install.sh && sh install.sh                  # Linux, Mac
+   irm https://github.com/qwertie/Strataq/releases/latest/download/install.ps1 | iex                         # Windows PowerShell
    ```
 
    On Windows, open a new terminal afterwards so that `strata` is on the PATH.

@@ -233,12 +233,12 @@ LLAMA_CPP_ZIP = f"https://github.com/ggml-org/llama.cpp/archive/{LLAMA_CPP_COMMI
 # "https://github.com/<you>/Strata/releases/latest/download/" (or pass --prebuilt / set STRATA_PREBUILT_URL).
 # With the default, the release of this checkout's own version (PREBUILT_TAG_URL, CMakeLists.txt's version) is
 # tried first and the latest release is the fallback (#214): an older checkout keeps the engine it shipped with.
-PREBUILT_URL = "https://github.com/Niko1221/Strata/releases/latest/download/"
+PREBUILT_URL = "https://github.com/qwertie/Strataq/releases/latest/download/"
 # The repository the release assets and their SHA-256 come from; `engine_digest` reads the API here even
 # when --prebuilt points the download somewhere else, because the hash is only worth having if it comes
 # from somewhere the download does not.
-REPO = "Niko1221/Strata"
-PREBUILT_TAG_URL = "https://github.com/Niko1221/Strata/releases/download/v{version}/"
+REPO = "qwertie/Strataq"
+PREBUILT_TAG_URL = "https://github.com/qwertie/Strataq/releases/download/v{version}/"
 PREBUILT_ASSET = "strata-windows-x64.zip" if WIN else "strata-linux-x64.zip"
 # the CUDA libraries the ready-made engine loads (the same CUDA 13.0 it is built with), from NVIDIA's pip packages
 CUDA_WHEELS = ["nvidia-cublas==13.0.2.14", "nvidia-cuda-runtime==13.0.96"]
@@ -256,6 +256,7 @@ CUDA12_WHEELS = ["nvidia-cublas-cu12==12.9.1.4", "nvidia-cuda-runtime-cu12==12.9
 # (575.51 / 576.02), which `strata update` enforces.  cuda12_min_driver() reads that from the package or the feed (#4247 #4188).
 CUDA12_COMPAT_DRIVER = 528 if WIN else 525
 ENGINE12_DIR = "engine-cuda12"
+# v0.1.59.1: first Strataq engines, with Original and New choices.
 MIN_ENGINE = (0, 1, 46)                # versions compare all numbers; v0.1.59: engine changes since v0.2.12 (git log 146df3c46..HEAD); v0.1.58: engine rounds 0215-0217 (tuned drafters, the file-tier re-check, prefill and Q5_0 fixes; git log c3b3f5035..HEAD); v0.1.46: the 0.2 release engine (UPDATE.bat and setup fetch it from the signed feed, #3469 #3437); v0.1.45: Qwen3.6 parallel requests and pictures, fixes #2346 #2372 #2396; v0.1.44.1: CPUs without AVX2 start again (#2324: an illegal instruction before main in the NVFP4 CPU rows), the CUDA 12.0/12.1 toolkits build (#2322), a crashed engine start is named instead of retried as a GPU runtime start, Mac M2 (#2323); v0.1.44: UD-Q4/Q5/Q6_K_XL and Q8_0 Unsloth files in setup (K-quant experts, MMQ prompt library strata_kq), NVFP4 packs, Qwen3.6-35B-A3B, Intel Arc A-series kernels, the pipelined-decode and latency work; v0.1.43.1: the adaptive overlap no longer collapses decode on pinned-host desktops (#1964 #1975), Windows PLE mmap stall (#1984), pinned prompt uploads (#1996), the I/O watchdog allowance; v0.1.43: adaptive-tier copies overlap on CUDA, P100 (sm_60) kernel tables, RDNA4 (gfx1200/gfx1201) defaults (route tail skip, measured PCIe share, 16K prompt chunks, fused IQ3 prompt experts); v0.1.42.1: the GGUF-in-place file tier on Windows unmaps every shard, dual-socket starts judge each NUMA node and STRATA_DROP_CACHE_ON_EXIT, tools/strata_bench.py; v0.1.42: STRATA_ROUTE_TAIL_SKIP=7 default on CUDA (+13-16% decode), the AMD 2-GPU checkpoint fix (H13), Phase 2 fixes and opt-ins; v0.1.41.1 (folded into 0.1.42): the #1576 card order, #1616 stage size, #1595 CPU share, #1630/#1607 Windows HIP chunk cap and commit-limit warning, #1603 parallel-request bookkeeping; v0.1.41: CPU prefill share on by default (NVIDIA, chunks < 1024), --batch-groups auto, the file tier read in batches on Windows, Pascal decode fix, per-arch tables; v0.1.40.3: the #1357 MTP router guard, the #1376 Windows HIP cache floor, #461 runtime DLLs, Intel A750 first-request fix; v0.1.40.2: F4 verify windows, the Linux file tier (#1194), the stager wait (#1057), #1264/#1201/#1139 fixes, opt-in CPU share (#1282), Intel Arc; v0.1.40: --resident-experts on a layer split with the split+resident variant (#848), --kv k8v4 with KV streaming (#711); v0.1.39: the #577 file-tier regression fixed, the OpenAI Responses API (#451, Codex), a reply stuck on one token ended (#606), the head before the arena (#620), effort_position (#458), --vram-reserve hot resize opt-in (#533), PR batch; v0.1.38: prompts faster (one gather per expert group #372, the first chunk's PLE rows beside layer 0 #374, DeltaNet three heads per thread #413), --kv q4_0 prompts on tensor cores (#452), Q5_0 experts on the GPU (#473), IQ4_XS on AVX-2 (#415), unbuffered expert loading on Windows (#357 #362), --peer-device (#531), a 6 GB card starts (#496), PR batch; v0.1.37: a silent engine is restarted (#481), Windows AMD counts the desktop's VRAM (#380 #377 #497), a steadier PCIe probe (#485), fixes #496 #495 #498 #505 #493; v0.1.36: a cancelled prompt logged as read so far (#471), the draft-head hint (#474), UPDATE.bat (#475), --expert-profile-save (#477); v0.1.35: Windows AMD uses its bundled HIP runtime (#468 #461), the low-RAM resident mode on Windows 32 GB (#467), fixes #460 #459 #446 #447 #457 #448 #444; v0.1.34: AMD on Windows (a ready-made HIP engine), an MCP server for AI assistants (tools/strata_mcp.py), a shorter README; v0.1.33: a portable image encoder again (#411 #412), setup recommends instead of forcing (#406 #403 #364 #384), fixes #352 #365 #369 #371 #375 #393 #408 #414; v0.1.32: split prompts faster (#340), AMD router +12%, Unsloth Q4 in setup, faster Q4 prompts, #326/#327/#342/#344 fixes, PR batch; v0.1.31: Unsloth UD-Q4_K_XL (experimental), GGUF-in-place low-RAM mode, Windows GGUF load 2x, server race + tokenizer fixes, AMD intrinsics; v0.1.30: short prompts faster (streaming from 1024 tokens), resident low-RAM variant, multi-GPU session carve, RDNA4; v0.1.29: sampled answers faster (split top-k), #154 correctness fixes; v0.1.28: the expert cache reserves the draft head, a cancelled request no longer fails the next; v0.1.27: RTX 20 (sm_75) in the ready-made engine, the HIP build without CUDA headers; v0.1.26: the draft layer's prompt pass in batches; v0.1.25: faster prompts (grouping off the copy engine, fused hyper-connection kernels), AMD HIP backend, --kv k8v4; v0.1.24: long prompts faster (QSA select on tensor cores); v0.1.23: image requests honor sampling, 8 GB cards start, batched verify window; v0.1.22: faster prompts (tensor-core attention), multi-GPU across images/steering/KV streaming; v0.1.21: multi-GPU layer split (--gpus); v0.1.20: system-prompt checkpoint, PCIe probe, hit rate; v0.1.19: penalties
 # KV bytes per context token and attention layer: 8-bit 1056, rotated 4-bit 576, hybrid K8V4 (8-bit K, 4-bit V) 816
 KV_CELL_BYTES = {"q4_0": 576, "k8v4": 816}
@@ -283,6 +284,7 @@ HVEXE = "strata-vision-hip.exe" if WIN else "strata-vision-hip"     # AMD: the p
 Q38EXE = "strata-q38.exe" if WIN else "strata-q38"
 DS41EXE = "strata-ds41.exe" if WIN else "strata-ds41"
 DSV41EXE = "strata-dsv41.exe" if WIN else "strata-dsv41"   # the older DeepSeek engine: setup's pack check runs it
+ENGINE_CHOICES = ("original", "new")   # --engine: the original engine (EXE, DSV41EXE) or the new one (Q38EXE, DS41EXE)
 # MODEL-UPDATE Phase 1: the K-quant prompt kernels (Unsloth's UD-Q4/Q5/Q6_K_XL experts) are a library next to the CUDA
 # engine, opened only for those models; an engine without it runs them on the FP16 prompt path
 KQ_LIB = "strata_kq.dll" if WIN else "libstrata_kq.so"
@@ -4474,10 +4476,12 @@ def build_vision_cpu(eng: Path, stamp: Path, meta: dict, llama, vsrc) -> Path:
 
 def compile_hip_reader(bdir: Path, archs: list, root: Path, dirs: list, llama, portable: bool) -> None:
     """Compiles the HIP picture reader (strata-vision-hip) in `bdir`; `portable`: for other PCs (a release)."""
+    # The Windows hip::device target caches its own architecture list across reader rebuilds.
     compile_hip(ROOT / "tools" / "vision", bdir, "strata-vision", root, dirs,
                 [f"-DLLAMA_DIR={llama}", "-DSTRATA_VISION_HIP=ON", "-DSTRATA_VISION_HIP_ARCHS=" + ";".join(archs),
                  f"-DSTRATA_PORTABLE={'ON' if portable else 'OFF'}",
-                 *([f"-DCMAKE_CXX_FLAGS={rocm_flags(root)}"] if WIN else [])], "build-vision-hip.bat")
+                 *([f"-DCMAKE_CXX_FLAGS={rocm_flags(root)}", "-DGPU_BUILD_TARGETS=" + ";".join(archs)]
+                   if WIN else [])], "build-vision-hip.bat")
 
 
 def compile_cpu_reader(bdir: Path, llama, portable: bool) -> None:
@@ -6193,13 +6197,14 @@ SHAPE_ENGINE: dict = {}       # the model-shape engine the chosen model runs on:
 
 
 def engine_exe(eng: Path, new: str | None = None) -> str:
-    """The `exe` of a run config: the engine component in the app, else the engine binary's path - the new engine `new`
-    (Q38EXE) when the folder has it. A model of its own shape names that shape's engine."""
+    """The `exe` of a run config: the engine component in the app (its program `new` when given), else the engine
+    binary's path - the new engine `new` (Q38EXE) when the folder has it. A model of its own shape names that shape's
+    engine."""
     if SHAPE_ENGINE.get("shape"):
         from strata_control import shape_engine
         return shape_engine.reference(SHAPE_ENGINE["shape"])
     if CONTROL:
-        return "component:strata-engine"
+        return EC.REFERENCE_PREFIX + EC.COMPONENT_ID + (f"/{Path(new).stem}" if new else "")
     return str(new_engine_or(Path(eng) / EXE, new) if new else Path(eng) / EXE)
 
 
@@ -6208,15 +6213,27 @@ def new_engine_or(exe: Path, new: str) -> Path:
     return exe.with_name(new) if exe.with_name(new).is_file() else exe
 
 
-def note_engine(exe: Path, new: str) -> Path:
-    """Says which engine program a model will run on - the new engine `new` beside the older engine `exe`, else `exe`
-    and how to get the new one - and returns it."""
-    chosen = new_engine_or(exe, new)
-    ok(f"engine: {chosen}" + (" (the new engine)" if chosen != exe else ""))
-    if chosen == exe:
+def choose_engine(a, exe: Path, new: str) -> Path:
+    """Settles which engine program a model runs on: the original engine `exe` or the new engine `new` (Q38EXE, DS41EXE)
+    beside it.  Asks when the folder has both and --engine did not say (the new one is the default), keeps the answer
+    in `a.engine` for the run config, says the choice and returns the program."""
+    preferred = new_engine_or(exe, new)
+    have_new = preferred != exe
+    a.engine = getattr(a, "engine", None)          # (an `a` made by other callers than setup's parser has none)
+    if have_new and a.engine is None:
+        say("  Which engine should run this model?")
+        say(f"  1) Original engine: {exe.stem} (qwertie/Strataq build of Niko1221/Strata's engine)")
+        say(f"  2) New engine: {Path(new).stem} (qwertie/Strataq: conversations share one memory pool)   (recommended)")
+        a.engine = ENGINE_CHOICES[int(ask("Which engine?", ["1", "2"], "2", a.yes)) - 1]
+    if not have_new and a.engine != "original":
+        if a.engine == "new":
+            warn(f"--engine new: this engine folder has no {Path(new).stem}, so the original engine runs this model")
         say(f"  The new engine ({Path(new).stem}) is not in this engine folder yet. Once a release carries it, "
-            f"`strata update` ({'UPDATE.bat' if WIN else './update.sh'}) fetches it and running setup again switches "
-            "to it; or run setup again with --build to compile it now.")
+            f"`strata update` ({'UPDATE.bat' if WIN else './update.sh'}) fetches it and running setup again offers "
+            "it; or run setup again with --build to compile it now.")
+        a.engine = "original"
+    chosen = preferred if a.engine == "new" else exe
+    ok(f"engine: {chosen}" + (" (the new engine)" if chosen != exe else ""))
     return chosen
 
 
@@ -7299,7 +7316,8 @@ def use_cuda12(cards, cfg_path: Path, cfg: dict, yes: bool) -> dict:
     vision = "gpu" if cfg.get("vision") else "none"
     eng = get_cuda12_engine(os.environ.get("STRATA_PREBUILT_URL", PREBUILT_URL),
                             {**main, "archs": sorted({int(g["arch"]) for g in cards})}, vision, yes)
-    cfg["exe"] = str(new_engine_or(eng / EXE, Q38EXE))
+    on_new = Path(str(cfg.get("exe", ""))).stem == Path(Q38EXE).stem
+    cfg["exe"] = str(new_engine_or(eng / EXE, Q38EXE) if on_new else eng / EXE)
     cfg["cuda"] = 12
     cfg["lib_dirs"] = engine_lib_dirs(eng, 12)
     if cfg.get("vision") and (eng / VEXE).exists():
@@ -8638,7 +8656,7 @@ def install_dsv41(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopted, 
         ok(f"engine: {exe}")
         run_exe = exe
     else:                                            # the run config starts it; setup's pack check runs `exe`
-        run_exe = note_engine(exe, DS41EXE)
+        run_exe = choose_engine(a, exe, DS41EXE)
     if mac and ds_vision == "on":                    # the Mac's pictures need an engine with the Metal picture tower: its program says so (dsv41_engine.MARK_MAC_VISION)
         from strata_control import dsv41_engine as _dsv41_engine
         if _dsv41_engine.mac_vision_state(exe) == "no":
@@ -9284,6 +9302,9 @@ def main() -> int:
     ap.add_argument("--rollback-engine", action="store_true",
                     help="put back the engine an update replaced (kept in engine/.previous), and keep the current one there")
     ap.add_argument("--build", action="store_true", help="compile the engine instead of using the ready-made one")
+    ap.add_argument("--engine", choices=ENGINE_CHOICES, default=None,
+                    help="the engine program for Qwen3.8 and DeepSeek: original (strata, strata-dsv41) or new "
+                         "(strata-q38, strata-ds41, the default when the engine folder has it); asked when not given")
     ap.add_argument("--source", choices=SOURCES, default=None,
                     help="where the model files come from: auto (default: Hugging Face), huggingface or modelscope "
                          "(mainland China: the same files, checked against ModelScope's published SHA-256; "
@@ -10084,10 +10105,10 @@ def main() -> int:
     if (MODELS[model].get("budget") or family == "gyro") and engine_ver < need_engine:
         fail(f"{model} needs engine {'.'.join(map(str, need_engine))} or newer; this one is {meta.get('version')}",
              "update Strata (or compile the engine with --build) and run setup again")
-    if CONTROL or SHAPE_ENGINE.get("shape"):
-        ok("engine: the engine component (looked up when the model loads)" if CONTROL else f"engine: {eng / EXE}")
+    if SHAPE_ENGINE.get("shape"):
+        ok(f"engine: {eng / EXE}")
     else:
-        note_engine(eng / EXE, Q38EXE)
+        choose_engine(a, eng / EXE, Q38EXE)
 
     # ---- 5. the model files
     step(5, f"downloading {fam['title']} {model}")

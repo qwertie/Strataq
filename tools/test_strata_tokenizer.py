@@ -412,7 +412,7 @@ class PreTokenizerType(unittest.TestCase):
     def test_from_gguf_refuses_an_unknown_type(self):
         import tempfile
         import struct
-        from gguf_reader import GGUF_MAGIC
+        from strata_common.gguf_reader import GGUF_MAGIC
         from gguf_writer import GGUFWriter
         w = GGUFWriter()
         w.add("tokenizer.ggml.model", "gpt2")

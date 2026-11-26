@@ -8,7 +8,9 @@ import { currentUserSid } from '../../server/private-file.mjs';
 export function assertPrivate(path) {
   if (process.platform !== 'win32') { assert.equal(statSync(path).mode & 0o777, 0o600); return; }
   const sddl = execFileSync(join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', `(Get-Acl -LiteralPath '${path.replace(/'/g, "''")}').Sddl`],
-    { encoding: 'utf8', timeout: 30000, windowsHide: true }).trim();
+    { encoding: 'utf8', timeout: 30000, windowsHide: true,
+      env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'psmodulepath'))
+    }).trim();
   const dacl = sddl.slice(sddl.indexOf('D:'));
   assert.equal(dacl, `D:PAI(A;;FA;;;${currentUserSid()})`, `ACL is not owner-only: ${sddl}`);
 }

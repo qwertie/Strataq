@@ -35,6 +35,7 @@
 
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
@@ -397,12 +398,62 @@ void mem_mark(const char* where);
 /// Tells whether PcieAuto also refines a layer split's shares (strata/core/pcie_share_rule.hpp: on for a discrete
 /// CUDA card, opt-in STRATA_PCIE_AUTO_SPLIT=1 on HIP and an integrated GPU).
 bool pcie_auto_split_ok();
+/// Gets the share of a layer's missed experts that a link of `link_gbps` GB/s should carry against a CPU pool computing
+/// `pool_gbps` GB/s of expert bytes: strata/core/pcie_share_rule.hpp's rule with this computer's ceiling and pool
+/// factor (0.2.10.1 on a discrete card: ceiling 0.95 and a factor falling with the pool rate - 2 workers 31 -> 63 tok/s,
+/// 4 workers 56 -> 79; an integrated GPU, whose "link" is the shared memory, and STRATA_DEFAULTS=026 keep 0.60 and
+/// 1.85; STRATA_PCIE_SHARE_MAX / STRATA_PCIE_K_RULE=0 or 1 set either by hand).
+double get_pcie_share(double link_gbps, double pool_gbps);
 /// Tells whether the HIP defaults of the decode speed push apply to the current card (gfx12; always on CUDA).
 bool decode_defaults_arch_ok();
 /// Enables rank-7 skipping of low-ranked missed experts when the environment leaves STRATA_ROUTE_TAIL_SKIP unset
 /// and the serving configuration allows it. Logs the choice with the prefix `who`. `gpu_experts` counts resident
 /// experts across all stages, or their total planned capacity for the paged engine's caches, which fill on demand.
 void set_tail_skip_default(const Model& m, int64_t gpu_experts, const char* who);
+/// Refines the share of the missed experts that the PCIe link carries from what the CPU pool measures in the first
+/// decode windows (0.1.42; CUDA serve without --pcie-frac).  The balance share is link / (link + CPU rate): the link
+/// is the start-up probe, the CPU rate the expert bytes over the pool's wall time per missed expert
+/// (ExpertDispatch::ms_run / multi_misses).  The best shares measured with the route tail skip on (RTX 3060 0.15-0.20,
+/// Tesla P100 0.20, RTX A4000 flat from 0.15 to 0.40; the 0.1.41 rule gave 0.55, 0.29, 0.30) lie within one 0.05 step
+/// of link / (link + 1.85 x pool rate).  Three updates at most (after 48, then 96 and 96 more windows), each rounded to
+/// 0.05, so a noisy window cannot move the share by less than a step and it stops moving after the third.
+/// STRATA_PCIE_FRAC_DEFAULT=old keeps the 0.1.41 rule.  Used by the older engine's serve loop (generate.cpp) and by
+/// strata-q38 (paged_model.cpp).
+struct PcieAuto {
+    bool on = false;
+    double link_gbps = 0.0, blob_bytes = 0.0;   ///< the probed link; the experts' mean blob size
+    double mark_ms = 0.0;
+    int64_t mark_jobs = 0;
+    double acc_ms = 0.0;
+    int64_t acc_jobs = 0;
+    int acc_win = 0, updates = 0;
+    void mark(double ms_run, int64_t jobs) { mark_ms = ms_run; mark_jobs = jobs; }
+    /// After a decode window: gets the new share, or -1 while there is nothing to change.  `tc_us`/`rate` get the
+    /// reading (microseconds per missed expert, GB/s of expert bytes).
+    double window(double ms_run, int64_t jobs, double cur, double* tc_us, double* rate) {
+        if (!on) return -1.0;
+        acc_ms += ms_run - mark_ms;
+        acc_jobs += jobs - mark_jobs;
+        mark(ms_run, jobs);
+        ++acc_win;
+        if (acc_win < (updates == 0 ? 48 : 96)) return -1.0;
+        if (acc_jobs < 300) {          // too few missed experts to read the pool's speed (everything hits): look again
+            if (acc_win >= 2000) on = false;
+            return -1.0;
+        }
+        const double tc = acc_ms * 1000.0 / (double) acc_jobs;
+        acc_ms = 0.0;
+        acc_jobs = 0;
+        acc_win = 0;
+        if (++updates >= 3) on = false;
+        if (!(tc > 1.0) || !(blob_bytes > 0.0) || !(link_gbps > 0.0)) return -1.0;
+        const double r = blob_bytes / (tc * 1e-6) / 1e9;
+        const double f = get_pcie_share(link_gbps, r);
+        *tc_us = tc;
+        *rate = r;
+        return std::fabs(f - cur) < 0.025 ? -1.0 : f;
+    }
+};
 /// Gets the host-to-device bandwidth the last PCIe probe measured, GB/s (<= 0: none ran).
 double get_last_h2d_gbps();
 #if !defined(_WIN32)

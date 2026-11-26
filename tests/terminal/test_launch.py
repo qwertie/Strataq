@@ -220,7 +220,8 @@ class PresetStore(unittest.TestCase):
             self.assertEqual(sorted(names), ["Coder 64K", "IQ3_XXS 128K"])
             back = store.load("IQ3_XXS 128K")
             self.assertEqual((back.model, back.context, back.api_key), ("IQ3_XXS", 131072, "sk-secret"))
-            store.touch_used("IQ3_XXS 128K")
+            with mock.patch.object(store, "now_text", return_value="2099-01-01 00:00:00.000000"):
+                store.touch_used("IQ3_XXS 128K")
             self.assertTrue(store.load("IQ3_XXS 128K").last_used)
             self.assertEqual(store.list_presets()[0].name, "IQ3_XXS 128K")          # most recently used first
             store.delete("Coder 64K")
@@ -346,6 +347,14 @@ class RunConfig(unittest.TestCase):
 
 
 class SetupArgs(unittest.TestCase):
+    def test_the_engine_choice_reaches_setup(self):
+        """Both engine choices must survive the launch wrapper's noninteractive setup call."""
+        for family in ("qwen", "deepseek41"):
+            for choice in ("original", "new"):
+                with self.subTest(family=family, engine=choice):
+                    args = self.args_for(family=family, engine=choice)
+                    self.assertEqual(args[args.index("--engine") + 1], choice)
+
     def runner(self, **kw):
         with Home():
             cat = catalog(HW_12)

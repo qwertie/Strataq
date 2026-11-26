@@ -39,12 +39,33 @@ class NewEngines(unittest.TestCase):
             eng = Path(d)
             (eng / setup.EXE).write_text("x")
             self.assertEqual(setup.engine_exe(eng, setup.Q38EXE), str(eng / setup.EXE))
-            said = quiet(setup.note_engine, eng / setup.EXE, setup.Q38EXE)[1]
+            a = SimpleNamespace(engine=None, yes=True)
+            chosen, said = quiet(setup.choose_engine, a, eng / setup.EXE, setup.Q38EXE)
+            self.assertEqual((chosen, a.engine), (eng / setup.EXE, "original"))
             self.assertIn("is not in this engine folder yet", said)
             (eng / setup.Q38EXE).write_text("x")
             self.assertEqual(setup.engine_exe(eng, setup.Q38EXE), str(eng / setup.Q38EXE))
             self.assertEqual(setup.engine_exe(eng), str(eng / setup.EXE))
-            self.assertEqual(quiet(setup.note_engine, eng / setup.EXE, setup.Q38EXE)[0], eng / setup.Q38EXE)
+
+    def test_engine_choice_asks_and_defaults_to_the_new_engine(self):
+        """--yes takes the new engine; --engine original keeps the original one without asking; the app names the
+        package's program in its component reference."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = Path(d)
+            for name in (setup.EXE, setup.Q38EXE):
+                (eng / name).write_text("x")
+            a = SimpleNamespace(engine=None, yes=True)
+            chosen, said = quiet(setup.choose_engine, a, eng / setup.EXE, setup.Q38EXE)
+            self.assertEqual((chosen, a.engine), (eng / setup.Q38EXE, "new"))
+            self.assertIn("1) Original engine: strata", said)
+            self.assertIn("2) New engine: strata-q38", said)
+            a = SimpleNamespace(engine="original", yes=False)
+            chosen, said = quiet(setup.choose_engine, a, eng / setup.EXE, setup.Q38EXE)
+            self.assertEqual(chosen, eng / setup.EXE)
+            self.assertNotIn("Which engine", said)
+            with mock.patch.object(setup, "CONTROL", True), mock.patch.dict(setup.SHAPE_ENGINE, clear=True):
+                self.assertEqual(setup.engine_exe(eng, setup.Q38EXE), "component:strata-engine/strata-q38")
+                self.assertEqual(setup.engine_exe(eng), "component:strata-engine")
 
     def test_a_recompile_keeps_the_new_engines(self):
         meta = {"programs": [setup.DS41EXE, setup.DSV41EXE]}
@@ -67,15 +88,21 @@ class NewEngines(unittest.TestCase):
                 quiet(setup.engine_step, a, {"arch": "gfx1151"}, True, [], 13, "none", (setup.Q38EXE,))
                 self.assertEqual(build.call_args.args[-1], (setup.Q38EXE,))
 
-    def test_cuda12_migration_uses_the_new_engine_when_available(self):
-        """Moving to an older GPU keeps the selected engine family when CUDA 12 carries it."""
+    def test_cuda12_migration_keeps_the_chosen_engine(self):
+        """Moving to an older GPU keeps the chosen engine (the new one when CUDA 12 carries it)."""
         with tempfile.TemporaryDirectory() as d, mock.patch.object(setup, "get_cuda12_engine", return_value=Path(d)), \
                 mock.patch.object(setup, "gpu_info", return_value=None), \
                 mock.patch.object(setup, "engine_lib_dirs", return_value=[]), \
                 mock.patch.object(setup, "write_config"):
+            (Path(d) / setup.EXE).write_text("x")
             for name in (setup.EXE, setup.Q38EXE):
-                (Path(d) / name).write_text("x")
-                cfg = quiet(setup.use_cuda12, [{"index": 0, "arch": "61"}], Path(d) / "config.json", {}, True)[0]
+                cfg = quiet(setup.use_cuda12, [{"index": 0, "arch": "61"}], Path(d) / "config.json",
+                            {"exe": f"/old/{name}"}, True)[0]
+                self.assertEqual(cfg["exe"], str(Path(d) / setup.EXE))      # CUDA 12 has no new engine yet
+            (Path(d) / setup.Q38EXE).write_text("x")
+            for name in (setup.EXE, setup.Q38EXE):
+                cfg = quiet(setup.use_cuda12, [{"index": 0, "arch": "61"}], Path(d) / "config.json",
+                            {"exe": f"/old/{name}"}, True)[0]
                 self.assertEqual(cfg["exe"], str(Path(d) / name))
 
 

@@ -31,8 +31,8 @@ def translate_args(cfg: dict, args: list[str]) -> list[str]:
     model = set(("""vision gpus cpu-threads dspark dspark-conf experts dspark-block prefill-chunk threads"""
                  if deepseek else """native native-dense-gguf embd-gguf ple-gguf kv prefill mtp spec-min-p
                  gpu pcie-frac pool-cores aux-cpus pool-affinity vram-reserve-later-mib""").split())
-    switches = {"serve"} | ({"no-expert-cache"} if deepseek else
-                 {"vision", "no-ple", "no-prefill-borrow", "no-host-worker", "no-ple-prefetch", "stop-eos"})
+    switches = {"serve", "trim-stage-weights"} | ({"no-expert-cache"} if deepseek else
+                 {"vision", "no-ple", "no-prefill-borrow", "no-host-worker", "no-ple-prefetch", "stop-eos", "stats"})
     # Installed engines may predate shared option names, so emit each family's original spelling.
     aliases = {"--slots": "--batch"}
     aliases.update({"--gpu": "--gpus", "--vram-reserve-mib": "--reserve-mib", "--eos-ids": "--eos"} if deepseek else

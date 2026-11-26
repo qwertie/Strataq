@@ -56,6 +56,20 @@ def runner(spawned: list) -> Runner:
 
 
 class EngineBeforeModel(unittest.TestCase):
+    def test_an_explicit_engine_choice_overrides_an_installed_config(self):
+        """A cached model must not hide an engine choice that would otherwise reach setup."""
+        r = runner([])
+        for program in ("strata", "strata-q38", "strata-dsv41", "strata-ds41",
+                        "component:strata-engine", "component:strata-engine/strata-q38"):
+            for choice in ("original", "new"):
+                with self.subTest(program=program, choice=choice):
+                    r.s.engine = choice
+                    is_new = program.endswith(("strata-q38", "strata-ds41"))
+                    expected = choice == ("new" if is_new else "original")
+                    with mock.patch("strata_cli.launch.runner.read_config", return_value={"exe": program}):
+                        self.assertEqual(r.installed_serves_request(Path("unused.json")), expected)
+                    self.assertIn(f"--engine {choice}", S.flags_text(r.s))
+
     def run_ensure(self, statuses: list[dict], events: list[dict], code: int = 0):
         """ensure_engine() with a fake `strata update` and a sequence of engine reports. Returns (spawn count, the error or None)."""
         spawns, err, _r = self.run_ensure_runner(statuses, events, code)

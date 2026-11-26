@@ -41,7 +41,10 @@ bool gpu_stream_synchronize(void* stream) {
 }
 
 bool gpu_copy(void* dst, const void* src, size_t bytes) {
-    return cudaMemcpy(dst, src, bytes, cudaMemcpyDefault) == cudaSuccess;
+    if (cudaMemcpy(dst, src, bytes, cudaMemcpyDefault) == cudaSuccess)
+        return true;
+    (void) cudaGetLastError();   // reported by the return value: do not leave it for the next launch check to blame
+    return false;
 }
 
 void* gpu_host_alloc_mapped(size_t bytes, void** device_view) {

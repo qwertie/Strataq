@@ -396,6 +396,9 @@ class SetupIntegration(unittest.TestCase):
         os.environ["XDG_CONFIG_HOME"] = self.tmp.name
         import setup as S
         self.S = S
+        patch = mock.patch.object(sys, "platform", "win32" if S.WIN else "linux")
+        patch.start()
+        self.addCleanup(patch.stop)
         self.saved = (S.gpu_info, S.cpu_info, S.ram_gb, CAL.run)
         S.gpu_info = lambda pick=None: {"name": "RTX Test", "vram_gb": 12.0, "arch": "120", "count": 1, "index": 0}
         S.cpu_info = lambda: ("Test CPU", True, True)

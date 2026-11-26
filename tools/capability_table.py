@@ -130,7 +130,10 @@ def page(cap, release):
            "- **Supported**: what these docs commit to. *untested* means a package exists and nothing is claimed.",
            "- **Measured**: where numbers for that combination are published. Empty means none are published; it does not mean the combination fails.",
            "",
-           "App and Terminal %s, Control and engines %s. App, Control and engine versions differ on purpose." % (release["product_version"], release["engine_version"]),
+           "App %s, Terminal %s, Control %s and engines %s. "
+           "App, Control and engine versions differ on purpose." % (
+               release["product_version"], release.get("terminal_version", release["product_version"]),
+               release["control_version"], release["engine_version"]),
            "", "## At a glance", "",
            "| Model | " + " | ".join(c["label"] for c in cols) + " |",
            "| --- |" + " --- |" * len(cols)]

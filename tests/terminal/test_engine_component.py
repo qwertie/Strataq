@@ -81,6 +81,28 @@ class Resolution(unittest.TestCase):
         self.root = Path(self.dir.name)
         self.addCleanup(self.dir.cleanup)
 
+    def test_a_program_reference_requires_a_manifest_file(self):
+        """Stray executables beside a verified package must not become trusted entry points."""
+        name = "strata-q38" + (".exe" if WINDOWS else "")
+        folder = make_package(self.root, extra={name: b"new-engine"})
+        reference = "component:strata-engine/strata-q38"
+        self.assertEqual(ec.expand(reference, {"backend": "cuda"}, root=self.root), str(folder / name))
+        (folder / name).write_bytes(b"bad-engine")
+        with self.assertRaisesRegex(ec.EngineMissing, "SHA-256"):
+            ec.expand(reference, {"backend": "cuda"}, root=self.root)
+        data = json.loads((folder / ec.MANIFEST).read_text())
+        rewrite(folder, files=[item for item in data["files"] if item["path"] != name])
+        with self.assertRaisesRegex(ec.EngineMissing, "has no strata-q38"):
+            ec.expand(reference, {"backend": "cuda"}, root=self.root)
+
+    def test_program_references_reject_paths_and_shape_suffixes(self):
+        """Invalid names fail before filesystem lookup, including Windows path and stream syntax."""
+        for suffix in ("", "../outside", "sub/program", "..\\outside", "/outside", "C:outside", "strata.exe"):
+            with self.subTest(suffix=suffix), self.assertRaises(ec.EngineMissing):
+                ec.expand("component:strata-engine/" + suffix, root=self.root)
+        with self.assertRaises(ec.EngineMissing):
+            ec.expand("component:strata-q4-lite/strata-q38", root=self.root)
+
     def test_the_package_for_the_backend_is_chosen(self):
         make_package(self.root, backend="cuda")
         make_package(self.root, backend="hip", version="0.1.46")
@@ -319,7 +341,7 @@ class WrongCardFamily(unittest.TestCase):
         with mock.patch.object(ec, "hip_archs_present", return_value=[]):
             note = ec.status(self.root, backend="cuda")["notice"]
         self.assertTrue(note.startswith("This Strata is for AMD RX 9000 cards. Your PC has an NVIDIA card: download the NVIDIA version from "), note)
-        self.assertIn("https://github.com/Niko1221/Strata/releases", note)
+        self.assertIn("https://github.com/qwertie/Strataq/releases", note)
 
     def test_the_matching_family_is_not_blocked(self):
         with mock.patch.object(ec, "hip_archs_present", return_value=["gfx1201"]):

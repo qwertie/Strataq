@@ -55,6 +55,10 @@ namespace {
 bool g_pool_state = false;   // session_set_pool_state
 }  // namespace
 
+bool session_pool_state() {
+    return g_pool_state;
+}
+
 void session_set_pool_state(bool enabled) {
     g_pool_state = enabled;
     qsa_set_kv_units(enabled);

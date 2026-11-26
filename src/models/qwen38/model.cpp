@@ -2147,7 +2147,9 @@ int Model::load() {
         if (const cudaError_t e = cudaMemGetInfo(&fb, &tb); e != cudaSuccess)
             std::fprintf(stderr, "strata generate: layer split: CUDA%d free memory: %s\n", dev < 0 ? 0 : dev,
                          cudaGetErrorString(e));
-        const int64_t pf = search && split_own_auto && !place_with_reserve ? 0 : split_pf_mib;
+        // strata-q38 lends each prompt its buffers from the card's page pool (paged_model.cpp), so its cards keep no
+        // reserve for them
+        const int64_t pf = search && ((split_own_auto && !place_with_reserve) || is_paged()) ? 0 : split_pf_mib;
         // what a later stage allocates after its cache and nothing prices (cuBLAS, the modules and the MMQ pool the prompt path warms up, ~250 MiB measured): the single card prices
         // it (kLateAllocMib, #4474); a stage did not, and two 16 GB cards ended a start with 131 MiB free and ran out of memory in the first long prompt.  Not under STRATA_DEFAULTS=026.
         const int64_t late_alloc = later && !strata::defaults_026() ? strata::program::split_walk::kStageLateAllocMib : 0;
@@ -2356,6 +2358,14 @@ int Model::load() {
                                  "--vram-reserve-mib, an explicit --layer-split, or close other programs using the GPU\n");
         };
         problem.can_start = can_start;
+        if (strata::core::session_pool_state()) {
+            // the paged engine (strata-q38) carves a card's session for a page pool: it needs a GDN and a QSA layer
+            const int64_t qi = std::max<int64_t>(g.qsa_interval, 1);
+            problem.can_run = [qi](int64_t lb, int64_t le) {
+                const int64_t qsa = le / qi - lb / qi;
+                return qsa != 0 && qsa != le - lb;
+            };
+        }
         const char* const log_prefix = "strata generate: layer split auto: ";
         // THE LAYER SPLIT'S SPILL WALK, STEP 2: THE KV WINDOW DOWN.  No placement can start the prompt path with the window asked for: the sessions of the cards are smaller with a
         // smaller one (the rest of the K/V streams from pinned RAM), so the search runs again at 20480, 8192, 4096 cells a layer (the engine's smallest) and keeps the first window
@@ -5548,6 +5558,14 @@ void mem_mark(const char* where) {
                      sync_e == cudaSuccess && last_e == cudaSuccess ? "ok" : "ERROR", where, cudaGetErrorString(sync_e),
                      cudaGetErrorString(last_e));
     }
+}
+
+double get_pcie_share(double link_gbps, double pool_gbps) {
+    static const double ceiling = strata::pcie_share_ceiling(spill_discrete_gpu(), strata::defaults_026(),
+                                                             std::getenv("STRATA_PCIE_SHARE_MAX"));
+    static const bool k_rule = strata::pcie_k_rule_default(spill_discrete_gpu(), strata::defaults_026(),
+                                                           std::getenv("STRATA_PCIE_K_RULE"));
+    return strata::pcie_share_for(link_gbps, pool_gbps, ceiling, k_rule);
 }
 
 /// 0.1.43: PcieAuto also refines a layer split's shares, each stage by its own probed link.  0.2.10.1: on by default for a discrete CUDA card

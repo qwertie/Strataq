@@ -76,7 +76,7 @@ int main() {
     // the dot product (device code): the build option decides; the intrinsics header carries the guard
     CHECK(ac::dot4_gfx1010_built() == (EXPECT_DOT_BUILT != 0));
     {
-        std::ifstream in("include/strata/hip_compat/intrinsics.hpp");
+        std::ifstream in("include/strata/base/gpu/hip_compat/intrinsics.hpp");
         std::stringstream ss;
         ss << in.rdbuf();
         const std::string text = ss.str();

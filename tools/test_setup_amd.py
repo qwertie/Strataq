@@ -324,11 +324,14 @@ class WindowsDetection(unittest.TestCase):
             for name in target.split():
                 (bdir / (name + ".exe")).write_text("x")
         with tempfile.TemporaryDirectory() as d, mock.patch.object(setup, "WIN", True), \
+                mock.patch.object(setup, "EXE", "strata.exe"), \
+                mock.patch.object(setup, "Q38EXE", "strata-q38.exe"), \
                 mock.patch.object(setup, "ROOT", Path(d)), mock.patch.object(setup, "cmake_build", fake_build), \
                 mock.patch.object(setup, "rocm_root", return_value=(Path(d) / "rocm", [str(Path(d) / "rocm/bin")])), \
                 mock.patch.object(setup, "find_vcvars", return_value=Path("C:/vs/vcvars64.bat")), \
                 mock.patch.object(setup, "source_hash", return_value="h"), \
                 mock.patch.object(setup, "source_version", return_value="0.1.59"), \
+                mock.patch.object(setup, "cpu_info", return_value=("Test CPU", True, True)), \
                 mock.patch.object(setup, "stale_binary", return_value=False), \
                 mock.patch.object(setup, "hip_runtime_beside_exe") as beside, \
                 mock.patch.object(setup, "say"), mock.patch.object(setup, "ok"), mock.patch.dict(setup.os.environ):

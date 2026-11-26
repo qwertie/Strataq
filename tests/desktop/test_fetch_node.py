@@ -32,7 +32,8 @@ class PowerShellTests(unittest.TestCase):
     def run_script(self, *args):
         return subprocess.run([POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                                str(SCRIPTS / "fetch-node.ps1"), *args],
-                              capture_output=True, text=True, timeout=120)
+                              capture_output=True, text=True, timeout=120,
+                              env={k: v for k, v in os.environ.items() if k.lower() != "psmodulepath"})
 
     def test_a_zip_with_the_wrong_digest_is_refused_and_nothing_is_installed(self):
         with tempfile.TemporaryDirectory() as directory:
