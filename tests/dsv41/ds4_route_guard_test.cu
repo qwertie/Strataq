@@ -32,7 +32,7 @@ static void check(bool ok, const char* what) {
 
 static void check_fewer_picks(const float* d_logits, const float* d_bias, const unsigned long long* d_vram, int* d_idx,
                               float* d_w, unsigned long long* d_plan, const std::vector<float>& logits,
-                              const std::vector<float>& bias, int n, int k, int T, int which);
+                              const std::vector<float>& bias, int n, int k, int kept, int T, int which);
 static std::vector<int> get_host_ranking(const float* logits, const std::vector<float>& bias, int n);
 static float get_score(float logit);
 
@@ -141,7 +141,9 @@ static int run(int n) {
                 check(plan_ok, what);
             }
             if (mode == 0)
-                check_fewer_picks(d_logits, d_bias, d_vram, d_idx, d_w, d_plan, logits, bias, n, k, T, which);
+                for (int kept : {1, 2, 5})
+                    check_fewer_picks(d_logits, d_bias, d_vram, d_idx, d_w, d_plan, logits, bias, n, k, kept, T,
+                                      which);
         }
     }
 
@@ -181,13 +183,13 @@ static int run(int n) {
     return 0;
 }
 
-/// Checks route() (which 0) or route_publish() (which 1) with 2 of the model's k picks on finite logits: the first 2
-/// of the host's top-k, each weighing its share of all k picks' unbiased scores times route_scale (not renormalized).
+/// Checks that fewer picks retain their shares of all k scores and leave unused output slots untouched.
+/// which selects route() (0) or route_publish() (1).
 static void check_fewer_picks(const float* d_logits, const float* d_bias, const unsigned long long* d_vram, int* d_idx,
                               float* d_w, unsigned long long* d_plan, const std::vector<float>& logits,
-                              const std::vector<float>& bias, int n, int k, int T, int which) {
-    const int kept = 2;
+                              const std::vector<float>& bias, int n, int k, int kept, int T, int which) {
     const float scale = 1.5f;
+    CK(cudaMemset(d_idx, 0xff, (size_t) T * kPicks * sizeof(int)));
     if (which == 0)
         route(d_logits, d_bias, n, kept, k, T, scale, d_idx, d_w, 0);
     else
@@ -210,6 +212,8 @@ static void check_fewer_picks(const float* d_logits, const float* d_bias, const 
             const size_t at = (size_t) t * kPicks + r;
             ok = ok && idx[at] == e && std::fabs(w[at] - want) <= 1e-4f * scale;
         }
+        for (int r = kept; r < kPicks; ++r)
+            ok = ok && idx[(size_t) t * kPicks + r] == -1;
     }
     char what[160];
     std::snprintf(what, sizeof what, "finite: %s with %d of %d picks keeps their shares of all %d",

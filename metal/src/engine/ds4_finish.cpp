@@ -1321,8 +1321,8 @@ bool sparse_attn(const float* q, const uint16_t* win, const void* ckv, const int
 }
 
 
-// ds4_kernels.cu:461 route_kernel - sqrt(softplus(logits)) top k with bias, then the unbiased weights (shares of
-// k_model picks').  vl is a VlBits (1024 bytes) or null; bias_vl applies to the rows its bits select.
+// Selects experts and weights them against the model's full selection; see ds4_kernels.cuh's route() rationale.
+// vl is a VlBits (1024 bytes) or null; bias_vl applies to the rows its bits select.
 bool route(const float* logits, const float* bias, int n, int k, int k_model, int T, float route_scale, int* idx,
            float* w, const float* bias_vl, const void* vl) {
     if (T <= 0) return true;
@@ -2180,6 +2180,8 @@ bool gemv_f32(const float* W, const float* x, int n, int k, int T, float* y, int
 bool route_publish(const float* logits, const float* bias, int n, int k, int k_model, int T, float route_scale,
                    const void* vram, int* idx, float* w, void* plan_ptr, const float* bias_vl, unsigned vl) {
     if (T <= 0 || n <= 0) return true;
+    if (n > 1024 || k <= 0 || k > k_model || k_model > 8)
+        return false;
     if (!ensure()) return false;
     void* hl = cpu_addr((void*) logits);
     void* hb = cpu_addr((void*) bias);

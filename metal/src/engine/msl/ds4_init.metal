@@ -930,8 +930,7 @@ kernel void ds4_route_publish(device const float* logits [[buffer(0)]], device c
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
     const uint lane = tid & 31u, wp = tid >> 5u;
-    for (uint r = 0; r < 8u; ++r) {
-        if (r >= k_model) break;
+    for (uint r = 0; r < k_model; ++r) {
         float best = -3.402823466e+38f;
         int bix = 0x7fffffff;
         for (uint i = tid; i < n; i += 512u) {
@@ -958,9 +957,9 @@ kernel void ds4_route_publish(device const float* logits [[buffer(0)]], device c
     }
     if (tid == 0u) {
         float sum = 0.0f;
-        for (uint r = 0; r < 8u; ++r) { if (r >= k_model) break; sum += sc[pick[r]]; }
-        for (uint r = 0; r < 8u; ++r) {
-            if (r >= kk) break;
+        for (uint r = 0; r < k_model; ++r)
+            sum += sc[pick[r]];
+        for (uint r = 0; r < kk; ++r) {
             const uint p_ = uint(pick[r]);
             const float wv = sc[p_] / (sum + 1e-20f) * route_scale;
             idx[(size_t) t * 8u + r] = int(p_);

@@ -63,12 +63,13 @@ static void run(mtl::Context& cx, const int lib, const int n) {
                 d.p = &p_route;
                 d.args = {mtl::Arg::B(b_logits), mtl::Arg::B(b_bias), mtl::Arg::V((uint32_t) n), mtl::Arg::V((uint32_t) k),
                           mtl::Arg::V(scale), mtl::Arg::B(b_idx), mtl::Arg::B(b_w), mtl::Arg::B(b_bias), mtl::Arg::V(0u),
-                          mtl::Arg::B(b_vlw), mtl::Arg::B(b_bad)};
+                          mtl::Arg::B(b_vlw), mtl::Arg::B(b_bad), mtl::Arg::V((uint32_t) k)};
             } else {
                 d.p = &p_pub;
                 d.args = {mtl::Arg::B(b_logits), mtl::Arg::B(b_bias), mtl::Arg::V((uint32_t) n), mtl::Arg::V((uint32_t) k),
                           mtl::Arg::V(scale), mtl::Arg::B(b_vram), mtl::Arg::B(b_idx), mtl::Arg::B(b_w), mtl::Arg::B(b_plan),
-                          mtl::Arg::B(b_bias), mtl::Arg::V(0u), mtl::Arg::V(0u), mtl::Arg::B(b_bad)};
+                          mtl::Arg::B(b_bias), mtl::Arg::V(0u), mtl::Arg::V(0u), mtl::Arg::B(b_bad),
+                          mtl::Arg::V((uint32_t) k)};
             }
             d.grid[0] = (uint32_t) T;
             d.tg[0] = 512;
