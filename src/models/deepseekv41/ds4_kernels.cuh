@@ -26,7 +26,7 @@ void embed(const uint16_t* rows_bf16, int T, float* h, int dim, int hc, cudaStre
 /// The per-vector finish: n_vec vectors of len values at x + v * stride, each in order
 ///   norm  (w != null): x = x * rsqrt(mean(x^2) + eps) * w
 ///   rope  (rd > 0): the last rd values as adjacent complex pairs rotated by pos_v * freqs[i] (inverse: the conjugate),
-///         pos_v = pos + (v / vpp) * pos_step
+///         pos_v = pos + (v / vpp) * pos_step, or rpos[v / vpp] when n_rpos > 0
 ///   quant 0 none, 1 FP8 E4M3 with a power-of-two scale per 32, 2 FP4 E2M1 with an E4M3 scale per 16, 3 FP4 with a
 ///         power-of-two scale per 32 (the reference kernels' act_quant / fp4_act_quant, inplace)
 /// and written back to x, or as BF16 to dst + v * dst_stride when dst is given, or packed (quant > 0: the cache format of
@@ -41,6 +41,9 @@ struct Finish {
     long long dst_stride = 0;
     KvRows pdst;
     int64_t pdst_row = 0;
+    // (last: Metal's FinishIn mirrors the fields above and ignores these; Metal never batches conversations)
+    int n_rpos = 0;          // > 0: the positions from rpos, not pos and pos_step (several conversations' rows)
+    int rpos[kWin] = {};
 };
 void finish(float* x, int n_vec, int len, long long stride, const Finish& f, cudaStream_t s);
 

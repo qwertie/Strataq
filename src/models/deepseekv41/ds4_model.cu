@@ -14958,11 +14958,12 @@ struct Model::Impl {
                 return false;
         } else {   // a run of rows a conversation: select_row's, or a multi step's (--parallel: wp.rseq)
             const bool multi = wp.nrow > 0;
-            float** fields[] = {&d.qr, &d.q, &d.kvr, &d.ckr, &d.cgr, &d.x, &d.o};
-            const size_t strides[] = {(size_t) g.q_lora, (size_t) HQ, (size_t) HD, (size_t) HD,
-                                      (size_t) HD, (size_t) D, (size_t) HQ};
-            float* bases[7];
-            for (int i = 0; i < 7; ++i)
+            float** fields[] = {&d.qr, &d.q, &d.kvr, &d.ckr, &d.cgr, &d.x, &d.o, &d.iq, &d.iw};
+            const size_t strides[] = {(size_t) g.q_lora, (size_t) HQ, (size_t) HD, (size_t) HD, (size_t) HD,
+                                      (size_t) D, (size_t) HQ, (size_t) g.ix_heads * g.ix_hd, 64};
+            constexpr int kFields = (int) std::size(fields);
+            float* bases[kFields];
+            for (int i = 0; i < kFields; ++i)
                 bases[i] = *fields[i];
             int* topk = d.topk;
             int* cand = d.cand;
@@ -14970,6 +14971,15 @@ struct Model::Impl {
             AttnRows batch_rows;
             AttnRows* const batch = !multi && row_counts[0] < T && NHL > 0 && !l.mtp &&
                                     can_sparse_attn_unpack(T, (int) topk_stride(), d.attn_scr) ? &batch_rows : nullptr;
+            int rpos[kWin];   // (batch) each row's position
+            if (batch != nullptr) {   // every run's queries rotated (and their indexer queries made) at once
+                for (int row = 0; row < T; row += row_counts[row])
+                    for (int i = 0; i < row_counts[row]; ++i)
+                        rpos[row + i] = (int) row_positions[row] + i;
+                finish(d.q, T * NHL, HD, HD, get_rope(l, d, l.ahn, 0, T, rpos), s);
+                if (l.ratio > 0 && l.ix_src && !project_indexer_queries(l, d, 0, T, rpos, err))
+                    return false;
+            }
             for (int row = 0, k = 0; row < T; ++k) {
                 int n = multi ? 1 : row_counts[row];
                 while (multi && row + n < T && wp.rseq[row + n] == wp.rseq[row])
@@ -14979,7 +14989,7 @@ struct Model::Impl {
                     swap_seq_state(L0, mi, wp.rseq[row], wp.par);
                 else
                     select_row(row);
-                for (int i = 0; i < 7; ++i)
+                for (int i = 0; i < kFields; ++i)
                     *fields[i] = bases[i] + (size_t) row * strides[i];
                 d.topk = topk + (size_t) row * topk_stride();
                 d.cand = cand + (size_t) row * cand_stride();
@@ -15004,7 +15014,7 @@ struct Model::Impl {
                 l.ring_bak = ring_bak;
                 l.c_snap = c_snap;
                 l.c_rows = c_rows;
-                for (int i = 0; i < 7; ++i)
+                for (int i = 0; i < kFields; ++i)
                     *fields[i] = bases[i];
                 d.topk = topk;
                 d.cand = cand;
@@ -15013,11 +15023,10 @@ struct Model::Impl {
                     return false;
                 row += n;
             }
-            if (batch != nullptr) {   // every run's attention in one launch, then each run's output rotation
+            if (batch != nullptr) {   // every run's attention in one launch, then their outputs rotated back
                 sparse_attn_unpacked(d.q, d.ext, *batch, l.sink, NHL, HD, T, 1.0f / std::sqrt((float) HD), d.o,
                                      d.attn_scr, s);
-                for (int row = 0; row < T; row += row_counts[row])
-                    finish_attention(l, d, d.o + (size_t) row * HQ, row_positions[row], row_counts[row]);
+                finish_attention(l, d, d.o, 0, T, rpos);
             }
             if (multi && !multi_put(l, mi, d, wp, err))
                 return false;
@@ -15046,8 +15055,9 @@ struct Model::Impl {
 
     /// Updates the selected conversation's rings and compressors and reads its paged attention sources.  `r`: the row
     /// of the window (and of wp's per-row plans) that these T rows start at, past the rows of the runs before them.
-    /// `batch`: if not null, the attention is left to run_attention, which runs it for every run at once; this decodes
-    /// the run's selected rows into its scratch slots (from active_row) and puts its rows' AttnRows entries there.
+    /// `batch`: if not null, run_attention rotates every run's queries, projects their indexer queries and runs the
+    /// attention for every run at once; this decodes the run's selected rows into its scratch slots (from active_row)
+    /// and puts its rows' AttnRows entries there.
     bool run_attention_state(Layer& L0, int mi, int64_t p0, int T, const WinPlan& wp, std::string& err, int r = 0,
                              AttnRows* batch = nullptr) {
         Layer& l = member(L0, mi);
@@ -15056,14 +15066,8 @@ struct Model::Impl {
         cudaStream_t s = d.st;
         const int D = g.dim, HD = g.hd, NHL = l.ahn, HQ = NHL * HD;
         const float* freqs = l.ratio ? d.freqs_comp : d.freqs_win;
-        if (NHL > 0) {
-            Finish fr;
-            fr.rd = g.rd;
-            fr.pos = (int) p0;
-            fr.vpp = NHL;
-            fr.freqs = freqs;
-            finish(d.q, T * NHL, HD, HD, fr, s);
-        }
+        if (NHL > 0 && batch == nullptr)   // (batch: run_attention rotates every run's queries)
+            finish(d.q, T * NHL, HD, HD, get_rope(l, d, l.ahn, p0, T, nullptr), s);
         if (NHL > 0) dump_sub(d, "q", l.il, p0, T, d.q, (size_t) T * HQ * 4);
         // the window rows: the ring's (positions p0 - win ..) then this window's, each query its own 128.  A DSpark
         // block's ring holds the trunk's main KV (positions <= p0 - 1, seeded); its block of drafts attends to all of
@@ -15150,17 +15154,9 @@ struct Model::Impl {
                         return false;
                 }
                 if (clen_max > 0) {
-                    if (!mv(d, {job(l.i_wq_b, d.qr, d.iq, T, g.q_lora, (size_t) g.ix_heads * g.ix_hd)}, err)) return false;
-                    Finish fi;
-                    fi.rd = g.rd;
-                    fi.pos = (int) p0;
-                    fi.vpp = g.ix_heads;
-                    fi.freqs = freqs;
-                    fi.quant = 3;
-                    finish(d.iq, T * g.ix_heads, g.ix_hd, g.ix_hd, fi, s);
-                    // (iw rows are 64 apart)
-                    gemv_f16_rows(l.i_wproj, d.x, (size_t) D, g.ix_heads, D, T,
-                                  1.0f / std::sqrt((float) g.ix_hd) / std::sqrt((float) g.ix_heads), d.iw, 64, s);
+                    // (batch: run_attention projects them)
+                    if (batch == nullptr && !project_indexer_queries(l, d, p0, T, nullptr, err))
+                        return false;
                     const long long ss = (long long) o.max_context + 64;
                     bool restrict_ = false;
                     for (int t = 0; t < T; ++t)
@@ -15239,17 +15235,43 @@ struct Model::Impl {
         return true;
     }
 
-    /// Rotates the attention output `o` of T rows at positions p0 .. back by their positions (DeepSeek's inverse RoPE
-    /// on the output) and rounds it to FP8 as the reference does before layer member l's output projection.
-    void finish_attention(const Layer& l, Dev& d, float* o, int64_t p0, int T) {
-        Finish fo;
-        fo.rd = g.rd;
-        fo.pos = (int) p0;
-        fo.vpp = l.ahn;
-        fo.freqs = l.ratio ? d.freqs_comp : d.freqs_win;
+    /// Rotates the attention output `o` of T rows at positions p0 .. (rpos: at rpos[t] each) back by their positions
+    /// (DeepSeek's inverse RoPE on the output) and rounds it to FP8 as the reference does before layer member l's
+    /// output projection.
+    void finish_attention(const Layer& l, Dev& d, float* o, int64_t p0, int T, const int* rpos = nullptr) {
+        Finish fo = get_rope(l, d, l.ahn, p0, T, rpos);
         fo.inverse = 1;
         fo.quant = 1;
         finish(o, T * l.ahn, g.hd, g.hd, fo, d.st);
+    }
+
+    /// Projects T rows' indexer queries (d.iq, rotated to positions p0, p0 + 1, .. or rpos[t] each, and rounded to
+    /// FP4) and head weights (d.iw, rows 64 apart) from their q latents (d.qr) and attention inputs (d.x), for layer
+    /// member l's top-k selection of compressed rows.
+    bool project_indexer_queries(const Layer& l, Dev& d, int64_t p0, int T, const int* rpos, std::string& err) {
+        if (!mv(d, {job(l.i_wq_b, d.qr, d.iq, T, g.q_lora, (size_t) g.ix_heads * g.ix_hd)}, err))
+            return false;
+        Finish fi = get_rope(l, d, g.ix_heads, p0, T, rpos);
+        fi.quant = 3;
+        finish(d.iq, T * g.ix_heads, g.ix_hd, g.ix_hd, fi, d.st);
+        gemv_f16_rows(l.i_wproj, d.x, (size_t) g.dim, g.ix_heads, g.dim, T,
+                      1.0f / std::sqrt((float) g.ix_hd) / std::sqrt((float) g.ix_heads), d.iw, 64, d.st);
+        return true;
+    }
+
+    /// Gets the Finish that rotates T rows of layer member l's vectors (vpp a row) by their positions: p0, p0 + 1, ..
+    /// or, when rpos is given, rpos[t] each.
+    Finish get_rope(const Layer& l, const Dev& d, int vpp, int64_t p0, int T, const int* rpos) const {
+        Finish f;
+        f.rd = g.rd;
+        f.pos = (int) p0;
+        f.vpp = vpp;
+        f.freqs = l.ratio ? d.freqs_comp : d.freqs_win;
+        if (rpos != nullptr) {
+            f.n_rpos = T;
+            std::copy_n(rpos, T, f.rpos);
+        }
+        return f;
     }
 
     /// Computes the shared and routed experts for all rows in this layer.

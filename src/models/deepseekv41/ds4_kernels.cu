@@ -170,7 +170,7 @@ __global__ void __launch_bounds__(kThreads) finish_kernel(float* x, int len, lon
     }
     if (f.rd > 0) {
         const int r0 = len - f.rd;
-        const int pos = f.pos + (int) (blockIdx.x / f.vpp) * f.pos_step;
+        const int pos = f.n_rpos > 0 ? f.rpos[blockIdx.x / f.vpp] : f.pos + (int) (blockIdx.x / f.vpp) * f.pos_step;
 #pragma unroll
         for (int j = 0; j < kFinMax; ++j) {
             if (j >= nj) break;
@@ -388,10 +388,12 @@ __global__ void __launch_bounds__(kThreads) hc_mix_split_kernel(const float* __r
     if (threadIdx.x == 0) cnt[t] = 0u;
 }
 
+// kHc: hc when known at compile time (a value's hc loads then issued together), 0: hc_rt
+template <int kHc>
 __global__ void __launch_bounds__(1024) hc_pre_norm_kernel(const float* __restrict__ h, const float* __restrict__ mix,
-                                                           const float* __restrict__ w, int dim, int hc, float eps,
+                                                           const float* __restrict__ w, int dim, int hc_rt, float eps,
                                                            float* __restrict__ x) {
-    const int t = blockIdx.x;
+    const int t = blockIdx.x, hc = kHc > 0 ? kHc : hc_rt;
     h += (size_t) t * hc * dim;
     mix += (size_t) t * 8;
     x += (size_t) t * dim;
@@ -495,14 +497,21 @@ __global__ void __launch_bounds__(kThreads) gemv_f32_kernel(const float* __restr
     if (row >= n) return;
     const float4* w = (const float4*) (W + (size_t) row * k);
     const float4* xv = (const float4*) (x + (size_t) t * k);
+    const auto add = [&](float acc, float4 a, float4 b) {
+        return fmaf(a.w, b.w, fmaf(a.z, b.z, fmaf(a.y, b.y, fmaf(a.x, b.x, acc))));
+    };
+    constexpr int kAhead = 8;   // (W's loads kept in flight: a decode step's few rows leave the bus idle otherwise)
     float acc = 0.0f;
-    for (int c = lane; c < k / 4; c += 32) {
-        const float4 a = w[c], b = xv[c];
-        acc = fmaf(a.x, b.x, acc);
-        acc = fmaf(a.y, b.y, acc);
-        acc = fmaf(a.z, b.z, acc);
-        acc = fmaf(a.w, b.w, acc);
+    int c = lane;
+    for (; c + 32 * (kAhead - 1) < k / 4; c += 32 * kAhead) {
+        float4 a[kAhead];
+#pragma unroll
+        for (int u = 0; u < kAhead; ++u) a[u] = w[c + 32 * u];
+#pragma unroll
+        for (int u = 0; u < kAhead; ++u) acc = add(acc, a[u], xv[c + 32 * u]);
     }
+    for (; c < k / 4; c += 32)
+        acc = add(acc, w[c], xv[c]);
     acc = warp_sum(acc);
     if (lane == 0) y[(size_t) t * ldy + row] = acc;
 }
@@ -846,6 +855,19 @@ __global__ void block_max_kernel(const float* __restrict__ score, long long stri
 // ---------------------------------------------------------------- sparse attention, a block a (head, query)
 constexpr int kAttTile = 64;
 
+// Gets query t's window rows (n_win from window buffer row w0) and selected-row count n_sel.
+__device__ __forceinline__ void attn_spans(const AttnRows& ar, int t, int& n_win, int& n_sel, int& w0) {
+    if (ar.gen) {
+        const long long ta = ar.t0 + t, pa = ar.p0 + ta;
+        const long long first = max((long long) ar.win - ar.p0, ta + 1);   // the window buffer row of max(0, pa - win + 1)
+        w0 = (int) first;
+        n_win = (int) (ar.win + ta - first + 1);
+        n_sel = ar.R > 0 ? (int) min((long long) ar.kcap, (pa + 1) / ar.R) : 0;
+    } else {
+        n_win = ar.nwin[t], n_sel = ar.nsel[t], w0 = ar.win0[t];
+    }
+}
+
 // kContig: query t's selected rows are ckv's rows t * sel_stride .. (the scratch of rows decoded once a query) - read
 // without sel, a warp's rows of a tile loaded kPre at a time before their dots (0: as the BF16 kernel); the
 // arithmetic the same
@@ -859,15 +881,7 @@ __global__ void __launch_bounds__(kThreads) sparse_attn_kernel(const float* __re
     // d == 512: a thread owns 2 output values, a lane 16 of a row's dot
     const int h = blockIdx.x, t = blockIdx.y;
     int n_win, n_sel, w0;
-    if (ar.gen) {
-        const long long ta = ar.t0 + t, pa = ar.p0 + ta;
-        const long long first = max((long long) ar.win - ar.p0, ta + 1);   // the window buffer row of max(0, pa - win + 1)
-        w0 = (int) first;
-        n_win = (int) (ar.win + ta - first + 1);
-        n_sel = ar.R > 0 ? (int) min((long long) ar.kcap, (pa + 1) / ar.R) : 0;
-    } else {
-        n_win = ar.nwin[t], n_sel = ar.nsel[t], w0 = ar.win0[t];
-    }
+    attn_spans(ar, t, n_win, n_sel, w0);
     const uint16_t* wbase = win + (size_t) w0 * d;
     const int* sl = sel + (size_t) t * sel_stride;
     __shared__ float qs[512];
@@ -981,6 +995,144 @@ __global__ void __launch_bounds__(kThreads) sparse_attn_kernel(const float* __re
     ov[c] = o0 / den;
     ov[c + 1] = o1 / den;
 }
+
+#if defined(STRATA_USE_HIP)
+constexpr int kRowsMax = 1024;   // rows (window and selected) sparse_attn_rows_kernel takes a query
+
+// sparse_attn_kernel<true> for G heads of a query a block, in three phases that need no barrier a tile: every row's
+// scores (each warp's rows two loads ahead, a row's load serving the G heads), then the tiles' softmax (a (head, tile)
+// a warp; only each head's running max and denominator in tile order, by one thread), then each output value's
+// weighted sums over all the rows, rescaled where a tile starts.  Each value's operations, and so its bits, are
+// sparse_attn_kernel's; its per-tile barriers, row-at-a-time loads and a block a head cost more than the rows' bytes
+// at a decode step's few queries.  Used by sparse_attn_unpacked on HIP when a query's rows fit kRowsMax.
+template <int G>
+__global__ void __launch_bounds__(kThreads) sparse_attn_rows_kernel(const float* __restrict__ q,
+                                                                    const uint16_t* __restrict__ win,
+                                                                    const uint16_t* __restrict__ ckv, int sel_stride,
+                                                                    AttnRows ar, const float* __restrict__ sink,
+                                                                    int heads, int d, float scale,
+                                                                    float* __restrict__ out) {
+    constexpr int kTiles = kRowsMax / kAttTile, kAhead = 2, nw = kThreads / 32;
+    const int h0 = blockIdx.x * G, t = blockIdx.y;
+    int n_win, n_sel, w0;
+    attn_spans(ar, t, n_win, n_sel, w0);
+    const uint16_t* wbase = win + (size_t) w0 * d;
+    const uint16_t* sbase = ckv + (size_t) t * sel_stride * d;
+    const auto row = [&](int j) { return j < n_win ? wbase + (size_t) j * d : sbase + (size_t) (j - n_win) * d; };
+    __shared__ float qs[G][512];
+    __shared__ float sc[G][kRowsMax];
+    __shared__ float tile_max[G][kTiles], tile_sum[G][kTiles], tile_scale[G][kTiles], tile_m[G][kTiles];
+    __shared__ float m_run_s[G], den_s[G];
+    for (int i = threadIdx.x; i < G * d; i += blockDim.x)
+        qs[i / d][i % d] = q[((size_t) t * heads + h0 + i / d) * d + i % d];
+    __syncthreads();
+    const int lane = threadIdx.x & 31, wp = threadIdx.x >> 5;
+    const int total = n_win + n_sel, n_tiles = (total + kAttTile - 1) / kAttTile;
+    for (int j0 = wp; j0 < total; j0 += nw * kAhead) {   // scores: rows wp, wp + nw, .. (sparse_attn_kernel's dots)
+        uint4 a[kAhead], b[kAhead];
+#pragma unroll
+        for (int k = 0; k < kAhead; ++k)
+            if (const int j = j0 + nw * k; j < total) {
+                const uint16_t* rr = row(j);
+                a[k] = *(const uint4*) (rr + lane * 16);
+                b[k] = *(const uint4*) (rr + lane * 16 + 8);
+            }
+#pragma unroll
+        for (int k = 0; k < kAhead; ++k)
+            if (const int j = j0 + nw * k; j < total) {
+                const uint16_t* pa = (const uint16_t*) &a[k];
+                const uint16_t* pb = (const uint16_t*) &b[k];
+#pragma unroll
+                for (int g = 0; g < G; ++g) {
+                    float s = 0.0f;
+#pragma unroll
+                    for (int x = 0; x < 8; ++x) s += qs[g][lane * 16 + x] * bf16f(pa[x]);
+#pragma unroll
+                    for (int x = 0; x < 8; ++x) s += qs[g][lane * 16 + 8 + x] * bf16f(pb[x]);
+                    s = warp_sum(s);
+                    if (lane == 0) sc[g][j] = s * scale;
+                }
+            }
+    }
+    __syncthreads();
+    for (int task = wp; task < G * n_tiles; task += nw) {
+        const int g = task / n_tiles, ti = task % n_tiles, t0 = ti * kAttTile, nt = min(kAttTile, total - t0);
+        float m = -INFINITY;
+        for (int j = lane; j < nt; j += 32) m = fmaxf(m, sc[g][t0 + j]);
+        m = warp_max(m);
+        if (lane == 0) tile_max[g][ti] = m;
+    }
+    __syncthreads();
+    if (threadIdx.x < G) {
+        const int g = threadIdx.x;
+        float m_run = -1e30f;
+        for (int ti = 0; ti < n_tiles; ++ti) {
+            const float m_new = fmaxf(m_run, tile_max[g][ti]);
+            tile_scale[g][ti] = expf(m_run - m_new);
+            tile_m[g][ti] = m_new;
+            m_run = m_new;
+        }
+        m_run_s[g] = m_run;
+    }
+    __syncthreads();
+    for (int task = wp; task < G * n_tiles; task += nw) {
+        const int g = task / n_tiles, ti = task % n_tiles, t0 = ti * kAttTile, nt = min(kAttTile, total - t0);
+        float s = 0.0f;
+        for (int j = lane; j < nt; j += 32) {
+            const float p = expf(sc[g][t0 + j] - tile_m[g][ti]);
+            sc[g][t0 + j] = p;
+            s += p;
+        }
+        s = warp_sum(s);
+        if (lane == 0) tile_sum[g][ti] = s;
+    }
+    __syncthreads();
+    if (threadIdx.x < G) {
+        const int g = threadIdx.x;
+        float den = 0.0f;
+        for (int ti = 0; ti < n_tiles; ++ti) den = den * tile_scale[g][ti] + tile_sum[g][ti];
+        den_s[g] = den;
+    }
+    const int c = threadIdx.x * 2;
+    float o0[G], o1[G];
+#pragma unroll
+    for (int g = 0; g < G; ++g) o0[g] = o1[g] = 0.0f;
+    const auto add = [&](int j, uint32_t pr) {
+#pragma unroll
+        for (int g = 0; g < G; ++g) {
+            o0[g] += sc[g][j] * bf16f((uint16_t) (pr & 0xffffu));
+            o1[g] += sc[g][j] * bf16f((uint16_t) (pr >> 16));
+        }
+    };
+    for (int ti = 0; ti < n_tiles; ++ti) {
+        const int t0 = ti * kAttTile, nt = min(kAttTile, total - t0);
+#pragma unroll
+        for (int g = 0; g < G; ++g) {
+            o0[g] *= tile_scale[g][ti];
+            o1[g] *= tile_scale[g][ti];
+        }
+        int j = t0;
+        for (; j + 8 <= t0 + nt; j += 8) {   // (eight rows' loads before their sums)
+            uint32_t pr[8];
+#pragma unroll
+            for (int k = 0; k < 8; ++k) pr[k] = *(const uint32_t*) (row(j + k) + c);
+#pragma unroll
+            for (int k = 0; k < 8; ++k)
+                add(j + k, pr[k]);
+        }
+        for (; j < t0 + nt; ++j)
+            add(j, *(const uint32_t*) (row(j) + c));
+    }
+    __syncthreads();
+#pragma unroll
+    for (int g = 0; g < G; ++g) {
+        const float den = den_s[g] + expf(sink[h0 + g] - m_run_s[g]);
+        float* ov = out + ((size_t) t * heads + h0 + g) * d;
+        ov[c] = o0[g] / den;
+        ov[c + 1] = o1[g] / den;
+    }
+}
+#endif
 
 // ---------------------------------------------------------------- sparse attention over the packed compressed rows
 // G heads of one query a block (8 / G warps a head): each pass stages 16 of a tile's rows in shared memory as BF16
@@ -2315,7 +2467,8 @@ void hc_pre_norm(const float* h, const float* mix, const float* w, int dim, int 
 #if defined(STRATA_METAL)
     if (strata::dsv41::metal_host::hc_pre_norm(h, mix, w, dim, hc, T, eps, x)) return;
 #endif
-    strata_ds4_launch(hc_pre_norm_kernel, T, 1024, 0, s, h, mix, w, dim, hc, eps, x);
+    if (hc == 4) strata_ds4_launch(hc_pre_norm_kernel<4>, T, 1024, 0, s, h, mix, w, dim, hc, eps, x);
+    else strata_ds4_launch(hc_pre_norm_kernel<0>, T, 1024, 0, s, h, mix, w, dim, hc, eps, x);
 }
 void hc_post(const float* y, const float* res, const float* post, const float* comb, int dim, int hc, int T,
              float* out, cudaStream_t s) {
@@ -2564,7 +2717,20 @@ void sparse_attn_unpack(const KvRows& ckv, const int* sel, int sel_stride, const
 }
 void sparse_attn_unpacked(const float* q, const uint16_t* win, const AttnRows& a, const float* sink, int heads, int d,
                           int T, float scale, float* out, const AttnScratch& scr, cudaStream_t s) {
-#if !defined(STRATA_USE_HIP)
+#if defined(STRATA_USE_HIP)
+    int most = a.gen ? a.win + a.kcap : 0;   // (gen: n_win <= win, n_sel <= kcap)
+    for (int t = 0; t < T && !a.gen; ++t)
+        most = std::max(most, a.nwin[t] + a.nsel[t]);
+    if (most <= kRowsMax && heads % 4 == 0) {   // (G: the fastest at each count on a Radeon 8060S)
+        if (T < 4)
+            strata_ds4_launch(sparse_attn_rows_kernel<2>, dim3(heads / 2, T), kThreads, 0, s, q, win, scr.rows,
+                              scr.cap, a, sink, heads, d, scale, out);
+        else
+            strata_ds4_launch(sparse_attn_rows_kernel<4>, dim3(heads / 4, T), kThreads, 0, s, q, win, scr.rows,
+                              scr.cap, a, sink, heads, d, scale, out);
+        return;
+    }
+#else
     if (T == 1)   // (V100: the loads ahead pay for the decode's kernel at one query, not at more)
         strata_ds4_launch(sparse_attn_kernel<true, 8>, dim3(heads, T), kThreads, 0, s, q, win, scr.rows, nullptr,
                           scr.cap, a, sink, heads, d, scale, out);
