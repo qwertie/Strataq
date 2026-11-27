@@ -31,8 +31,10 @@
 // parked conversations there; paused_budget: the most they may take.  pool_pages: the pages of a page pool there
 // (strata-q38's), of which allocated_pages hold experts or conversations and fragmented_pages are free in runs
 // shorter than the smallest expert, which no expert can use.  setting: the bytes the engine's pool there takes now
-// (its `memory_mib.<id>` setting), and smallest, largest: the range CHANGE_SETTINGS accepts for it now (largest: the
-// estimate of what the GPU's dedicated memory holds; a growth finds the real end).  pool_shared: the bytes of an
+// and, on a GPU of the paged engines, the dense weights it holds besides (setting_weights: their bytes, which a layer
+// cut move or the drafter switch trades against the pool) - its `memory_mib.<id>` setting; smallest, largest: the
+// range CHANGE_SETTINGS accepts for it now (largest: the estimate of what the GPU's dedicated memory holds; a growth
+// finds the real end).  pool_shared: the bytes of an
 // integrated GPU's pool that went to shared memory; dedicated_full=1: the pool's last growth stopped
 // where the dedicated memory ended (CHANGE_SETTINGS' shared_memory=on lets the next one go on).  kept_free: the bytes
 // the engine's pools leave unallocated on the GPU for other programs (its `vram_reserve_mib` setting).
@@ -92,8 +94,9 @@ struct Memory {
     /// The pages of the page pool here (0: none; the old engines'), how many are allocated, and how many are free in
     /// runs too short for any expert (PagePoolReport::allocated, fragmented).
     uint64_t pool_pages = 0, allocated_pages = 0, fragmented_pages = 0;
-    /// The bytes the engine's pool here takes (0: no setting to change), and the least and most it may be set to now.
+    /// The pool and setting_weights in bytes (0: no setting to change), and the least and most accepted now.
     uint64_t setting = 0, smallest = 0, largest = 0;
+    uint64_t setting_weights = 0;   ///< the bytes of `setting` that are dense weights rather than the pool
     uint64_t pool_offset = 0;   ///< bytes drawn before the adjustable pool, independent of category names
     uint64_t mapped = 0;   ///< the bytes of it the GPUs map (page-locked); 0: none or not said
     uint64_t pool_shared = 0;     ///< the bytes of the GPU's pool in shared memory instead of dedicated
@@ -215,6 +218,8 @@ inline std::string format_memory_report(MemoryReport report, const std::vector<c
                 put("pool_offset", m.pool_offset);
             put("smallest", m.smallest);
             put("largest", m.largest);
+            if (m.setting_weights > 0)
+                put("setting_weights", m.setting_weights);
         }
         if (m.pool_shared > 0)
             put("pool_shared", m.pool_shared);

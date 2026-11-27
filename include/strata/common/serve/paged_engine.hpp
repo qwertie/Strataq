@@ -100,7 +100,8 @@ struct PagedSettings {
     /// (live: prefill_chunk) Caps the chunk chosen when borrowing prompt buffers, initially
     /// PagedModel::get_prompt_ceiling() (--prefill-chunk, also spelled --prefill); 0 disables borrowing.
     int64_t prompt_chunk = 0;
-    /// --gpu-mib, per card of a layer split (one value: every card's); empty: what each GPU has free less what it keeps
+    /// --gpu-mib, per card of a layer split (one value: every card's): the card's memory, which holds its pool and
+    /// its dense weights (PagedEngine::get_card_weight_bytes); empty: what each GPU has free less what it keeps
     std::vector<int64_t> gpu_mib;
     int64_t ram_mib = -1;                          ///< --ram-mib; -1: get_ram_room
     /// --vram-reserve-mib (also --reserve-mib, strata-dsv41's name for it): the memory each GPU's pool leaves
@@ -187,17 +188,20 @@ struct CardPoolPlan {
     uint64_t bytes = 0;                    ///< what the pool takes
     uint64_t room = 0;                     ///< what the pool could take (get_gpu_room)
     int64_t gpu_mib = -1;                  ///< the card's --gpu-mib, -1 when not given
+    uint64_t weights = 0;                  ///< the card's dense weights, which --gpu-mib counts besides the pool
 };
-/// Sizes a pool using --gpu-mib, capped by get_gpu_room(dev, keep). The default also caps it at one max_context
-/// conversation plus ranking's first max_experts experts, rounded to pages; blob_bytes is indexed by layer.
+/// Sizes a pool using --gpu-mib less `weights` (the dense weights the card holds: its layers' and, when on, the
+/// drafter's), capped by get_gpu_room(dev, keep). The default also caps it at one max_context conversation plus
+/// ranking's first max_experts experts, rounded to pages; blob_bytes is indexed by layer.
 CardPoolPlan plan_card_pool(const PagedCard& card, const PagedSettings& s, const strata::core::StateLayout& layout,
                             int64_t max_context, uint64_t page_bytes, const std::vector<uint64_t>& blob_bytes,
-                            const std::vector<strata::core::ExpertKey>& ranking, int64_t max_experts, uint64_t keep);
+                            const std::vector<strata::core::ExpertKey>& ranking, int64_t max_experts, uint64_t keep,
+                            uint64_t weights);
 /// Gets the memory report's names of a pool's experts (PagePoolConfig::label_expert) for a model of `n_layers` layers,
 /// whose drafter's experts, kept as the layers from `n_layers` on, are named as the drafter's.
 std::function<strata::core::MemoryLabel(strata::core::ExpertKey, uint64_t)> get_expert_labels(int64_t n_layers);
 /// Plans and reports DeepSeek's initial cuts using PagedEngine's planner, one tokens_min conversation, and experts
-/// in hottest-first ranked_layers order. Repeated GPUs share free memory unless --gpu-mib sets each stage's pool.
+/// in hottest-first ranked_layers order. Repeated GPUs share free memory unless --gpu-mib sets each stage's memory.
 /// Returns no cuts if planning fails.
 std::vector<int64_t> plan_start_split(const std::vector<int>& devices, const PagedSettings& s, uint64_t keep,
                                       const strata::core::LayerSizes& sizes, std::vector<int32_t> ranked_layers,

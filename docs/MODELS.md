@@ -81,7 +81,8 @@ These engines add live memory settings in the Memory panel, several conversation
 in RAM or on disk, saved sessions, and layer splitting. DeepSeek's layer split is still under test; separate-card
 validation remains open in D9. Pictures, the suffix drafter, `--batch-groups` and `--tp` are unavailable.
 The server keeps context, GPU selection and `parallel` (starting conversations at once). It logs options it leaves
-out. Use `--set gpu-mib=18432 --set ram-mib=8192` to set the pools; `tokens-min` and `tokens-max` bound the token
+out. Use `--set gpu-mib=18432 --set ram-mib=8192` to set the pools (`gpu-mib` counts the GPU's
+dense weights too); `tokens-min` and `tokens-max` bound the token
 pages kept in the pools. These are engine options in the config's `args`, also available through `--set`.
 
 Measured on Strix Halo on Windows, HIP, the IQ2_XXS pack, 8,192 context, D7: with DSpark, 1,200 trunk experts

@@ -248,6 +248,10 @@ private:
     /// Gets what `card`'s pool leaves free on its GPU: `reserve_mib` (PagedSettings::vram_reserve_mib) and what the
     /// model keeps there (PagedModel::get_gpu_keep).
     uint64_t get_gpu_keep(const PagedCard& card, int64_t reserve_mib) const;
+    /// Gets the GPU memory of the dense weights `card` holds that its memory setting counts besides its pool: its
+    /// layers' and, while the drafter is on, the drafter's (those a cut move or the drafter switch trades against the
+    /// pool).  The model-wide tensors are not counted.
+    uint64_t get_card_weight_bytes(const PagedCard& card) const;
     /// Gets the least and the most the RAM's pool and its staging ring may hold now; the most leaves
     /// kRamReserveBytes free.
     uint64_t get_smallest_ram() const;
@@ -2438,9 +2442,10 @@ strata::serve::MemoryReport PagedEngine::describe_memory() const {
         gpu.pool_pages = r.total.pages;
         gpu.allocated_pages = r.allocated.pages;
         gpu.fragmented_pages = r.fragmented.pages;
-        gpu.setting = r.total.bytes;
-        gpu.smallest = get_smallest_gpu(card, settings_.tokens_min);
-        gpu.largest = get_largest_gpu(card, settings_.vram_reserve_mib);
+        gpu.setting_weights = get_card_weight_bytes(card);
+        gpu.setting = r.total.bytes + gpu.setting_weights;
+        gpu.smallest = get_smallest_gpu(card, settings_.tokens_min) + gpu.setting_weights;
+        gpu.largest = get_largest_gpu(card, settings_.vram_reserve_mib) + gpu.setting_weights;
         gpu.pool_shared = r.outside.bytes;
         gpu.dedicated_full = card.index < dedicated_full_.size() && dedicated_full_[card.index];
         gpu.kept_free = settings_.get_vram_reserve_bytes();
@@ -2507,8 +2512,7 @@ strata::serve::MemoryReport PagedEngine::describe_memory() const {
                        {"ssd_pause_mib", settings_.ssd_pause_mib},
                        {"vram_reserve_mib", settings_.vram_reserve_mib}};
     for (const PagedCard& card : cards_)
-        report.settings.emplace_back("memory_mib." + card.id,
-                                     (int64_t) (card.experts.pool().report().total.bytes >> 20));
+        report.settings.emplace_back("memory_mib." + card.id, (int64_t) (report.at(card.id).setting >> 20));
     report.settings.insert(report.settings.end(),
                            {{"memory_mib.ram", (int64_t) ((rr.total.bytes + ram_.ring_bytes()) >> 20)},
                             {"token_bytes", (int64_t) ((grown - fixed) / probe)},
@@ -2563,7 +2567,7 @@ strata::serve::MemoryReport PagedEngine::describe_memory() const {
 
 std::string PagedEngine::change_settings(const SettingValues& values, std::string& shortfall) {
     PagedSettings s = settings_;
-    std::vector<std::optional<uint64_t>> gpu_bytes(cards_.size());   // per card
+    std::vector<std::optional<uint64_t>> gpu_bytes(cards_.size());   // per card: its pool and dense weights
     std::optional<uint64_t> ram_bytes;
     bool shared_ok = false;   // this change's GPU pools may grow into shared memory (one change only: no setting)
     for (const auto& [name, text] : values) {
@@ -2596,7 +2600,7 @@ std::string PagedEngine::change_settings(const SettingValues& values, std::strin
         const auto card = std::find_if(cards_.begin(), cards_.end(),
                                        [&](const PagedCard& c) { return name == "memory_mib." + c.id; });
         if (card != cards_.end())
-            gpu_bytes[card->index] = round_to_chunks(card->experts.pool(), (uint64_t) v << 20);
+            gpu_bytes[card->index] = (uint64_t) v << 20;
         else if (name == "memory_mib.ram")
             ram_bytes = round_to_chunks(ram_.pages().pool(), std::max((uint64_t) v << 20, ram_.ring_bytes()) -
                                                               ram_.ring_bytes()) + ram_.ring_bytes();
@@ -2685,13 +2689,14 @@ std::string PagedEngine::change_settings(const SettingValues& values, std::strin
         if (!why.empty())
             shortfall += (shortfall.empty() ? "" : "; ") + (what + why);
     };
-    std::vector<uint64_t> gpu_now;
     for (const PagedCard& card : cards_) {
-        const uint64_t now = gpu_now.emplace_back(card.experts.pool().report().total.bytes);
-        const uint64_t smallest = get_smallest_gpu(card, s.tokens_min), asked = gpu_bytes[card.index].value_or(now);
-        if (asked < smallest)
-            return "the biggest active conversation and the token minimum need " + gib(smallest) + "; the pool of " +
-                   card.id + " would keep " + gib(asked);
+        const uint64_t weights = get_card_weight_bytes(card);
+        const uint64_t freed = settings_.drafter && !s.drafter ? model_.get_drafter_weight_bytes(card) : 0;
+        const uint64_t smallest = get_smallest_gpu(card, s.tokens_min) + weights - freed;
+        if (const uint64_t asked = gpu_bytes[card.index].value_or(card.experts.pool().report().total.bytes + weights);
+            asked < smallest)
+            return "the biggest active conversation, the token minimum and the dense weights need " + gib(smallest) +
+                   " of " + card.id + ", not " + gib(asked);
     }
     if (ram_bytes && (*ram_bytes < get_smallest_ram() || *ram_bytes > get_largest_ram()))
         return "the resizable RAM pool may be " + gib(get_smallest_ram()) + " to " + gib(get_largest_ram()) +
@@ -2702,13 +2707,13 @@ std::string PagedEngine::change_settings(const SettingValues& values, std::strin
     if (const std::string why = set_token_limits(min_first, s.tokens_max, s.conversation_context); !why.empty())
         return why;
     for (const PagedCard& card : cards_) {
-        const uint64_t asked = gpu_bytes[card.index].value_or(gpu_now[card.index]);
         // (a growth itself finds where the GPU's dedicated memory ends, resize_gpu)
-        if (const uint64_t largest = get_largest_gpu(card, s.vram_reserve_mib, true);
-            gpu_bytes[card.index] && asked > largest) {
+        if (const uint64_t largest = get_largest_gpu(card, s.vram_reserve_mib, true) + get_card_weight_bytes(card);
+            gpu_bytes[card.index] && *gpu_bytes[card.index] > largest) {
+            note((card.id + ": ").c_str(),
+                 "the GPU has room for " + gib(largest) + " of pool and dense weights, not " +
+                 gib(*gpu_bytes[card.index]));
             gpu_bytes[card.index] = largest;
-            note(("the pool of " + card.id + ": ").c_str(),
-                 "the GPU has room for " + gib(largest) + " of pool, not " + gib(asked));
         }
     }
     (void) trim_gpu_conversations((int) s.vram_conversations);
@@ -2740,11 +2745,17 @@ std::string PagedEngine::change_settings(const SettingValues& values, std::strin
     settings_.suffix_draft = s.suffix_draft;
     settings_.lookup_chain = s.lookup_chain;
     const uint64_t ram_now = ram_.pages().pool().report().total.bytes + ram_.ring_bytes();
+    // Recompute the pool target after a drafter switch, which trades its weights against the pool itself.
     const auto resize = [&](bool shrink) {
-        for (PagedCard& card : cards_)
-            if (const std::optional<uint64_t> asked = gpu_bytes[card.index];
-                asked && *asked != gpu_now[card.index] && (*asked < gpu_now[card.index]) == shrink)
-                note(("the pool of " + card.id + ": ").c_str(), resize_gpu(card, *asked, shared_ok));
+        for (PagedCard& card : cards_) {
+            const std::optional<uint64_t> asked = gpu_bytes[card.index];
+            if (!asked)
+                continue;
+            const uint64_t now = card.experts.pool().report().total.bytes, weights = get_card_weight_bytes(card);
+            const uint64_t pool = round_to_chunks(card.experts.pool(), *asked - std::min(*asked, weights));
+            if (pool != now && (pool < now) == shrink)
+                note(("the pool of " + card.id + ": ").c_str(), resize_gpu(card, pool, shared_ok));
+        }
         if (ram_bytes && *ram_bytes != ram_now && (*ram_bytes < ram_now) == shrink)
             note("the RAM's pool: ", resize_ram(*ram_bytes));
     };
@@ -2878,7 +2889,7 @@ std::vector<int64_t> PagedEngine::plan_cut() const {
             ++decoding;
             tokens = std::max(tokens, h->dec.pos + h->dec.max_new - h->dec.produced + settings_.step.lookahead + 1);
         }
-    std::vector<uint64_t> pools;   // each card's memory setting: its pool and its layers' dense weights
+    std::vector<uint64_t> pools;   // each card's memory setting less the drafter's weights
     std::vector<double> layer_ms, links;
     for (const PagedCard& card : cards_) {
         pools.push_back(std::accumulate(sizes.dense.begin() + card.lb, sizes.dense.begin() + card.le,
@@ -3243,6 +3254,12 @@ uint64_t PagedEngine::get_largest_gpu(const PagedCard& card, int64_t reserve_mib
 
 uint64_t PagedEngine::get_gpu_keep(const PagedCard& card, int64_t reserve_mib) const {
     return ((uint64_t) reserve_mib << 20) + model_.get_gpu_keep(card);
+}
+
+uint64_t PagedEngine::get_card_weight_bytes(const PagedCard& card) const {
+    const std::vector<uint64_t> dense = model_.get_layer_sizes(card.experts.pool().page_bytes()).dense;
+    return std::accumulate(dense.begin() + card.lb, dense.begin() + card.le,
+                           settings_.drafter ? model_.get_drafter_weight_bytes(card) : 0);
 }
 
 uint64_t PagedEngine::get_smallest_ram() const {

@@ -199,11 +199,13 @@ export function drawMemoryPanel(element, view, onChange) {
  * @typedef {{available: boolean, reason?: string, busy?: boolean, error?: string | null, can_change?: boolean,
  *   config?: boolean, details?: Record<string, string>, memories: MemoryUse[], settings: Record<string, number>,
  *   conversations?: HeldConversation[], shortfall?: string, pause_directory?: string}} MemoryView
- * `setting`: the size of the engine's page pool there now, which `memory_mib.<id>` changes; `smallest`, `largest`:
- * the sizes it accepts now (a GPU's `largest`: what its dedicated memory holds, as last measured).  `pool_shared`: the
- * bytes of the pool in a GPU's shared memory; `dedicated_full`: its last growth stopped where the dedicated memory
- * ended.  `kept_free`: what the engine's pools leave free there for other programs; `dedicated_room`: bytes below
- * the measured dedicated-memory limit minus all programs' current use, from Windows' D3DKMT statistics. Absent
+ * `setting`: the size of the engine's page pool there now with the dense weights a GPU holds besides
+ * (`setting_weights`: their bytes, which a layer cut move trades against the pool), which `memory_mib.<id>` changes;
+ * `smallest`, `largest`: the sizes it accepts now (a GPU's `largest`: what its dedicated memory holds, as last
+ * measured).  `pool_shared`: the bytes of the pool in a GPU's shared memory; `dedicated_full`: its last growth
+ * stopped where the dedicated memory ended.  `kept_free`: what the engine's pools leave free there for other
+ * programs; `dedicated_room`: bytes below the measured dedicated-memory limit minus all programs' current use, from
+ * Windows' D3DKMT statistics. Absent
  * until a growth finds the limit; zero means full. The bar's free-memory counter can differ, so room is capped
  * at `free` and the rest of `free` is drawn as unusable.  `commit_room` (the RAM, on Windows): what Windows can still
  * promise programs (its commit limit, the RAM plus the page file, less all programs' commit).  Bytes.
@@ -212,7 +214,8 @@ export function drawMemoryPanel(element, view, onChange) {
  *   other?: number, other_apps?: number,
  *   blocks?: MemoryBlock[],
  *   in_share?: number, borrowed?: number | null, gpu_borrowed?: number, allocated_pct?: number | null,
- *   fragmented_pct?: number | null, setting?: number | null, pool_offset?: number | null, smallest?: number | null,
+ *   fragmented_pct?: number | null, setting?: number | null, setting_weights?: number | null,
+ *   pool_offset?: number | null, smallest?: number | null,
  *   largest?: number | null, pool_shared?: number | null, dedicated_full?: boolean, kept_free?: number | null,
  *   dedicated_room?: number | null, commit_room?: number | null}} MemoryUse
  * @typedef {{category: string, pool: string, label: string, bytes: number,
@@ -233,12 +236,13 @@ export function drawMemoryPanel(element, view, onChange) {
  * @typedef {{view: MemoryView, onChange?: ChangeSettings, dividers: Record<string, Divider>, drag: Drag | null,
  *   busy: boolean, notice: Notice | null, pending: SettingsChange}} Panel
  * A boundary of a bar that can be dragged.  `key`: the setting it changes; `from`: the size now; `start`: where the
- * segment it ends begins on the bar; `scale`: drawn bytes per byte of the engine's; `total`: the drawn bytes the
- * bar's width stands for; `fixed`: Strata allocations outside the adjustable pool; `shared`: the pool's bytes in
+ * segment it ends would begin on the bar (the pool's start, less its dense weights drawn elsewhere); `scale`: drawn
+ * bytes per byte of the engine's; `total`: the drawn bytes the bar's width stands for; `fixed`: Strata allocations
+ * outside the setting; `weights`: the setting's dense weights; `shared`: the pool's bytes in
  * shared memory; `commit`: Windows' remaining allocation capacity when below the known free RAM (else null).
  * Bytes.
  * @typedef {{key: string, from: number, smallest: number, largest: number, start: number, scale: number,
- *   total: number, fixed: number, shared: number, commit: number | null}} Divider
+ *   total: number, fixed: number, weights: number, shared: number, commit: number | null}} Divider
  * A divider being moved.  `value`: the size it would set (bytes); `x0`: the pointer's x where the drag started (null
  * for the keyboard); `perPx`: bytes per pixel of the bar.
  * @typedef {{id: string, value: number, x0: number | null, perPx: number}} Drag
@@ -741,13 +745,14 @@ function findDivider(x) {
   const first = parts.findIndex((p) => ssd ? SSD_BUDGET_USES.includes(p.use) : p.pool);
   if (from == null || !total || (first < 0 && !ssd && x.pool_offset == null))
     return null;
-  const start = !ssd && first < 0 && x.pool_offset != null ? x.pool_offset * scale :
-    (first < 0 ? parts : parts.slice(0, first)).reduce((a, p) => a + (p.drawn ?? p.bytes), 0);
+  const weights = ssd ? 0 : x.setting_weights ?? 0;
+  const start = (!ssd && first < 0 && x.pool_offset != null ? x.pool_offset * scale :
+    (first < 0 ? parts : parts.slice(0, first)).reduce((a, p) => a + (p.drawn ?? p.bytes), 0)) - weights * scale;
   const fixed = ssd ? 0 : Math.max(0, Object.values(x.uses).reduce((a, b) => a + b, 0) - from);
   const commit = x.id === "ram" && x.commit_room != null && x.free != null && x.commit_room < x.free ?
     x.commit_room : null;
   return {key: ssd ? "ssd_pause_mib" : `memory_mib.${x.id}`, from, smallest: x.smallest ?? 0,
-          largest: x.largest ?? Infinity, start, scale, total, fixed, shared: x.pool_shared ?? 0, commit};
+          largest: x.largest ?? Infinity, start, scale, total, fixed, weights, shared: x.pool_shared ?? 0, commit};
 }
 
 /** Gets why the engine may not give a divider's size: it refuses less than it needs and more than a RAM pool can
@@ -842,7 +847,7 @@ function drawDivider(id, d, drag) {
   const what = id === "ssd" ? "the SSD space paused conversations may take" :
     `Strata's total memory ${id === "ram" ? "in RAM" : "on this GPU"}`;
   const allocation = `${size(d.fixed + value)}${id === "ssd" ? "" :
-    ` total (${size(d.fixed)} fixed, ${size(value)} resizable pool)`}`;
+    ` total (${size(d.fixed)} fixed, ${size(value)} ${getResizableName(d)})`}`;
   const shared = d.shared ? ` The pool has ${size(d.shared)} in shared memory, which is slower; prompt buffers ` +
     "are lent below the lowest shared chunk." : "";
   const moved = drag && value !== d.from ? `<span class="mem-change${warned}" style="left:` +
@@ -861,8 +866,15 @@ function drawPreview(d, drag) {
   const warning = findWarning(d, drag.value);
   return `<p class="mem-preview${warning ? " mem-warned" : ""}">` +
     `${size(d.fixed + d.from)} → ${size(d.fixed + drag.value)}` +
-    (d.key === "ssd_pause_mib" ? "" : ` Strata total (${size(d.fixed)} fixed; ${size(drag.value)} resizable pool)`) +
+    (d.key === "ssd_pause_mib" ? "" :
+      ` Strata total (${size(d.fixed)} fixed; ${size(drag.value)} ${getResizableName(d)})`) +
     (warning ? `: ${esc(warning)}; ` : ": ") + "release to apply, Escape cancels</p>";
+}
+
+/** Gets what the part of a memory that a divider sizes is called.
+ * @param {Divider} d */
+function getResizableName(d) {
+  return d.weights ? "resizable pool and dense weights" : "resizable pool";
 }
 
 /** Gets the API monitor's selectable contexts, including engine-reported activity ages when available.
@@ -955,7 +967,7 @@ function markRedundantExperts(memories) {
  * @param {number} scale
  * @returns {{use: string, bytes: number, drawn?: number, pool?: boolean}[]} */
 function splitPoolParts(memory, scale) {
-  const start = memory.pool_offset, end = (start ?? 0) + (memory.setting ?? 0);
+  const start = memory.pool_offset, end = (start ?? 0) + (memory.setting ?? 0) - (memory.setting_weights ?? 0);
   let at = 0;
   return Object.entries(memory.uses).flatMap(([use, bytes]) => {
     const before = at;

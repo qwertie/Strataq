@@ -257,14 +257,17 @@ std::function<strata::core::MemoryLabel(strata::core::ExpertKey, uint64_t)> get_
 
 CardPoolPlan plan_card_pool(const PagedCard& card, const PagedSettings& s, const strata::core::StateLayout& layout,
                             int64_t max_context, uint64_t page_bytes, const std::vector<uint64_t>& blob_bytes,
-                            const std::vector<strata::core::ExpertKey>& ranking, int64_t max_experts, uint64_t keep) {
+                            const std::vector<strata::core::ExpertKey>& ranking, int64_t max_experts, uint64_t keep,
+                            uint64_t weights) {
     uint64_t most = get_conversation_bytes(layout, max_context, page_bytes);
     for (size_t i = 0; i < ranking.size() && (int64_t) i < max_experts; ++i)
         most += (blob_bytes[(size_t) ranking[i].layer] + page_bytes - 1) / page_bytes * page_bytes;
     CardPoolPlan plan;
     plan.gpu_mib = s.get_gpu_mib(card.index);
     plan.room = get_gpu_room(card.dev, keep);
-    plan.bytes = plan.gpu_mib >= 0 ? std::min((uint64_t) plan.gpu_mib << 20, plan.room) : std::min(plan.room, most);
+    plan.weights = weights;
+    const uint64_t asked = plan.gpu_mib >= 0 ? (uint64_t) plan.gpu_mib << 20 : 0;
+    plan.bytes = plan.gpu_mib >= 0 ? std::min(asked - std::min(asked, weights), plan.room) : std::min(plan.room, most);
     plan.config.page_bytes = page_bytes;
     plan.config.chunk_bytes = get_chunk_bytes(plan.bytes, page_bytes);
     plan.config.tokens_min = std::clamp<int64_t>(s.tokens_min, 0, max_context);
@@ -436,14 +439,16 @@ uint64_t get_chunk_bytes(uint64_t pool_bytes, uint64_t page_bytes) {
 void say_gpu_pool(const std::string& program, const PagedCard& card, const CardPoolPlan& plan) {
     const strata::core::PagePool& pool = card.experts.pool();
     char capped[128] = "";
-    if (plan.gpu_mib >= 0 && ((uint64_t) plan.gpu_mib << 20) > plan.room)
+    if (plan.gpu_mib >= 0 && ((uint64_t) plan.gpu_mib << 20) > plan.room + plan.weights)
         std::snprintf(capped, sizeof capped, "; --gpu-mib %lld asked for more than the GPU has room for",
                       (long long) plan.gpu_mib);
-    std::fprintf(stderr, "%s: the page pool of %s (layers %lld-%lld): %.2f GiB (of %.2f GiB it could take) in chunks "
+    std::fprintf(stderr, "%s: the page pool of %s (layers %lld-%lld): %.2f GiB (of %.2f GiB it could take) beside "
+                         "%.2f GiB of dense weights, in chunks "
                          "of %.0f MiB%s, pages of %llu bytes, for the experts and the conversations, %lld tokens of it "
                          "kept for the conversations%s\n",
                  program.c_str(), card.id.c_str(), (long long) card.lb, (long long) card.le - 1,
                  (double) pool.report().total.bytes / 1073741824.0, (double) plan.room / 1073741824.0,
+                 (double) plan.weights / 1073741824.0,
                  (double) pool.chunk_bytes() / 1048576.0,
                  card.experts.is_contiguous() ? " mapped back to back in one virtual range" : "",
                  (unsigned long long) pool.page_bytes(),

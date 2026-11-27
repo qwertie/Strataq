@@ -19,7 +19,8 @@ namespace strata::qwen38 {
 /// CHANGE_SETTINGS turns it on).  `--batch N` is the batch slots, and `--concurrent N` how many of them decode at once
 /// (default all).  `--expert-cache N` is the most experts the GPU holds, as many as N slots of the largest expert
 /// hold; `auto`, as many as fit; on a layer split, the profile's first N, each on the card of its layer.  `--gpu-mib
-/// N[,N2..]`: the GPU's pool, one per card of a layer split (one value: each card's) (default: what is free less
+/// N[,N2..]`: the GPU's pool and the dense weights of its layers (and of the drafter when on), one per card of a layer
+/// split (one value: each card's) (default for the pool: what is free less
 /// --vram-reserve-mib (default kDefaultVramReserveMib) and what the start allocates after the pool, but no more than
 /// those experts and a conversation at --max-context take).  The RAM:
 /// `--ram-mib N`, the RAM's pool (default: what the RAM has free less the resident headroom, but no more than every

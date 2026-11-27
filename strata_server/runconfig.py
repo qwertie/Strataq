@@ -117,7 +117,7 @@ def check_live(changes, to_default: bool, cards: list[str] | None = None) -> dic
     numbers; _LIVE_SWITCHES "on" or "off"; _LIVE_WORDS one of their words; draft_rule its text), or raises a
     ValueError naming the first bad setting or value.  `to_default`: the values are to be saved to the run config
     too, so only settings with a flag there are accepted; `cards`: the engine's GPU pool settings
-    (get_card_settings), which --gpu-mib holds (one size per card)."""
+    (get_card_settings), which --gpu-mib holds (one size per card: its pool and dense weights)."""
     if not isinstance(changes, dict) or not changes:
         raise ValueError('send {"set": {"<setting>": <value>, ...}}')
     out = {}
@@ -158,7 +158,8 @@ def read_live_defaults(path: str | Path | None) -> dict:
 def apply_live(cfg: dict, values: dict, settings: dict | None = None) -> tuple[dict, list[str]]:
     """Gets the config with check_live's `values` written as their engine flags in "args" (as the person's, as
     apply does), and the settings whose default changed.  `settings`: the engine's settings after the change; a GPU
-    pool's size (get_card_settings) is saved as --gpu-mib's list of every card's pool, in the cards' order."""
+    card's memory (get_card_settings: its pool and dense weights) is saved as --gpu-mib's list of every card's, in
+    the cards' order."""
     new = json.loads(json.dumps(cfg))                  # a deep copy: the caller's dict is left alone
     cards = get_card_settings(settings or {})
     changed = []

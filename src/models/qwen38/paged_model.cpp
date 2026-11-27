@@ -48,6 +48,7 @@
 #include <cstring>
 #include <deque>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <utility>
 #include <vector>
@@ -363,6 +364,7 @@ private:
 std::string get_split_hop_refusal(const Options& o);
 std::vector<uint64_t> get_blob_bytes(const Model& m, bool drafter);
 bool has_drafter(const Model& m, const ModelCard& card);
+uint64_t get_head_bind_bytes(const Model& m, const ModelCard& card);
 int64_t get_pool_max_experts(const Model& m);
 PagedCard& add_card(Model& m, Conversation& conv, PagedCards& cards, ModelCards& model_cards, GpuStage* stage);
 bool open_pages(Model& m, PagedCard& card, ModelCard& mc, const PagedSettings& s, int64_t max_experts,
@@ -751,11 +753,15 @@ bool get_card_layout(const Model& m, const PagedCard& card, const ModelCard& mc,
 /// the verify windows; on a later stage of a layer split, kStageLateAllocMib and kWindowMib).  (The prompt path's
 /// buffers are lent from the pool.)
 uint64_t get_gpu_keep(const Model& m, const ModelCard& card, bool started) {
-    const uint64_t head = (card.stage != nullptr ? card.stage->head : m.native_head).row_bytes();
     const int64_t late_mib = started ? 0 : card.stage == nullptr ? strata::core::kLateAllocMib :
         strata::program::split_walk::kStageLateAllocMib + strata::program::stage_reserve::kWindowMib;
     return ((uint64_t) late_mib << 20) +
-           (has_drafter(m, card) && (!started || m.mtp.vram_bytes() == 0) ? m.mtp.bind_bytes(head, m.n_vocab) : 0);
+           (has_drafter(m, card) && (!started || m.mtp.vram_bytes() == 0) ? get_head_bind_bytes(m, card) : 0);
+}
+
+/// Gets the GPU memory binding the drafter's head on `card` adds to the drafter's (MtpDrafter::bind_bytes).
+uint64_t get_head_bind_bytes(const Model& m, const ModelCard& card) {
+    return m.mtp.bind_bytes((card.stage != nullptr ? card.stage->head : m.native_head).row_bytes(), m.n_vocab);
 }
 
 /// Gets what card `mc`'s prompt path borrows to read in chunks of `chunk` tokens (Prefill::bytes_needed and
@@ -1622,8 +1628,13 @@ bool open_pages(Model& m, PagedCard& card, ModelCard& mc, const PagedSettings& s
     if (!ConversationPages::get_layout(m.g, *mc.own, drafting ? &m.mtp.kv_state() : nullptr, layout, err))
         return false;
     const uint64_t keep = s.get_vram_reserve_bytes() + get_gpu_keep(m, mc, false);
-    strata::serve::CardPoolPlan plan =
-        strata::serve::plan_card_pool(card, s, layout, m.o.max_context, page, blobs, ranking, max_experts, keep);
+    std::vector<uint64_t> dense;   // (priced as PagedQwen::get_layer_sizes prices them)
+    if (!m.get_layer_bytes(strata::core::WeightTable(), dense, err))
+        return false;
+    const uint64_t drafter = drafting && s.drafter ? m.mtp.vram_bytes() + get_head_bind_bytes(m, mc) : 0;
+    const uint64_t weights = std::accumulate(dense.begin() + card.lb, dense.begin() + card.le, drafter);
+    strata::serve::CardPoolPlan plan = strata::serve::plan_card_pool(card, s, layout, m.o.max_context, page, blobs,
+                                                                     ranking, max_experts, keep, weights);
     plan.config.label_expert = strata::serve::get_expert_labels(m.g.n_layers);
     const uint64_t chunk = plan.config.chunk_bytes;
     mc.cache->set_expert_bytes((int64_t) std::ranges::max(blobs));

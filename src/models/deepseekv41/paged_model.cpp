@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <utility>
@@ -1291,9 +1292,9 @@ void add_ranks(const Model& m, int64_t lb, int64_t le, std::vector<strata::core:
 }
 
 /// Opens `card`'s page pool for conversations of `layout` and the first `max_experts` experts of `ranking` (-1: every
-/// one) in the GPU memory the model left: --gpu-mib, by default what they and one conversation of the whole context
-/// take, leaving `s`'s reserve free.  Its page is the trunk's experts' (the drafter's take whole pages, a few bytes
-/// unused).
+/// one) in the GPU memory the model left: --gpu-mib less the card's dense weights, by default what they and one
+/// conversation of the whole context take, leaving `s`'s reserve free.  Its page is the trunk's experts' (the drafter's
+/// take whole pages, a few bytes unused).
 bool open_card_pool(const Model& m, const PagedSettings& s, const strata::core::StateLayout& layout,
                     int64_t max_experts, const std::vector<strata::core::ExpertKey>& ranking, PagedCard& card,
                     std::string& err) {
@@ -1301,10 +1302,12 @@ bool open_card_pool(const Model& m, const PagedSettings& s, const strata::core::
     const std::vector<uint64_t> blobs = m.get_expert_bytes();
     if (max_experts < 0)
         max_experts = (int64_t) ranking.size();
+    const std::vector<uint64_t> dense = m.get_layer_dense_bytes();
     strata::serve::CardPoolPlan plan = strata::serve::plan_card_pool(
         card, s, layout, m.max_context(),
         strata::core::choose_expert_page_bytes({blobs.begin(), blobs.begin() + m.geometry().nl}), blobs, ranking,
-        max_experts, keep);
+        max_experts, keep, std::accumulate(dense.begin() + card.lb, dense.begin() + card.le,
+                                           s.drafter ? m.get_drafter_weight_bytes((int) card.index) : 0));
     plan.config.label_expert = strata::serve::get_expert_labels(m.geometry().nl);
     const strata::core::OnDevice on(card.dev);
     if (!card.experts.open(strata::serve::get_gpu_chunk_memory(card.dev, plan.config.chunk_bytes), plan.bytes,
@@ -1323,7 +1326,9 @@ strata::core::LayerSizes get_split_sizes(const Geometry& g, const std::vector<ui
     (void) find_kv_sources(g, sources, source_of, err);
     strata::core::LayerSizes sizes;
     for (int il = 0; il < g.nl; ++il) {
-        sizes.dense.push_back(0);   // (outside the pools)
+        // (not known before the load: the start's split takes the whole of --gpu-mib for pool, and so may give a
+        // card more layers than its pool, which its weights shrink, holds well; the first memory change replans)
+        sizes.dense.push_back(0);
         sizes.expert.push_back((experts[(size_t) il] + page - 1) / page * page);
         sizes.fixed_state.push_back((uint64_t) g.win * kv_row_bytes(kKvFp8, g.hd));
         sizes.token_bytes.push_back(0);

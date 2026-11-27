@@ -478,6 +478,15 @@ test('a pool interval crossing a category keeps the divider and legend totals co
   assert.equal((legend.match(/Other 2.00 GiB/g) || []).length, 1);
 });
 
+test('a GPU setting that counts dense weights puts its divider at the end of the pool', () => {
+  const {element} = mount({available: true, can_change: true, settings: {}, memories: [{
+    id: 'gpu0', total: 8 * GIB, setting: 3 * GIB, setting_weights: GIB, pool_offset: 0,
+    uses: {experts: 2 * GIB, weights: 2 * GIB}, free: 4 * GIB}]}, async () => ({}));
+  const html = element.innerHTML;
+  assert.match(html, /class="mem-divider[^>]*style="left:50%"/);
+  assert.match(html, /4[.,]00 GiB total \(1[.,]00 GiB fixed, 3[.,]00 GiB resizable pool and dense weights\)/);
+});
+
 test("a RAM pool capped by Windows' commit limit explains it in the Free tooltip and on release",
   async () => {
   const ram = {id: 'ram', total: 8 * GIB, setting: 2 * GIB, pool_offset: 0, smallest: GIB, largest: 3 * GIB,

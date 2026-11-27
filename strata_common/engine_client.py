@@ -1521,14 +1521,16 @@ class StrataEngine:
         """GET /v1/memory: `GET_MEMORY_USE` (an engine whose READY says "memory";
         include/strata/common/serve/memory_report.hpp) - what the engine holds in each memory and its settings:
         {"memories": [{"id", "name", "total", "free", "unified", "uses": {use: bytes}, "paused_count",
-        "paused_budget", "allocated_pct", "fragmented_pct", "setting", "smallest", "largest", "mapped"}],
+        "paused_budget", "allocated_pct", "fragmented_pct", "setting", "setting_weights", "smallest", "largest",
+        "mapped"}],
         "settings": {key: number}}, and "conversations" (list_conversations' entries) from an engine that lists them
         there (strata-q38).  allocated_pct and fragmented_pct: the shares, in percent, of a page pool's pages that are
         allocated, and that are free in runs too short for any expert (strata-q38's pool).  setting: the pool's size
-        in bytes now (what CHANGE_SETTINGS' memory_mib.<id> sets); smallest and largest: the range of sizes it
-        accepts now.  mapped: the bytes of it the GPUs map (page-locked), which Windows counts in a GPU's shared use
-        too.  pool_shared, dedicated_full, kept_free (the memory the pools leave free for other programs),
-        dedicated_room and commit_room: as include/strata/common/serve/memory_report.hpp says.  "expert_traffic"
+        in bytes now with the dense weights the card holds besides (setting_weights: their bytes) - what
+        CHANGE_SETTINGS' memory_mib.<id> sets; smallest and largest: the range of sizes it accepts now.  mapped: the
+        bytes of it the GPUs map (page-locked), which Windows counts in a GPU's shared use too.  pool_shared,
+        dedicated_full, kept_free (the memory the pools leave free for other programs), dedicated_room and
+        commit_room: as include/strata/common/serve/memory_report.hpp says.  "expert_traffic"
         (the paged engines): {memory id: {counter: count}}, each expert pool's EXPERT_TRAFFIC counters since it started
         (memory_report.hpp).  A value the engine did not say is None (uses: absent).  The same turn rules as
         list_conversations."""
@@ -1598,8 +1600,8 @@ class StrataEngine:
                              "paused_budget": keys.pop("paused_budget", None),
                              "allocated_pct": share["allocated"], "fragmented_pct": share["fragmented"],
                              **{k: keys.pop(k, None) for k in
-                                ("setting", "smallest", "largest", "mapped", "pool_offset", "pool_shared",
-                                 "kept_free", "dedicated_room", "commit_room")},
+                                ("setting", "setting_weights", "smallest", "largest", "mapped", "pool_offset",
+                                 "pool_shared", "kept_free", "dedicated_room", "commit_room")},
                              "dedicated_full": bool(keys.pop("dedicated_full", 0)),
                              "uses": keys})
         for key in ("concurrent", "tokens_max", "vram_conversations", "conversation_idle_seconds",
