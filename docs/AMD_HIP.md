@@ -223,6 +223,10 @@ ctest --test-dir build-hip --output-on-failure --timeout 60 -E '^(ple_parity|pla
 
 `ple_parity` needs an external model fixture. `platform_memory_test` needs a memlock limit above the shell's default.
 
+On Windows, put the HIP SDK's `bin` folder on `PATH` before running `ctest` (for the pip-installed SDK, its
+`_rocm_sdk_devel\bin`). The tests that use rocBLAS or hipBLASLt load `rocblas.dll` and `libhipblaslt.dll` from there.
+Without them, Windows opens a "System Error" window for each such test, and the test waits for its timeout.
+
 ## Model and serving configuration
 
 Prepare a supported model pack and its MTP runtime with the existing tools. For OrcaRouter IQ3_XXS, follow the

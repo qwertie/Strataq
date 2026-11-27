@@ -130,7 +130,7 @@ const CONTEXT_CAPACITY_HELP = "To raise this limit, increase --max-context in th
 /** Settings the engine reports that the panel shows elsewhere (the bars) or not at all. */
 const UNLISTED = new RegExp("^memory_mib\\.|^(token_bytes|conversation_bytes|context_capacity|" +
   "has_drafter|suffix_draft|lookup_chain|slots|ssd_pause_mib|batch_groups_now|pipeline_stages|" +
-  "prefill_chunk_capacity)$");
+  "prefill_chunk_capacity|route_tail_skip_max)$");
 /**
  * The number settings the panel's controls change, with the range each accepts given the reading's settings `s`
  * (the engine checks them again).
@@ -150,7 +150,7 @@ const CONTROLS = [["concurrent", () => 1, (s) => Math.min(s.slots ?? 8, s.rows ?
                   ["tokens_max", (s) => s.tokens_min ?? 0, () => Infinity],
                   ["context", () => 1, (s) => s.context_capacity ?? s.context ?? Infinity],
                   ["vram_reserve_mib", () => 0, () => Infinity],
-                  ["route_tail_skip", () => 0, () => 9],
+                  ["route_tail_skip", () => 0, (s) => s.route_tail_skip_max ?? 9],
                   ["route_prior_pct", () => 0, () => 10000],
                   ["draft_confidence_pct", () => 0, () => 100],
                   ["draft_cumulative_pct", () => 0, () => 100],
@@ -159,8 +159,8 @@ const CONTROLS = [["concurrent", () => 1, (s) => Math.min(s.slots ?? 8, s.rows ?
  *  question asked before it is switched on. */
 const ROUTE_PRIOR_WARNING = "When the model picks the experts for each word, it prefers those already in the GPU's " +
   "memory, so fewer are read from RAM or the SSD. This may speed up a card that holds few experts " +
-  "(RTX 3060 12 GB, IQ3_XXS, 348%: story +15%, code +37% decode), but answers can get worse. " +
-  "Long agent sessions repeated themselves and solved fewer tasks in our checks.";
+  "(Qwen3.8-Flash-Next on an RTX 3060 12 GB, IQ3_XXS, 348%: story +15%, code +37% decode), but answers can get " +
+  "worse. Long agent sessions repeated themselves and solved fewer tasks in our checks.";
 /** HTML entities for the characters esc replaces. @type {Record<string, string>} */
 const ESCAPES = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"};
 /** Names shown for where a conversation is held (its `place`). */
@@ -672,8 +672,8 @@ function describeControl(key, settings, details) {
       "Empty or 0 uses all the experts the model picks.";
   if (key === "route_prior_pct")
     return ROUTE_PRIOR_WARNING + " When the experts are picked, one already on the GPU counts as this many " +
-      "percent more likely than the model says; the picked experts keep the model's weights. 348 is the value " +
-      "that was tested; 0 turns it off. The current value corresponds to STRATA_ROUTE_PRIOR=" +
+      "percent more likely than the model says; the picked experts keep the model's weights. 0 turns it off. " +
+      "348 is the value tested with Qwen3.8-Flash-Next, where the current value corresponds to STRATA_ROUTE_PRIOR=" +
       `${Math.log1p(Number(settings.route_prior_pct) / 100).toFixed(2)}.`;
   if (key === "draft_confidence_pct" || key === "draft_cumulative_pct")
     return (key === "draft_confidence_pct" ?

@@ -42,6 +42,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -260,8 +261,12 @@ public:
     int get_pipeline_stages() const override { return (int) cards_.size(); }
     int get_route_tail_skip() const override { return strata::core::tail_skip_rank(); }
     void set_route_tail_skip(int rank) override { strata::core::set_tail_skip_rank(rank); }
-    float get_route_prior() const override { return strata::core::get_route_prior(); }
-    void set_route_prior(float lambda) override { strata::core::set_route_prior(lambda); }
+    int get_route_tail_skip_max() const override { return 9; }
+    // (the percent as STRATA_ROUTE_PRIOR's logit bonus: ln(1 + pct/100), the router's probability times 1 + pct/100)
+    int get_route_prior_pct() const override {
+        return (int) std::lround(std::expm1(strata::core::get_route_prior()) * 100);
+    }
+    void set_route_prior_pct(int pct) override { strata::core::set_route_prior((float) std::log1p(pct / 100.0)); }
     bool prepare_group(int group, const std::vector<strata::spec::StepRow>& rows, std::string& err) override;
     bool launch_group(int stage, int group, std::string& err) override;
     int poll_group(int stage, int group, std::vector<int32_t>& picks, std::string& err) override;

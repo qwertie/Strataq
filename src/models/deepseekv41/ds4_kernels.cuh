@@ -85,13 +85,17 @@ void gemv_f32(const float* W, const float* x, int n, int k, int T, float* y, int
 
 /// The router, row t: scores = sqrt(softplus(logits[t])) (n experts, rows 1024 apart), the top `k` of scores + bias;
 /// weights from the unbiased scores, normalized to sum 1 (+1e-20) and times route_scale -> idx[t][i], w[t][i] (rows
-/// kPicks apart).  Rows of image tokens (bit t of vl) take bias_vl instead (training's noaux_tc_for_vl).
+/// kPicks apart).  Rows of image tokens (bit t of vl) take bias_vl instead (training's noaux_tc_for_vl).  With `prior`
+/// above 0 (--route-prior-pct / 100, CHANGES THE ANSWERS), the picking counts the score of an expert that `vram` (the
+/// layer's table; non-zero: on the device) holds 1 + prior times; the weights stay the unbiased scores'.  The Metal
+/// routers ignore `prior`: only strata-ds41 sets it, and the Mac does not build strata-ds41.
 constexpr int kVlRows = 8192;
 struct VlBits {
     uint32_t w[kVlRows / 32];
 };
 void route(const float* logits, const float* bias, int n, int k, int T, float route_scale, int* idx, float* w,
-           cudaStream_t s, const float* bias_vl = nullptr, const VlBits* vl = nullptr);
+           cudaStream_t s, const float* bias_vl = nullptr, const VlBits* vl = nullptr,
+           const unsigned long long* vram = nullptr, float prior = 0.0f);
 
 /// h = silu(min(g, lim)) * clamp(u, -lim, lim)  (lim <= 0: no clamp); n values.
 void swiglu(const float* g, const float* u, int n, float lim, float* h, cudaStream_t s);
@@ -220,12 +224,13 @@ struct Resp {
     int cpu[kWin];   // 1: part[t] is the CPU lane's weighted sum for token t
     float part[kWin][kMaxDim];
 };
-/// route() for the T tokens of a window, plus: plan_ptr[t][i] = vram[idx[t][i]] (0: not on the device), each token's x
-/// (dim floats) and picks into the request slot, then T and seq (req null: no request, the plan alone).
+/// route() (with its `prior` over `vram`) for the T tokens of a window, plus: plan_ptr[t][i] = vram[idx[t][i]] (0: not
+/// on the device), each token's x (dim floats) and picks into the request slot, then T and seq (req null: no request,
+/// the plan alone).
 void route_publish(const float* logits, const float* bias, int n, int k, int T, float route_scale,
                    const unsigned long long* vram, const float* x, int dim, int* idx, float* w,
                    unsigned long long* plan_ptr, Req* req, unsigned seq, cudaStream_t s, const float* bias_vl = nullptr,
-                   unsigned vl = 0, int na0 = 0, int na1 = 0);
+                   unsigned vl = 0, int na0 = 0, int na1 = 0, float prior = 0.0f);
 /// Lookahead: the m picks a later layer will likely make (its gate's logits on this layer's FFN input, the routing's
 /// score + bias, the m best of n) into req->ahead[t][off ..) for the T tokens - before route_publish, which publishes them.
 void route_ahead(const float* logits, const float* bias, int n, int m, int T, Req* req, int off, cudaStream_t s);

@@ -678,6 +678,10 @@ test('the minimum experts, draft cuts and expert half-life are number boxes the 
   const off = mount({...view, settings: {...view.settings, route_tail_skip: 0}}, onChange).element;
   assert.match(off.innerHTML, /data-setting="route_tail_skip" value="" min="0"/);
   assert.match(off.querySelector('[data-setting="route_tail_skip"]').title, /^--route-tail-skip: /);
+  const fewer = mount({...view, settings: {...view.settings, route_tail_skip: 4, route_tail_skip_max: 5}},
+    onChange).element;
+  assert.match(fewer.innerHTML, /data-setting="route_tail_skip" value="4" min="0" max="5"/);
+  assert.ok(!fewer.innerHTML.includes('route_tail_skip_max'));
 });
 
 test('preferring experts on the GPU warns before it is switched on, and not when it is switched off', async () => {

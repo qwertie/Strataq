@@ -2526,9 +2526,10 @@ strata::serve::MemoryReport PagedEngine::describe_memory() const {
         report.settings.insert(report.settings.end(),
                                {{"prefill_chunk", settings_.prompt_chunk}, {"prefill_chunk_capacity", ceiling}});
     if (const int rank = model_.get_route_tail_skip(); rank >= 0)
-        report.settings.emplace_back("route_tail_skip", rank);
-    if (const float prior = model_.get_route_prior(); prior >= 0)
-        report.settings.emplace_back("route_prior_pct", std::lround(std::expm1(prior) * 100));
+        report.settings.insert(report.settings.end(),
+                               {{"route_tail_skip", rank}, {"route_tail_skip_max", model_.get_route_tail_skip_max()}});
+    if (const int pct = model_.get_route_prior_pct(); pct >= 0)
+        report.settings.emplace_back("route_prior_pct", pct);
     if (facts_.has_drafter)
         report.settings.insert(report.settings.end(),
                                {{"draft_confidence_pct", std::lround(draft_limits_.confidence * 100)},
@@ -2633,7 +2634,7 @@ std::string PagedEngine::change_settings(const SettingValues& values, std::strin
             s.batch_groups = v;
         else if (name == "route_tail_skip" && model_.get_route_tail_skip() >= 0)
             s.route_tail_skip = v;
-        else if (name == "route_prior_pct" && model_.get_route_prior() >= 0)
+        else if (name == "route_prior_pct" && model_.get_route_prior_pct() >= 0)
             s.route_prior_pct = v;
         else if (name == "draft_confidence_pct")
             s.draft_confidence_pct = v;
@@ -2660,8 +2661,10 @@ std::string PagedEngine::change_settings(const SettingValues& values, std::strin
         return why;
     if (s.drafter && !facts_.has_drafter)
         return "this engine has no drafter: it needs " + facts_.drafter_start + " at its start";
-    if (s.route_tail_skip > 9)
-        return "route_tail_skip takes a rank from 1 to 9, or 0 for off";
+    // (a start-time rank past the model's highest skips nothing: other changes may keep it)
+    if (const int most = model_.get_route_tail_skip_max();
+        s.route_tail_skip > most && s.route_tail_skip != settings_.route_tail_skip)
+        return "route_tail_skip takes a rank from 1 to " + std::to_string(most) + ", or 0 for off";
     if (s.route_prior_pct > 10000)
         return "route_prior_pct takes 0 (off) to 10000";
     if (std::max(s.draft_confidence_pct, s.draft_cumulative_pct) > 100)
@@ -3213,8 +3216,8 @@ void PagedEngine::apply_settings() {
         draft_limits_.cumulative = (float) settings_.draft_cumulative_pct / 100.0f;
     if (settings_.route_tail_skip >= 0 && model_.get_route_tail_skip() >= 0)
         model_.set_route_tail_skip((int) settings_.route_tail_skip);
-    if (settings_.route_prior_pct >= 0 && model_.get_route_prior() >= 0)
-        model_.set_route_prior((float) std::log1p((double) settings_.route_prior_pct / 100.0));
+    if (settings_.route_prior_pct >= 0 && model_.get_route_prior_pct() >= 0)
+        model_.set_route_prior_pct((int) settings_.route_prior_pct);
     model_.set_draft_rule(*settings_.draft_rule);
 }
 

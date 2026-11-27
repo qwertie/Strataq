@@ -318,6 +318,11 @@ if(STRATA_BUILD_TESTS)
   target_include_directories(split_rules_test PRIVATE include)
   add_test(NAME split_rules_test COMMAND split_rules_test)
 
+  # the route tail skip's rule, shared by Qwen3.8 and DeepSeek V4.1: header-only, no GPU
+  add_executable(tail_skip_test src/common/experts/tail_skip_test.cpp)
+  target_include_directories(tail_skip_test PRIVATE include)
+  add_test(NAME tail_skip_test COMMAND tail_skip_test)
+
   # #3797: the out-of-memory report at start (per card free/total, the largest other programs): the text is a pure
   # function; the driver query (NVML, loaded at run time) is only checked to be safe to call. No GPU needed.
   add_executable(gpu_report_test tests/program/gpu_report_test.cpp)

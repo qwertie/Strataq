@@ -529,9 +529,16 @@ __device__ __forceinline__ int route_fallback_pick(const int* pick, int r, int n
     }
     return ix < n ? ix : 0;
 }
+/// Gets the number route_kernel and route_publish_kernel rank expert i by when they pick the top k: its routing score
+/// `sc`, times 1 + prior where `vram` holds it (vram null: no bonus), plus its bias.
+__device__ __forceinline__ float get_pick_score(float sc, float bias, const unsigned long long* vram, float prior,
+                                                int i) {
+    return (prior > 0.0f && vram != nullptr && vram[i] != 0ull ? sc * (1.0f + prior) : sc) + bias;
+}
 __global__ void __launch_bounds__(512) route_kernel(const float* __restrict__ logits, const float* __restrict__ bias,
                                                     int n, int k, float route_scale, int* idx, float* w,
-                                                    const float* __restrict__ bias_vl, const VlBits vl) {
+                                                    const float* __restrict__ bias_vl, const VlBits vl,
+                                                    const unsigned long long* __restrict__ vram, float prior) {
     __shared__ float sc[1024], bs[1024];
     __shared__ float bv[32];
     __shared__ int bi[32];
@@ -543,7 +550,7 @@ __global__ void __launch_bounds__(512) route_kernel(const float* __restrict__ lo
         const float l = logits[i];
         const float sp = l > 20.0f ? l : log1pf(expf(l));
         sc[i] = sqrtf(sp);
-        bs[i] = sc[i] + bias[i];
+        bs[i] = get_pick_score(sc[i], bias[i], vram, prior, i);
     }
     __syncthreads();
     const int lane = threadIdx.x & 31, wp = threadIdx.x >> 5;
@@ -1610,7 +1617,8 @@ __global__ void __launch_bounds__(512) route_publish_kernel(const float* __restr
                                                             float route_scale, const unsigned long long* __restrict__ vram,
                                                             const float* __restrict__ x, int dim, int* idx, float* w,
                                                             unsigned long long* plan_ptr, Req* req,
-                                                            const float* __restrict__ bias_vl, unsigned vl) {
+                                                            const float* __restrict__ bias_vl, unsigned vl,
+                                                            float prior) {
     __shared__ float sc[1024], bs[1024];
     __shared__ float bv[32];
     __shared__ int bi[32];
@@ -1623,7 +1631,7 @@ __global__ void __launch_bounds__(512) route_publish_kernel(const float* __restr
         const float l = logits[i];
         const float sp = l > 20.0f ? l : log1pf(expf(l));
         sc[i] = sqrtf(sp);
-        bs[i] = sc[i] + bias[i];
+        bs[i] = get_pick_score(sc[i], bias[i], vram, prior, i);
     }
     __syncthreads();
     const int lane = threadIdx.x & 31, wp = threadIdx.x >> 5;
@@ -2145,7 +2153,7 @@ attnsplit::AttnSplitScratch split_scratch(cudaStream_t s, int heads) {
 void route_publish(const float* logits, const float* bias, int n, int k, int T, float route_scale,
                    const unsigned long long* vram, const float* x, int dim, int* idx, float* w,
                    unsigned long long* plan_ptr, Req* req, unsigned seq, cudaStream_t s, const float* bias_vl,
-                   unsigned vl, int na0, int na1) {
+                   unsigned vl, int na0, int na1, float prior) {
 #if defined(STRATA_METAL)
     // selection only: the prefetch schedule (req) is published by the CUDA kernel, and is turned on separately here
     if (strata::dsv41::metal_host::route_publish(logits, bias, n, k, T, route_scale, vram, idx, w, plan_ptr,
@@ -2156,7 +2164,7 @@ void route_publish(const float* logits, const float* bias, int n, int k, int T, 
     }
 #endif
     strata_ds4_launch(route_publish_kernel, T, 512, 0, s, logits, bias, n, k, route_scale, vram, x, dim, idx, w, plan_ptr, req,
-                                           vl != 0 ? bias_vl : nullptr, vl);
+                                           vl != 0 ? bias_vl : nullptr, vl, prior);
     if (req != nullptr) strata_ds4_launch(publish_kernel, 1, 1, 0, s, req, T, seq, na0, na1);
 }
 void route_ahead(const float* logits, const float* bias, int n, int m, int T, Req* req, int off, cudaStream_t s) {
@@ -2377,14 +2385,14 @@ void gemv_f32(const float* W, const float* x, int n, int k, int T, float* y, int
 }
 
 void route(const float* logits, const float* bias, int n, int k, int T, float route_scale, int* idx, float* w,
-           cudaStream_t s, const float* bias_vl, const VlBits* vl) {
+           cudaStream_t s, const float* bias_vl, const VlBits* vl, const unsigned long long* vram, float prior) {
     static const VlBits none = {};
 #if defined(STRATA_METAL)
     // route_kernel on the Metal dispatch; the launch below is the fallback
     if (strata::dsv41::metal_host::route(logits, bias, n, k, T, route_scale, idx, w, bias_vl, vl)) return;
 #endif
     strata_ds4_launch(route_kernel, T, 512, 0, s, logits, bias, n, k, route_scale, idx, w, vl != nullptr ? bias_vl : nullptr,
-                                   vl != nullptr ? *vl : none);
+                                   vl != nullptr ? *vl : none, vram, prior);
 }
 
 void swiglu(const float* g, const float* u, int n, float lim, float* h, cudaStream_t s) {
