@@ -52,6 +52,14 @@ and 36 GiB RAM requests. Runs alternated old/new/old/new with equal 20-second id
 [The report](../bench/results/2026-11-05-old-local-vs-new/README.md) gives per-prompt round ranges,
 row budgets, draft counts, expert counts, binary hashes, exact commands and limits.
 
+DeepSeek again, 26 November 2026, same machine with its fans on full, old (`strata-dsv41`) and new (`strata-ds41`) both
+built from `memory-manager` at `5ab1fe692`, the same pools and GPU experts matched: with the drafter off new was 4.2%
+slower over three prompts (15.10 against 15.75 tok/s; 2.8-5.7% per prompt); with DSpark on it was 2.5% faster, though
+the engines' answers differed. New with several conversations: 18.9 tok/s for two together, 23.2 for three and 24.1
+for four with the drafter off, and 25-27 for two or three with DSpark on.
+[The report](../bench/results/2026-11-26-ds41-old-vs-new/README.md) has the rows per step, sampled drafting, SSD reads
+and what a decode step reads.
+
 **Measured on:** RTX 5070 12 GB, Ryzen 5 7600 (6 cores), 64 GB DDR5-5200, Windows, Qwen3.8-Flash-Next ISTA-DASLab packs,
 engine 0.1.26 with the settings setup writes (`--prefill auto`, 8-bit KV above 4K, KV streaming from 64K). One
 code-agent prompt per length, 256 generated tokens, MTP speculative decoding on. "262K" is the full context window (a
