@@ -364,6 +364,8 @@ public:
     int get_route_tail_skip() const override { return m_.get_route_tail_skip(); }
     void set_route_tail_skip(int rank) override { m_.set_route_tail_skip(rank); }
     int get_route_tail_skip_max() const override { return m_.get_experts_per_token() - 1; }
+    int get_route_prior_pct() const override { return m_.get_route_prior_pct(); }
+    void set_route_prior_pct(int pct) override { m_.set_route_prior_pct(pct); }
     void print_info(int slots, int) const override {
         for (const std::string& line : m_.info_lines())
             std::printf("%s\n", line.c_str());

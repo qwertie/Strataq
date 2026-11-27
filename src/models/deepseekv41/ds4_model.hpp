@@ -264,11 +264,16 @@ public:
     bool finish_group(int group, const std::function<void(int)>& select, std::string& err);
     /// Sets which drafts a sampled request's verify rows keep (verify_rows, pick_joint_rows); speculative by default.
     void set_draft_rule(strata::kernels::DraftRule rule);
-    /// Gets the routing rank from which the CPU lane leaves out an expert VRAM does not hold, when every token of a
+    /// Gets the routing rank from which the decode leaves out an expert VRAM does not hold, when every token of a
     /// window ranks it that low or lower by weight (0: never; strata::core::mark_tail_skips).
     int get_route_tail_skip() const;
     /// Changes get_route_tail_skip's rank for the windows after this.
     void set_route_tail_skip(int rank);
+    /// Gets how many percent higher the decode's router counts the score of an expert VRAM holds when it picks a
+    /// token's experts (0: no bias; the weights stay the router's).
+    int get_route_prior_pct() const;
+    /// Changes get_route_prior_pct's percent for the steps after this.
+    void set_route_prior_pct(int pct);
     /// Samples one row of the last shared pass with the request's sampling settings.
     int sample_row(int row, float t, float tp, int tk, float mp, uint64_t seed, uint64_t counter);
     /// Feeds `token` at pos(); with logits, leaves the next token's scores on the head's device.

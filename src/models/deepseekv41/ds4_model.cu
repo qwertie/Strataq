@@ -1371,10 +1371,24 @@ struct Model::Impl {
         return v != nullptr ? std::max(0.0f, (float) std::atof(v)) : 0.0f;
     }();
     const int disk_skip_from = std::max(0, strata::platform::env_int("STRATA_DS4_DISK_SKIP_FROM", 0));
-    // --route-tail-skip (Model::set_route_tail_skip; 0 = off, CHANGES THE ANSWERS): on the trunk's layers the CPU lane
+    // --route-tail-skip (Model::set_route_tail_skip; 0 = off, CHANGES THE ANSWERS): on the trunk's layers the decode
     // leaves out a routed expert VRAM does not hold when no token of the window ranks it, by weight, among its top this
-    // many (strata::core::mark_tail_skips)
+    // many (mark_lane_skips): neither the CPU lane nor the PCIe lane reads it
     std::atomic<int> route_tail_skip{0};
+    // --route-prior-pct (Model::set_route_prior_pct; 0 = off, CHANGES THE ANSWERS): on the trunk's layers, the decode's
+    // router picks experts as if the score of each one VRAM holds were this many percent higher (get_route_prior)
+    std::atomic<int> route_prior_pct{0};
+    /// Marks the picks of a window (ids and weights kPicks apart for T tokens) that route_tail_skip leaves out, by
+    /// t * kPicks + i; never on the DSpark blocks.
+    void mark_lane_skips(const Layer& l, const int* ids, const float* w, int T, bool* tail) const {
+        const int rank = l.mtp || l.il >= g.nl ? 0 : route_tail_skip.load(std::memory_order_relaxed);
+        strata::core::mark_tail_skips(ids, w, T, l.k_exp, kPicks, l.n_exp, rank,
+                                      [&](int32_t e) { return l.slot[(size_t) e] < 0; }, tail);
+    }
+    /// Gets the router's `prior` for layer l's decode (route_prior_pct as a fraction; 0 on the DSpark blocks).
+    float get_route_prior(const Layer& l) const {
+        return l.mtp || l.il >= g.nl ? 0.0f : (float) route_prior_pct.load(std::memory_order_relaxed) / 100.0f;
+    }
     static_assert(kWin * kPicks <= strata::core::kMaxTailSkipEntries, "a window has too many picks for the tail skip");
     // the RAM store (--ssd-cache): the CPU lane's experts in slots a policy owns, read unbuffered (null: off)
     std::unique_ptr<ExpertStore> store;
@@ -9953,10 +9967,8 @@ struct Model::Impl {
                 const bool aon = dsk_rule && disk_skip_auto && sk_auto.on.load(std::memory_order_relaxed);
                 const bool dsk = dsk_rule && (!disk_skip_auto || aon);
                 const bool rsk = ram_skip_w > 0.0f && !l.mtp && li >= disk_skip_from && li < g.nl;
-                bool tail[kWin * kPicks];   // (route_tail_skip: by t * kPicks + i)
-                const int tail_rank = l.mtp || li >= g.nl ? 0 : route_tail_skip.load(std::memory_order_relaxed);
-                strata::core::mark_tail_skips(&r.ids[0][0], &r.w[0][0], T, l.k_exp, kPicks, l.n_exp, tail_rank,
-                                              [&](int32_t e) { return l.slot[(size_t) e] < 0; }, tail);
+                bool tail[kWin * kPicks];
+                mark_lane_skips(l, &r.ids[0][0], &r.w[0][0], T, tail);
                 int heavy = 0, cold = 0, heavy_cpu = 0;
                 for (int t = 0; t < T; ++t) {
                     float wsum = 0.0f;   // (DISK_SKIP_W: the token's route weights)
@@ -15245,7 +15257,7 @@ struct Model::Impl {
             }
             route_publish(d.glog, l.gate_bias, l.n_exp, l.k_exp, T, g.route_scale, l.vram_tab, d.x, D, d.ridx, d.rw,
                           d.plan_ptr, lead ? reqs + slot : nullptr, sq, s, l.gate_bias_vl, l.mtp ? 0u : wp.vl, na[0],
-                          na[1]);
+                          na[1], get_route_prior(l));
             if (mi == 0 && !l.mtp)
                 strata::kernels::count_routing(d.ridx, T, l.k_exp, kPicks, l.il, s);
             if (!mv(d, {job(l.s1, d.x, d.sg, T, D, FF), job(l.s3, d.x, d.su, T, D, FF)}, err)) return false;
@@ -15370,7 +15382,7 @@ struct Model::Impl {
         VlBits vb = {};
         vb.w[0] = l.mtp ? 0u : wp.vl;
         route(d.glog, l.gate_bias, l.n_exp, l.k_exp, T, g.route_scale, d.ridx, d.rw, s, l.gate_bias_vl,
-              vb.w[0] != 0 ? &vb : nullptr);
+              vb.w[0] != 0 ? &vb : nullptr, l.vram_tab, get_route_prior(l));
         if (mi == 0 && !l.mtp)
             strata::kernels::count_routing(d.ridx, T, l.k_exp, kPicks, l.il, s);
         CK(cudaMemcpyAsync(h_idx, d.ridx, (size_t) T * kPicks * 4, cudaMemcpyDeviceToHost, s));
@@ -15420,6 +15432,8 @@ struct Model::Impl {
         std::vector<Ent> ents;
         std::vector<std::pair<int, float>> cpu_rows;   // slot -> (token, weight)
         std::vector<std::vector<std::pair<int, int>>> per((size_t) l.n_exp);   // expert -> (token, pick)
+        bool tail[kWin * kPicks];
+        mark_lane_skips(l, h_idx, h_w, T, tail);
         for (int t = 0; t < T; ++t) {
             cm.n[t] = 0;
             cm.cpu[t] = 0;
@@ -15439,6 +15453,10 @@ struct Model::Impl {
                 l.heat[(size_t) e] += 1.0f;
                 count_usage(l, e);
                 if (l.slot[(size_t) e] < 0) l.cpu_hits.push_back(e);
+                if (tail[t * kPicks + i]) {
+                    ++st.skipped;
+                    continue;
+                }
                 per[(size_t) e].push_back({t, i});
             }
         }
@@ -16310,6 +16328,8 @@ bool Model::finish_group(int group, const std::function<void(int)>& select, std:
 void Model::set_draft_rule(strata::kernels::DraftRule rule) { p_->draft_rule = rule; }
 int Model::get_route_tail_skip() const { return p_->route_tail_skip.load(std::memory_order_relaxed); }
 void Model::set_route_tail_skip(int rank) { p_->route_tail_skip.store(std::max(rank, 0), std::memory_order_relaxed); }
+int Model::get_route_prior_pct() const { return p_->route_prior_pct.load(std::memory_order_relaxed); }
+void Model::set_route_prior_pct(int pct) { p_->route_prior_pct.store(std::max(pct, 0), std::memory_order_relaxed); }
 int Model::sample_row(int row, float t, float tp, int tk, float mp, uint64_t seed, uint64_t counter) {
     return p_->sample_row(row, t, tp, tk, mp, seed, counter, nullptr, p_->row_positions[row] + 1);
 }
