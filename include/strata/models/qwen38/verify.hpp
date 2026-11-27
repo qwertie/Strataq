@@ -509,6 +509,10 @@ private:
                              std::string& err) const;
     /// Moves each slot's last two PLE hash tokens past its accepted rows' `tokens` (the host's side of a commit).
     void advance_ple_prev(const int* rows, int S, const int* keep, const int32_t* tokens);
+    /// Starts reading, from the PLE table, the rows of the token `picks[t]` that each slot's last row `t` of the last
+    /// batch window chose, as if the slot keeps all its rows: the next window's stage_batch then finds them read.
+    /// For run_slot_rows and finish_slot_rows, after sample_rows and before the commit advances `ple_prev`.
+    void prefetch_next_ple(const int32_t* picks);
     bool batch_self_commit_default_ = false; ///< The caller's policy when no environment override is set.
     bool batch_self_commit_ = false; ///< The policy resolved before any graphs are captured.
     bool resident_shared_inline_ = false; ///< Avoids competing weight reads when a resident batch plans on device.

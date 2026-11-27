@@ -4631,7 +4631,8 @@ bool Verifier::stage_batch(const int* rows, int S, int hbase, const int32_t* tok
         for (int64_t h = 0; h < g.n_head_kv; ++h) pk[t * g.n_head_kv + h] = rotary;
         for (int64_t h = 0; h < g.idx_q_heads; ++h) pi[t * g.idx_q_heads + h] = rotary;
     }
-    if (ss_->ple.ready() && ple_stage()) {
+    const bool do_ple = ss_->ple.ready() && ple_stage();
+    if (do_ple) {
         uint32_t ple_rows[kVerifyMaxT * PLE_N_HEADS];   // (not `rows`: that is the slots of the window's rows)
         for (int t = 0; t < S; ++t) {
             const SessionState& sx = *slots_[(size_t) rows[t]];
@@ -4648,7 +4649,10 @@ bool Verifier::stage_batch(const int* rows, int S, int hbase, const int32_t* tok
     // decoding may change the prefix length after comparing the draft with these picks.
     (void) write_slot_prefixes(rows, S, nullptr, pos, h_commitb_, err);
     *(volatile uint32_t*) h_seq_ = 0;
-    *(volatile uint32_t*) h_flag_ = 0;
+    // The all-resident graph's one host wait, layer 1's for the PLE rows gathered above, passes at once with the flag
+    // up before the launch; raised after the launch call, the flag would hold that wait until the call returns (on
+    // gfx1151 Windows, ~1.7 ms into the window).
+    *(volatile uint32_t*) h_flag_ = ar_on() && do_ple ? 1u : 0u;
     *(volatile uint32_t*) h_flagA_ = 0;
     *(volatile uint32_t*) h_flagB_ = 0;
     std::atomic_thread_fence(std::memory_order_seq_cst);
@@ -4709,17 +4713,13 @@ bool Verifier::run_slot_rows(const int* rows, int S, const int32_t* tokens, cons
     // #646: a stage whose every expert is resident plans on the device and raises no host doorbells, so the
     // per-layer spin below has nothing to wait for: without the PLE flag the graph finishes with the ring silent
     // ("verify batch: layer K never rang (graph finished)" - K is that stage's first layer), and with it the graph
-    // sits on the PLE wait until the 20 s timeout.  As run() does: raise the PLE flag the graph's first wait reads,
-    // let the graph run to the end, and skip the host's per-layer service (there is nothing to serve).
+    // sits on the PLE wait until the 20 s timeout.  So stage_batch raises the PLE flag the graph's first wait reads
+    // before the launch, and the host lets the graph run to the end and skips its per-layer service (there is
+    // nothing to serve).
     // #646 + #871: the skip is per-window (ar_on), not per-process (has_resident_graph_): a stage that was 100%
     // resident at init takes the doorbell graph while a prompt loan/shrink/swap is in flight (ar_off_), and that
     // graph waits on host doorbells the skipped service never raises (GPU at 100%, host in the sync below).
     if (ar_on()) {
-        if (ss_->ple.ready() && ple_stage()) {
-            std::atomic_thread_fence(std::memory_order_seq_cst);
-            strata_store_fence();
-            *flag = 1;
-        }
         const Clock::time_point wait_start = Clock::now();
         const cudaError_t se = cudaStreamSynchronize(cs_);
         if (se != cudaSuccess) { err = std::string("verify batch: ") + cudaGetErrorString(se); return false; }
@@ -4729,6 +4729,7 @@ bool Verifier::run_slot_rows(const int* rows, int S, const int32_t* tokens, cons
         ++windows;
         if (le_ < g.n_layers) return next_ == nullptr || next_->run_slot_rows(rows, S, tokens, pos, pool, next_user_, out, err);
         if (!sample_rows(S, err)) return false;
+        prefetch_next_ple(h_out_);
         for (int t = 0; t < S; ++t) out[t] = ((volatile int32_t*) h_out_)[t];
         note_nonfinite(S, last_pos_b_);
         progress_at("decode");
@@ -4794,6 +4795,7 @@ bool Verifier::run_slot_rows(const int* rows, int S, const int32_t* tokens, cons
     ++windows;
     if (le_ < g.n_layers) return next_ == nullptr || next_->run_slot_rows(rows, S, tokens, pos, pool, next_user_, out, err);
     if (!sample_rows(S, err)) return false;
+    prefetch_next_ple(h_out_);
     for (int t = 0; t < S; ++t) out[t] = ((volatile int32_t*) h_out_)[t];
     note_nonfinite(S, last_pos_b_);
     progress_at("decode");
@@ -5070,6 +5072,7 @@ bool Verifier::finish_slot_rows(int base, std::vector<int32_t>& picks, std::stri
     std::copy_n(snapshot.greedy, last_t_, h_out_);
     if (!sample_rows(last_t_, err))
         return false;
+    prefetch_next_ple(h_out_);
     for (int row = 0; row < last_t_; ++row) {
         b_out_[row] = ((volatile int32_t*) h_out_)[row];
         picks[(size_t) row] = (snapshot.nonfinite & (1u << row)) ? -1 : b_out_[row];
@@ -5170,14 +5173,9 @@ bool Verifier::batch_launch(int base, int S, const int32_t* tokens, const int64_
 int Verifier::batch_serve(PoolMultiFn pool, void* user) {
     if (!b_running_.load(std::memory_order_acquire)) return 1;
     volatile uint32_t* const seq = h_seq_;
-    // #646: an all-resident stage's graph raises no host doorbells (see run_slot_rows): nothing to serve per layer,
-    // except the PLE flag, which the graph's first wait reads and only the host can raise (the same raise
-    // run_slot_rows makes).  Per-window (ar_on): with a loan in flight the doorbell graph needs the per-layer service.
-    if (ar_on() && ss_->ple.ready() && ple_stage()) {
-        std::atomic_thread_fence(std::memory_order_seq_cst);
-        strata_store_fence();
-        *h_flag_ = 1;
-    }
+    // #646: an all-resident stage's graph raises no host doorbells (see run_slot_rows), and stage_batch raised the PLE
+    // flag its one host wait reads before the launch: nothing to serve per layer.  Per-window (ar_on): with a loan in
+    // flight the doorbell graph needs the per-layer service.
     for (;;) {
         // the window's row count is read after the served-layer count: with external serving the window this call
         // began on can have finished and the next one been launched meanwhile, and batch_launch writes its rows
@@ -5700,6 +5698,21 @@ void Verifier::advance_ple_prev(const int* rows, int S, const int* keep, const i
             sx.ple_prev[0] = sx.ple_prev[1];
             sx.ple_prev[1] = tokens[u];
         }
+    });
+}
+
+// A wrong guess (drafts rejected, the conversation ends) costs a normal read: gather_batch reads the whole window again
+// unless it finds every row among the prefetched ones.  A window with draft rows never does (their tokens are not
+// known here), so while slots draft, these reads are wasted.
+void Verifier::prefetch_next_ple(const int32_t* picks) {
+    if (!ss_->ple.ready() || !ple_stage()) return;
+    for_each_slot_group(last_rows_, 0, last_t_, [&](int first, int end) {
+        const SessionState& sx = *slots_[(size_t) last_rows_[first]];
+        const int last = end - 1;   // ple_prev advances at the commit, after this: the hash's history ends at `last`
+        const int32_t prev[2] = {last > first ? last_tokens_[last - 1] : sx.ple_prev[1], last_tokens_[last]};
+        uint32_t ple_rows[strata::kernels::PLE_N_HEADS];
+        strata::kernels::ngram_rows(&picks[last], prev, 1, ss_->ple.consts, ple_rows);
+        ss_->ple.table->prefetch_rows(ple_rows);
     });
 }
 
