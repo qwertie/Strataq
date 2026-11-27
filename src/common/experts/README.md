@@ -11,6 +11,8 @@ What is here so far is the model-neutral host code, which needs no GPU:
 - `exchange_storage.hpp`: the adaptive tier's exchange of experts between the RAM copy and the GPU cache.
 - `expert_swaps.hpp`: the adaptive tier's rule for which experts a GPU's cache takes in and gives up (by decayed routing
   counts, with a margin), shared by the old engine and strata-q38's GPU pool (step M5b).
+- `tail_skip.hpp`: the route tail skip's rule (`--route-tail-skip`): which routed experts missing from the GPU a window
+  leaves out, shared by Qwen3.8's verify windows and DeepSeek V4.1's CPU lane.
 - `hit_hook.hpp`: the seam between Qwen3.8's host loop and the VRAM tier.
 - `uma_cache.hpp`: the GPU cache's size on a GPU that shares the system RAM.
 - `expert_pages`: experts in the pages of a page pool (`src/common/state/page_pool.cpp`) that conversations share: a

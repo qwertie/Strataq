@@ -130,7 +130,7 @@ const CONTEXT_CAPACITY_HELP = "To raise this limit, increase --max-context in th
 /** Settings the engine reports that the panel shows elsewhere (the bars) or not at all. */
 const UNLISTED = new RegExp("^memory_mib\\.|^(token_bytes|conversation_bytes|context_capacity|" +
   "has_drafter|suffix_draft|lookup_chain|slots|ssd_pause_mib|batch_groups_now|pipeline_stages|" +
-  "prefill_chunk_capacity)$");
+  "prefill_chunk_capacity|route_tail_skip_max)$");
 /**
  * The number settings the panel's controls change, with the range each accepts given the reading's settings `s`
  * (the engine checks them again).
@@ -150,7 +150,7 @@ const CONTROLS = [["concurrent", () => 1, (s) => Math.min(s.slots ?? 8, s.rows ?
                   ["tokens_max", (s) => s.tokens_min ?? 0, () => Infinity],
                   ["context", () => 1, (s) => s.context_capacity ?? s.context ?? Infinity],
                   ["vram_reserve_mib", () => 0, () => Infinity],
-                  ["route_tail_skip", () => 0, () => 9],
+                  ["route_tail_skip", () => 0, (s) => s.route_tail_skip_max ?? 9],
                   ["route_prior_pct", () => 0, () => 10000],
                   ["draft_confidence_pct", () => 0, () => 100],
                   ["draft_cumulative_pct", () => 0, () => 100],

@@ -128,7 +128,7 @@ struct Stats {
     double eg_io_ms = 0.0;                            // the windows' Engram reads, issue to last done (mostly hidden)
     int64_t eg_cached = 0, eg_cache_cap = 0;          // the row cache's rows held, its capacity
     int64_t swaps = 0;                // experts the cache moved into VRAM
-    int64_t skipped = 0;              // routed experts STRATA_DS4_DISK_SKIP_W left out (light, not in RAM)
+    int64_t skipped = 0;              // routed experts STRATA_DS4_DISK_SKIP_W / RAM_SKIP_W or the tail skip left out
     int skip_on = -1;                 // DISK_SKIP_AUTO: 1 skipping, 0 off (warm), -1 not in use
     int64_t skip_switches = 0;        // ... the times it switched
     double skip_cold = 0.0;           // ... the cold share over its window (while skipping)
@@ -264,6 +264,11 @@ public:
     bool finish_group(int group, const std::function<void(int)>& select, std::string& err);
     /// Sets which drafts a sampled request's verify rows keep (verify_rows, pick_joint_rows); speculative by default.
     void set_draft_rule(strata::kernels::DraftRule rule);
+    /// Gets the routing rank from which the CPU lane leaves out an expert VRAM does not hold, when every token of a
+    /// window ranks it that low or lower by weight (0: never; strata::core::mark_tail_skips).
+    int get_route_tail_skip() const;
+    /// Changes get_route_tail_skip's rank for the windows after this.
+    void set_route_tail_skip(int rank);
     /// Samples one row of the last shared pass with the request's sampling settings.
     int sample_row(int row, float t, float tp, int tk, float mp, uint64_t seed, uint64_t counter);
     /// Feeds `token` at pos(); with logits, leaves the next token's scores on the head's device.

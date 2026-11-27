@@ -50,6 +50,7 @@
 #include "strata/models/deepseekv41/exl3_cpu.hpp"
 #include "strata/models/deepseekv41/exl3.hpp"
 #include "strata/common/experts/expert_swaps.hpp"
+#include "strata/common/experts/tail_skip.hpp"
 #include "strata/common/kernels/f16_bits.hpp"
 #include "strata/models/deepseekv41/moe_win.hpp"
 #include "strata/models/deepseekv41/sampler.hpp"
@@ -1370,6 +1371,11 @@ struct Model::Impl {
         return v != nullptr ? std::max(0.0f, (float) std::atof(v)) : 0.0f;
     }();
     const int disk_skip_from = std::max(0, strata::platform::env_int("STRATA_DS4_DISK_SKIP_FROM", 0));
+    // --route-tail-skip (Model::set_route_tail_skip; 0 = off, CHANGES THE ANSWERS): on the trunk's layers the CPU lane
+    // leaves out a routed expert VRAM does not hold when no token of the window ranks it, by weight, among its top this
+    // many (strata::core::mark_tail_skips)
+    std::atomic<int> route_tail_skip{0};
+    static_assert(kWin * kPicks <= strata::core::kMaxTailSkipEntries, "a window has too many picks for the tail skip");
     // the RAM store (--ssd-cache): the CPU lane's experts in slots a policy owns, read unbuffered (null: off)
     std::unique_ptr<ExpertStore> store;
     // (Options::expert_pages) the blobs of the experts the CPU lane computes now, by expert, from the RAM's pool
@@ -9947,6 +9953,10 @@ struct Model::Impl {
                 const bool aon = dsk_rule && disk_skip_auto && sk_auto.on.load(std::memory_order_relaxed);
                 const bool dsk = dsk_rule && (!disk_skip_auto || aon);
                 const bool rsk = ram_skip_w > 0.0f && !l.mtp && li >= disk_skip_from && li < g.nl;
+                bool tail[kWin * kPicks];   // (route_tail_skip: by t * kPicks + i)
+                const int tail_rank = l.mtp || li >= g.nl ? 0 : route_tail_skip.load(std::memory_order_relaxed);
+                strata::core::mark_tail_skips(&r.ids[0][0], &r.w[0][0], T, l.k_exp, kPicks, l.n_exp, tail_rank,
+                                              [&](int32_t e) { return l.slot[(size_t) e] < 0; }, tail);
                 int heavy = 0, cold = 0, heavy_cpu = 0;
                 for (int t = 0; t < T; ++t) {
                     float wsum = 0.0f;   // (DISK_SKIP_W: the token's route weights)
@@ -9976,7 +9986,8 @@ struct Model::Impl {
                                 ++st.store_zc;
                                 continue;
                             }
-                            if ((light && !in_ram(l, e)) || (rsk && r.w[t][i] < ram_skip_w * wsum)) {
+                            if ((light && !in_ram(l, e)) || (rsk && r.w[t][i] < ram_skip_w * wsum) ||
+                                tail[t * kPicks + i]) {
                                 ++st.skipped;
                                 continue;
                             }
@@ -16297,6 +16308,8 @@ bool Model::finish_group(int group, const std::function<void(int)>& select, std:
     return p_->finish_group(group, select, err);
 }
 void Model::set_draft_rule(strata::kernels::DraftRule rule) { p_->draft_rule = rule; }
+int Model::get_route_tail_skip() const { return p_->route_tail_skip.load(std::memory_order_relaxed); }
+void Model::set_route_tail_skip(int rank) { p_->route_tail_skip.store(std::max(rank, 0), std::memory_order_relaxed); }
 int Model::sample_row(int row, float t, float tp, int tk, float mp, uint64_t seed, uint64_t counter) {
     return p_->sample_row(row, t, tp, tk, mp, seed, counter, nullptr, p_->row_positions[row] + 1);
 }

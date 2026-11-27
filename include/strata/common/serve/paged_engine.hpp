@@ -125,12 +125,12 @@ struct PagedSettings {
     /// sets it as the decode steps that halve a count (get_popularity_decay).
     double popularity_decay = 0;
     /// --route-tail-skip (live: route_tail_skip): the routing rank from which an expert missing from the GPUs is
-    /// skipped when every token of a verify window ranks it that low (PagedModel::set_route_tail_skip); 0: never;
-    /// -1: the model's default.
+    /// skipped when every token of a window ranks it that low (PagedModel::set_route_tail_skip); 0: never;
+    /// -1: the model's default. A rank past the model's PagedModel::get_route_tail_skip_max skips nothing.
     int64_t route_tail_skip = -1;
     /// --route-prior-pct (live: route_prior_pct): how much more likely, in percent, picking a token's experts treats
-    /// those already on the GPU as being (a logit bonus of ln(1 + pct/100); PagedModel::set_route_prior; changes the
-    /// answers); 0: none; -1: the model's default.
+    /// those already on the GPU as being (PagedModel::set_route_prior_pct; changes the answers); 0: none; -1: the
+    /// model's default.
     int64_t route_prior_pct = -1;
     /// --draft-confidence-pct and --draft-cumulative-pct (live: draft_confidence_pct, draft_cumulative_pct): the
     /// least confidence, in percent, of each drafted token and of the drafted tokens together for the step to verify

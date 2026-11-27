@@ -9,6 +9,7 @@
 #include "strata/base/gpu/on_device.hpp"
 #include "strata/base/platform/aux_cpus.hpp"
 #include "strata/common/experts/arena_ram.hpp"
+#include "strata/common/experts/tail_skip.hpp"
 #include "strata/core/remote_experts.hpp"
 #include "strata/core/peer_experts.hpp"
 #include "strata/common/kernels/cpu/expert_layout.hpp"
@@ -4205,6 +4206,7 @@ namespace {
 // larger k is refused at run time rather than written past them.  128 for the 8-row window (as it was), 256 for 16.
 constexpr int64_t kMaxWindowEntries = strata::kernels::kWindowMaxT <= 8 ? 128 : 256;
 static_assert(strata::kernels::kWindowMaxT * 10 <= kMaxWindowEntries, "a verify window's entries overflow the tables");
+static_assert(kMaxWindowEntries <= kMaxTailSkipEntries, "a verify window has more entries than mark_tail_skips takes");
 }  // namespace
 
 namespace {
@@ -4303,26 +4305,15 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
         // STRATA_ROUTE_TAIL_SKIP=R (default 7 on CUDA serve, =0 off; changes the output): a missed expert that EVERY token of the window routes
         // only at rank >= R (the smallest weights of the top-10) is neither copied nor computed; its contribution is
         // zero, without renormalisation (the others keep the weight the router gave them).  Less PCIe and CPU work.
-        const int tail_rank = tail_skip_rank();
-        bool skip_d[kMaxWindowEntries];
-        for (int q = 0; q < nd; ++q) skip_d[q] = false;
-        if (tail_rank > 0 && d.peer == nullptr && d.remote_count == 0) {
-            int minr[kMaxWindowEntries];
-            for (int q = 0; q < nd; ++q) minr[q] = 99;
-            for (int64_t i = 0; i < n; ++i) {
-                int q = 0;
-                while (q < nd && distinct[q] != first_of[i]) ++q;
-                if (q < nd) minr[q] = std::min(minr[q], (int) (i % k));
-            }
-            for (int q = 0; q < nd; ++q) {
-                const int32_t e = ids[distinct[q]];
-                if (e < 0 || e >= d.n_expert || minr[q] < tail_rank) continue;
-                if (d.host_res[(size_t) d.layers * (size_t) d.n_expert + (size_t) e] >= 0) continue;   // resident
-                skip_d[q] = true;
-                --nmiss;
-                ++d.tail_experts;
-            }
-        }
+        const int32_t* layer_res = d.host_res + (size_t) d.layers * (size_t) d.n_expert;
+        bool skip_e[kMaxWindowEntries], skip_d[kMaxWindowEntries];
+        const int tails = mark_tail_skips(ids, nullptr, (int) n_tok, (int) k, (int) k, (int32_t) d.n_expert,
+                                          d.peer == nullptr && d.remote_count == 0 ? tail_skip_rank() : 0,
+                                          [&](int32_t e) { return layer_res[e] < 0; }, skip_e);
+        for (int q = 0; q < nd; ++q)
+            skip_d[q] = skip_e[distinct[q]];
+        nmiss -= tails;
+        d.tail_experts += tails;
         // STRATA_ROUTE_DUMP=<file> (bench only, off by default): one text line per layer-window, "layer n_tok nd nmiss | e:rows:res ..." in routing
         // order (res 1 = resident in the GPU cache, 0 = a miss the CPU computes unless the PCIe share takes it, 2 = tail-skipped), for replaying placement
         // policies offline on the routing the engine really produced (round 0216 P3.1).
