@@ -788,8 +788,7 @@ struct Layer {
     std::vector<int> host_list;
     std::string name;         // "layers.N." or, for the DSpark drafter's blocks, "mtp.N."
     int n_exp = 0, k_exp = 0; // routed experts, and how many a token takes (the drafter's: 128, 3)
-    // experts a token took in training (k_exp before --experts lowers it): route()'s weights are each pick's share of
-    // that many picks' scores
+    /// Holds the trained expert count so route() can preserve each pick's share when --experts lowers k_exp.
     int k_model = 0;
     std::vector<void*> dense_allocations; ///< Records tensors and verify scratch reloaded on a cut move.
     size_t dense_scratch_bytes = 0; ///< Reloadable scratch accounted separately from tensors.
