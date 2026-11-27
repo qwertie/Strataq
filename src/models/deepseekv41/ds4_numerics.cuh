@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <cuda_runtime.h>
+#include "strata/common/kernels/s26_tsum.cuh"
 #if !defined(STRATA_USE_HIP)
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
@@ -14,6 +15,16 @@
 #endif
 
 namespace strata::ds4 {
+
+/// Gets the sum of v over the lanes that differ from this one in the bits of O, O / 2, .. 1 (O = 16: the whole warp),
+/// with the bits of the shuffle butterfly.  On AMD the lanes trade values by DPP and permlanex16, which skip the
+/// ds_bpermute round trip through the LDS unit; these small latency-bound kernels wait on every step.
+template <int O = 16>
+__device__ __forceinline__ float wave_sum(float v) { return ::strata::kernels::s26ts::tplain<O>(v); }
+
+/// Gets the largest of v over the lanes wave_sum<O> adds, with the bits of the shuffle butterfly.
+template <int O = 16>
+__device__ __forceinline__ float wave_max(float v) { return ::strata::kernels::s26ts::tmax<O>(v); }
 
 /// F32 -> BF16 bits, round to nearest even (a NaN stays a NaN).
 __device__ __forceinline__ uint16_t bf16_rn(float f) {

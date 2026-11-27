@@ -41,14 +41,8 @@ __device__ __forceinline__ uint16_t f2bf16(float f) {   // round to nearest even
     return (uint16_t) (u >> 16);
 }
 
-__device__ __forceinline__ float warp_sum(float v) {
-    for (int o = 16; o > 0; o >>= 1) v += __shfl_xor_sync(0xffffffffu, v, o);
-    return v;
-}
-__device__ __forceinline__ float warp_max(float v) {
-    for (int o = 16; o > 0; o >>= 1) v = fmaxf(v, __shfl_xor_sync(0xffffffffu, v, o));
-    return v;
-}
+__device__ __forceinline__ float warp_sum(float v) { return wave_sum(v); }
+__device__ __forceinline__ float warp_max(float v) { return wave_max(v); }
 
 // block-wide sum for blockDim.x <= 1024 (a multiple of 32); every thread gets the result
 __device__ float block_sum(float v) {

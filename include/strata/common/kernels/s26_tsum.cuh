@@ -34,6 +34,13 @@ __device__ __forceinline__ float tplain(float x) {
     if constexpr (O >= 1) { x += xmov<O>(x); return tplain<O / 2>(x); }
     else return x;
 }
+/// Gets the largest of x over the lanes that differ from this one in the bits of O, O / 2, .. 1: the xor-butterfly max
+/// (`for (o = O; o > 0; o >>= 1) x = fmaxf(x, shfl_xor(x, o))`) with tplain's cross-lane moves.
+template <int O>
+__device__ __forceinline__ float tmax(float x) {
+    if constexpr (O >= 1) { x = fmaxf(x, xmov<O>(x)); return tmax<O / 2>(x); }
+    else return x;
+}
 // v[0..CNT) (CNT a power of two <= 32): this lane's values; returns the sum of value tsum_token<CNT>(lane)
 template <int CNT, int O = 16>
 __device__ __forceinline__ float tsum(float* v, int lane) {

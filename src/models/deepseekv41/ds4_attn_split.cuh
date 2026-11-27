@@ -26,16 +26,8 @@ __device__ __forceinline__ uint16_t f2bf_exact(float f) { return (uint16_t) (__f
 __device__ __forceinline__ float e2m1_x2p14(uint32_t c) {
     return __half2float(__ushort_as_half((unsigned short) (((c & 8u) << 12) | ((c & 7u) << 9))));
 }
-__device__ __forceinline__ float wsum(float v) {
-#pragma unroll
-    for (int o = 16; o > 0; o >>= 1) v += __shfl_xor_sync(0xffffffffu, v, o);
-    return v;
-}
-__device__ __forceinline__ float wmax(float v) {
-#pragma unroll
-    for (int o = 16; o > 0; o >>= 1) v = fmaxf(v, __shfl_xor_sync(0xffffffffu, v, o));
-    return v;
-}
+__device__ __forceinline__ float wsum(float v) { return wave_sum(v); }
+__device__ __forceinline__ float wmax(float v) { return wave_max(v); }
 
 // d = 512 only (a thread owns 2 output values, a lane 16 values of a row)
 template <int G, int R>

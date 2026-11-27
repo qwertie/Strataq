@@ -47,11 +47,7 @@ void fail(const char* what) {
 constexpr int kWarps = 8, kThreads = kWarps * 32;
 constexpr int kMaxEnt = 16;   // a group's entries in one pass (a window's tokens at most)
 
-__device__ __forceinline__ float warp_sum(float v) {
-#pragma unroll
-    for (int o = 16; o > 0; o >>= 1) v += __shfl_xor_sync(0xffffffffu, v, o);
-    return v;
-}
+__device__ __forceinline__ float warp_sum(float v) { return wave_sum(v); }
 
 // ---------------------------------------------------------------- BF16 matrices
 struct BfJob {
@@ -198,8 +194,7 @@ __global__ void __launch_bounds__(kThreads) q8_quant_kernel(const float* __restr
     if (b * 32 >= k) return;
     const float v = x[(size_t) r * ldx + (size_t) b * 32 + lane];
     float am = fabsf(v);
-#pragma unroll
-    for (int o = 16; o > 0; o >>= 1) am = fmaxf(am, __shfl_xor_sync(0xffffffffu, am, o));
+    am = wave_max(am);
     const float sc = am / 127.0f;
     q[(size_t) r * k + (size_t) b * 32 + lane] = (int8_t) (am > 0.0f ? __float2int_rn(v / sc) : 0);
     if (lane == 0) d[(size_t) r * (k / 32) + b] = sc;
@@ -297,8 +292,7 @@ __global__ void __launch_bounds__(kThreads) q8_quant_multi_kernel(QuantItems it)
     if (r >= it.rows[z] || b * 32 >= k) return;
     const float v = it.x[z][(size_t) r * it.ldx[z] + (size_t) b * 32 + lane];
     float am = fabsf(v);
-#pragma unroll
-    for (int o = 16; o > 0; o >>= 1) am = fmaxf(am, __shfl_xor_sync(0xffffffffu, am, o));
+    am = wave_max(am);
     const float sc = am / 127.0f;
     it.q[z][(size_t) r * k + (size_t) b * 32 + lane] = (int8_t) (am > 0.0f ? __float2int_rn(v / sc) : 0);
     if (lane == 0) it.d[z][(size_t) r * (k / 32) + b] = sc;

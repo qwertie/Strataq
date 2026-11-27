@@ -568,11 +568,7 @@ __device__ __forceinline__ void decode_fast_b(const uint8_t* __restrict__ b, int
     }
 }
 
-__device__ __forceinline__ float warp_sum(float v) {
-#pragma unroll
-    for (int o = 16; o > 0; o >>= 1) v += __shfl_xor_sync(0xffffffffu, v, o);
-    return v;
-}
+__device__ __forceinline__ float warp_sum(float v) { return wave_sum(v); }
 __device__ __forceinline__ float swiglu(float gv, float uv, float limit) {   // (ds4_gguf.cu's)
     if (limit > 0.0f) {
         gv = fminf(gv, limit);
@@ -599,11 +595,7 @@ __device__ __forceinline__ bool group(const Args& a, int grp, const uint8_t*& bl
 // ---------------------------------------------------------------- token / window experts
 // RW rows a warp, 32 / RW lanes a row (a lane a sub-block a step), their sums over those lanes
 template <int RW>
-__device__ __forceinline__ float lanes_sum(float v) {
-#pragma unroll
-    for (int o = 16 / RW; o > 0; o >>= 1) v += __shfl_xor_sync(0xffffffffu, v, o);
-    return v;
-}
+__device__ __forceinline__ float lanes_sum(float v) { return wave_sum<16 / RW>(v); }
 constexpr int kGuRW = 1, kDnRW = 2;   // rows a warp: gate / up (n_embd 5120: 10 sub-blocks a lane), down (2304: 9)
 
 // grid (n_ff / (8 RW), groups): RW rows of the gate and of the up a warp, NE of the group's entries a pass (each
@@ -1011,8 +1003,7 @@ __global__ void __launch_bounds__(kThreads) light_q8_kernel(const float* __restr
     const size_t at = (size_t) b * 32 + lane, qr = (size_t) blockIdx.y;
     const float v = xf != nullptr ? xf[(size_t) idx[lr] * ldx + at] : __half2float(__ushort_as_half(xh[(size_t) lr * ldx + at]));
     float am = fabsf(v);
-#pragma unroll
-    for (int o = 16; o > 0; o >>= 1) am = fmaxf(am, __shfl_xor_sync(0xffffffffu, am, o));
+    am = wave_max(am);
     const float sc = am / 127.0f;   // (ds4_gguf.cu's q8_quant: the same operations)
     q[qr * k + at] = (int8_t) (am > 0.0f ? __float2int_rn(v / sc) : 0);
     if (lane == 0) d[qr * (k / 32) + b] = sc;
