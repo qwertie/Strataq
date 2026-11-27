@@ -1,8 +1,8 @@
 // Strata. Experts per word: the "faster mode" rule of the DeepSeek V4.1 engine.  Header only, no GPU code (tests/dsv41/experts_rule_test.cpp).
 //
 // The model routes every word to its top 6 experts.  On a PC with a small graphics card the CPU lane and the SSD set the speed, and
-// each expert dropped saves their bytes: the router's top N are kept and their weights renormalised (the same selection the full
-// model makes, a shorter list).  The default is 5 where the graphics memory is 16 GiB or less, or the GPU shares the PC's RAM, or the cards are RDNA4 (one card, or two or more holding half of the experts), the model's own count elsewhere;
+// each expert dropped saves their bytes: the router's top N are kept at the weights they have among all 6, not renormalised (the same
+// selection the full model makes, a shorter list; ds4_kernels.cuh's route() says why).  The default is 5 where the graphics memory is 16 GiB or less, or the GPU shares the PC's RAM, or the cards are RDNA4 (one card, or two or more holding half of the experts), the model's own count elsewhere;
 // --experts N says it outright (--experts 6: full quality), DS4_TOPK=N is the test override over everything.
 #pragma once
 

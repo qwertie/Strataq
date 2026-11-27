@@ -788,6 +788,9 @@ struct Layer {
     std::vector<int> host_list;
     std::string name;         // "layers.N." or, for the DSpark drafter's blocks, "mtp.N."
     int n_exp = 0, k_exp = 0; // routed experts, and how many a token takes (the drafter's: 128, 3)
+    // experts a token took in training (k_exp before --experts lowers it): route()'s weights are each pick's share of
+    // that many picks' scores
+    int k_model = 0;
     std::vector<void*> dense_allocations; ///< Records tensors and verify scratch reloaded on a cut move.
     size_t dense_scratch_bytes = 0; ///< Reloadable scratch accounted separately from tensors.
     size_t weight_bytes = 0;  ///< Dense allocations accounted to the stage that currently runs this layer.
@@ -2869,7 +2872,7 @@ struct Model::Impl {
                 err = l.name + ": the drafter has " + std::to_string(l.n_exp) + " experts and the model " + std::to_string(g.n_exp) + ": not covered";
                 return false;
             }
-            l.k_exp = l.mtp ? g.d_k : g.k_exp;
+            l.k_exp = l.k_model = l.mtp ? g.d_k : g.k_exp;
             if (!l.mtp) {   // experts a word takes: --experts N / the faster-mode rule (ds4_experts_rule.hpp), DS4_TOPK=N over both (a test)
                 if (il == 0) {
                     uint64_t vram_all = 0;
@@ -12456,7 +12459,7 @@ struct Model::Impl {
             const int nr = std::min(kVlRows, T - r0);
             VlBits vb;
             const bool vl = l.gate_bias_vl != nullptr && vl_bits(p0 + r0, nr, vb);
-            route(c.glog + (size_t) r0 * 1024, l.gate_bias, l.n_exp, l.k_exp, nr, g.route_scale,
+            route(c.glog + (size_t) r0 * 1024, l.gate_bias, l.n_exp, l.k_exp, l.k_model, nr, g.route_scale,
                   c.ridx + (size_t) r0 * kPicks, c.rw + (size_t) r0 * kPicks, s, l.gate_bias_vl, vl ? &vb : nullptr);
         }
         const int n_vs = L0.pv_n + (int) L0.host_list.size();
@@ -15255,9 +15258,9 @@ struct Model::Impl {
                 route_ahead(gl, nx->gate_bias, nx->n_exp, m, T, reqs + slot, (a - 1) * kAhead1, s);
                 na[a - 1] = m;
             }
-            route_publish(d.glog, l.gate_bias, l.n_exp, l.k_exp, T, g.route_scale, l.vram_tab, d.x, D, d.ridx, d.rw,
-                          d.plan_ptr, lead ? reqs + slot : nullptr, sq, s, l.gate_bias_vl, l.mtp ? 0u : wp.vl, na[0],
-                          na[1], get_route_prior(l));
+            route_publish(d.glog, l.gate_bias, l.n_exp, l.k_exp, l.k_model, T, g.route_scale, l.vram_tab, d.x, D,
+                          d.ridx, d.rw, d.plan_ptr, lead ? reqs + slot : nullptr, sq, s, l.gate_bias_vl,
+                          l.mtp ? 0u : wp.vl, na[0], na[1], get_route_prior(l));
             if (mi == 0 && !l.mtp)
                 strata::kernels::count_routing(d.ridx, T, l.k_exp, kPicks, l.il, s);
             if (!mv(d, {job(l.s1, d.x, d.sg, T, D, FF), job(l.s3, d.x, d.su, T, D, FF)}, err)) return false;
@@ -15381,7 +15384,7 @@ struct Model::Impl {
         gemv_f32(l.gate_w, d.x, l.n_exp, D, T, d.glog, 1024, s);
         VlBits vb = {};
         vb.w[0] = l.mtp ? 0u : wp.vl;
-        route(d.glog, l.gate_bias, l.n_exp, l.k_exp, T, g.route_scale, d.ridx, d.rw, s, l.gate_bias_vl,
+        route(d.glog, l.gate_bias, l.n_exp, l.k_exp, l.k_model, T, g.route_scale, d.ridx, d.rw, s, l.gate_bias_vl,
               vb.w[0] != 0 ? &vb : nullptr, l.vram_tab, get_route_prior(l));
         if (mi == 0 && !l.mtp)
             strata::kernels::count_routing(d.ridx, T, l.k_exp, kPicks, l.il, s);
@@ -15401,8 +15404,8 @@ struct Model::Impl {
                 const Layer& nx = L[(size_t) il];
                 if (nx.nm != 1 || nx.lay.fmt != gg::kFmtMXFP4 || nx.gate_bias == nullptr || nx.gate_w == nullptr) break;
                 gemv_f32(nx.gate_w, d.x, nx.n_exp, D, 1, d.glog_a + (size_t) (a - 1) * kWin * 1024, 1024, s);
-                route(d.glog_a + (size_t) (a - 1) * kWin * 1024, nx.gate_bias, nx.n_exp, nx.k_exp, 1, g.route_scale, d.ridx_a + (a - 1) * kPicks,
-                      d.rw_a + (a - 1) * kPicks, s, nullptr, nullptr);
+                route(d.glog_a + (size_t) (a - 1) * kWin * 1024, nx.gate_bias, nx.n_exp, nx.k_exp, nx.k_model, 1,
+                      g.route_scale, d.ridx_a + (a - 1) * kPicks, d.rw_a + (a - 1) * kPicks, s, nullptr, nullptr);
                 CK(cudaMemcpyAsync(h_idx_a + (a - 1) * kPicks, d.ridx_a + (a - 1) * kPicks, (size_t) kPicks * 4, cudaMemcpyDeviceToHost, s));
                 la_n = a;
             }

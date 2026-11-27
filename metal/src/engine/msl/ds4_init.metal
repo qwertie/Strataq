@@ -902,17 +902,18 @@ static inline int ds4_route_fallback_pick(threadgroup const int* pick, uint r, u
     return ix < int(n) ? ix : 0;
 }
 
-// ds4_kernels.cu:1353  route_publish_kernel - the MoE router: sc = sqrt(softplus(logit)), bs = sc + bias, then k rounds of a
-// block-wide argmax (a strided max, a warp reduction, a 16-warp pass), the picks' sc summed into the weights, and each pick's
-// device address published to plan_ptr.  The prefetch requests (req) are NOT published here yet: that is the schedule, not the
-// answer, and it can be turned on separately.
+// ds4_kernels.cu:1353  route_publish_kernel - the MoE router: sc = sqrt(softplus(logit)), bs = sc + bias, then
+// k_model rounds of a block-wide argmax (a strided max, a warp reduction, a 16-warp pass); the first kk picks get their
+// share of all k_model picks' sc as weights (ds4_kernels.cuh's route() says why) and their device addresses published
+// to plan_ptr.  The prefetch requests (req) are NOT published here yet: that is the schedule, not the answer, and it
+// can be turned on separately.
 kernel void ds4_route_publish(device const float* logits [[buffer(0)]], device const float* bias [[buffer(1)]],
                               constant uint& n [[buffer(2)]], constant uint& kk [[buffer(3)]],
                               constant float& route_scale [[buffer(4)]], device const ulong* vram [[buffer(5)]],
                               device int* idx [[buffer(6)]], device float* w [[buffer(7)]],
                               device ulong* plan_ptr [[buffer(8)]], device const float* bias_vl [[buffer(9)]],
                               constant uint& vl [[buffer(10)]], constant uint& has_vl [[buffer(11)]],
-                              device int* bad [[buffer(12)]],
+                              device int* bad [[buffer(12)]], constant uint& k_model [[buffer(13)]],
                               uint t [[threadgroup_position_in_grid]], uint tid [[thread_index_in_threadgroup]]) {
     threadgroup float sc[1024];
     threadgroup float bs[1024];
@@ -930,7 +931,7 @@ kernel void ds4_route_publish(device const float* logits [[buffer(0)]], device c
     threadgroup_barrier(mem_flags::mem_threadgroup);
     const uint lane = tid & 31u, wp = tid >> 5u;
     for (uint r = 0; r < 8u; ++r) {
-        if (r >= kk) break;
+        if (r >= k_model) break;
         float best = -3.402823466e+38f;
         int bix = 0x7fffffff;
         for (uint i = tid; i < n; i += 512u) {
@@ -957,7 +958,7 @@ kernel void ds4_route_publish(device const float* logits [[buffer(0)]], device c
     }
     if (tid == 0u) {
         float sum = 0.0f;
-        for (uint r = 0; r < 8u; ++r) { if (r >= kk) break; sum += sc[pick[r]]; }
+        for (uint r = 0; r < 8u; ++r) { if (r >= k_model) break; sum += sc[pick[r]]; }
         for (uint r = 0; r < 8u; ++r) {
             if (r >= kk) break;
             const uint p_ = uint(pick[r]);
@@ -2432,13 +2433,14 @@ kernel void ds4_sparse_attn_bf16(device const float* q [[buffer(0)]], device con
                         &tscale_s, &den_s, tgp, tid, lane, wp);
 }
 
-// ds4_kernels.cu:461 route_kernel - softplus scores, their top k with bias, weights from the unbiased scores.  One
-// threadgroup (512) a token, as the CUDA kernel; rows 1024 values apart, the picks kPicks = 8 apart.
+// ds4_kernels.cu:461 route_kernel - softplus scores, their top k with bias, weights from the unbiased scores (shares of
+// the top k_model's, as ds4_kernels.cuh's route() says).  One threadgroup (512) a token, as the CUDA kernel; rows 1024
+// values apart, the picks kPicks = 8 apart.
 kernel void ds4_route(device const float* logits [[buffer(0)]], device const float* bias [[buffer(1)]],
                       constant uint& n [[buffer(2)]], constant uint& k [[buffer(3)]], constant float& route_scale [[buffer(4)]],
                       device int* idx [[buffer(5)]], device float* w [[buffer(6)]], device const float* bias_vl [[buffer(7)]],
                       constant uint& has_vl [[buffer(8)]], device const uint* vlw [[buffer(9)]],
-                      device int* bad [[buffer(10)]],
+                      device int* bad [[buffer(10)]], constant uint& k_model [[buffer(11)]],
                       uint tg [[threadgroup_position_in_grid]], uint tid [[thread_index_in_threadgroup]],
                       ushort lane [[thread_index_in_simdgroup]], ushort wp [[simdgroup_index_in_threadgroup]]) {
     threadgroup float sc[1024], bs[1024];
@@ -2456,7 +2458,7 @@ kernel void ds4_route(device const float* logits [[buffer(0)]], device const flo
         bs[i] = sc[i] + bp[i];
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    for (uint r = 0; r < k; ++r) {
+    for (uint r = 0; r < k_model; ++r) {
         float best = -INFINITY;
         int bix = 0x7fffffff;
         for (uint i = tid; i < n; i += 512u)
@@ -2493,7 +2495,7 @@ kernel void ds4_route(device const float* logits [[buffer(0)]], device const flo
     }
     if (tid == 0u) {
         float s = 0.0f;
-        for (uint r = 0; r < k; ++r) s += sc[pick[r]];
+        for (uint r = 0; r < k_model; ++r) s += sc[pick[r]];
         for (uint r = 0; r < k; ++r) {
             idx[(size_t) t * 8u + r] = pick[r];
             w[(size_t) t * 8u + r] = sc[pick[r]] / (s + 1e-20f) * route_scale;

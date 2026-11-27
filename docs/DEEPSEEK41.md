@@ -189,7 +189,7 @@ families. `strata launch` warns for these and still starts. If the engine stops 
 
 ## Speed: Faster or Full quality
 
-DeepSeek picks 6 experts for every word it writes. **Faster** uses 5 of them (engine flag `--experts 5`): a small quality change, usually not noticeable, and answers come sooner. It is the default on a PC whose graphics cards total 16 GiB or less, and on an integrated GPU such as Strix Halo: the engine decides that itself (`--experts auto`), and Strata passes `--experts` only when you choose. **Full quality** uses all 6 (`--experts 6`).
+DeepSeek picks 6 experts for every word it writes. **Faster** uses 5 of them (engine flag `--experts 5`): a small quality change, usually not noticeable, and answers come sooner. It is the default on a PC whose graphics cards total 16 GiB or less, and on an integrated GPU such as Strix Halo: the engine decides that itself (`--experts auto`), and Strata passes `--experts` only when you choose. **Full quality** uses all 6 (`--experts 6`). With fewer experts, those kept weigh what they would among all 6: the left-out expert's share is dropped, not spread over the others. Spreading it gave nonsense in 9 answers of 9 with one expert a word, where the same expert at its own weight still wrote mostly sensible answers (Strix Halo, 26 November 2026).
 
 The choice needs the DeepSeek engine 0.1.50 or newer (0.1.49.2 does not take `--experts`); with an older engine the step and the plan line are left out and nothing is passed. In `strata launch` the guided screens have a Speed step for DeepSeek; with flags use `--speed faster|full`, or `--full-quality` in scripts. `strata launch --plan` shows which one this PC gets.
 

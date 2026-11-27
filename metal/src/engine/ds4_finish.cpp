@@ -1321,12 +1321,13 @@ bool sparse_attn(const float* q, const uint16_t* win, const void* ckv, const int
 }
 
 
-// ds4_kernels.cu:461 route_kernel - sqrt(softplus(logits)) top k with bias, then the unbiased weights.  vl is a VlBits
-// (1024 bytes) or null; bias_vl applies to the rows its bits select.
-bool route(const float* logits, const float* bias, int n, int k, int T, float route_scale, int* idx, float* w,
-           const float* bias_vl, const void* vl) {
+// ds4_kernels.cu:461 route_kernel - sqrt(softplus(logits)) top k with bias, then the unbiased weights (shares of
+// k_model picks').  vl is a VlBits (1024 bytes) or null; bias_vl applies to the rows its bits select.
+bool route(const float* logits, const float* bias, int n, int k, int k_model, int T, float route_scale, int* idx,
+           float* w, const float* bias_vl, const void* vl) {
     if (T <= 0) return true;
-    if (logits == nullptr || bias == nullptr || idx == nullptr || w == nullptr || n <= 0 || n > 1024 || k <= 0 || k > 8)
+    if (logits == nullptr || bias == nullptr || idx == nullptr || w == nullptr || n <= 0 || n > 1024 || k <= 0 ||
+        k > k_model || k_model > 8)
         return false;
     if (!ensure()) return false;
     void* hl = cpu_addr((void*) logits);
@@ -1366,7 +1367,7 @@ bool route(const float* logits, const float* bias, int n, int k, int T, float ro
     dsp.args = {mtl::Arg::B(bl, off(hl)), mtl::Arg::B(bb, off(hb)), mtl::Arg::V((unsigned) n), mtl::Arg::V((unsigned) k),
                 mtl::Arg::V(route_scale), mtl::Arg::B(bi, off(hi)), mtl::Arg::B(bw, off(hw)),
                 mtl::Arg::B(bv, hv != nullptr ? off(hv) : 0), mtl::Arg::V(has_vl ? 1u : 0u), mtl::Arg::B(bbv),
-                mtl::Arg::B(route_bad())};
+                mtl::Arg::B(route_bad()), mtl::Arg::V((unsigned) k_model)};
     dsp.grid[0] = (uint32_t) T;
     dsp.grid[1] = dsp.grid[2] = 1;
     dsp.tg[0] = 512;
@@ -2176,8 +2177,8 @@ bool gemv_f32(const float* W, const float* x, int n, int k, int T, float* y, int
 
 
 // ds4_kernels.cu:1353 - the router's selection (idx, w, plan_ptr).  The prefetch requests stay unpublished for now.
-bool route_publish(const float* logits, const float* bias, int n, int k, int T, float route_scale, const void* vram,
-                   int* idx, float* w, void* plan_ptr, const float* bias_vl, unsigned vl) {
+bool route_publish(const float* logits, const float* bias, int n, int k, int k_model, int T, float route_scale,
+                   const void* vram, int* idx, float* w, void* plan_ptr, const float* bias_vl, unsigned vl) {
     if (T <= 0 || n <= 0) return true;
     if (!ensure()) return false;
     void* hl = cpu_addr((void*) logits);
@@ -2216,7 +2217,7 @@ bool route_publish(const float* logits, const float* bias, int n, int k, int T, 
     d.args = {mtl::Arg::B(bl, off(hl)), mtl::Arg::B(bb, off(hb)), mtl::Arg::V((unsigned) n), mtl::Arg::V((unsigned) k),
               mtl::Arg::V(route_scale), mtl::Arg::B(bv, off(hv)), mtl::Arg::B(bi, off(hi)), mtl::Arg::B(bw, off(hw)),
               mtl::Arg::B(bp, off(hp)), mtl::Arg::B(bvl, vl_off), mtl::Arg::V((unsigned) vl),
-              mtl::Arg::V((unsigned) (bias_vl ? 1 : 0)), mtl::Arg::B(route_bad())};
+              mtl::Arg::V((unsigned) (bias_vl ? 1 : 0)), mtl::Arg::B(route_bad()), mtl::Arg::V((unsigned) k_model)};
     d.grid[0] = (uint32_t) T;
     d.grid[1] = d.grid[2] = 1;
     d.tg[0] = 512; d.tg[1] = d.tg[2] = 1;
