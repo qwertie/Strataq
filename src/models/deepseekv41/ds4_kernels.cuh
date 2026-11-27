@@ -160,6 +160,17 @@ struct AttnRows {
 void sparse_attn(const float* q, const uint16_t* win, const KvRows& ckv, const int* sel, int sel_stride,
                  const AttnRows& a, const float* sink, int heads, int d, int T, float scale, float* out, cudaStream_t s,
                  int ckv_fmt = kKvFp4, int heads_per_block = 0, const AttnScratch* scr = nullptr);
+/// Checks whether sparse_attn_unpack and sparse_attn_unpacked can attend T queries of kKvFp4 rows (sel_stride apart)
+/// through `scr`: sparse_attn's few-query path in two parts, which ds4_model.cu's run_attention uses to decode each
+/// conversation's selected rows on their own and then attend for all of them in one launch.  False on Metal and when
+/// DS4_ATTN_SPLIT asks for the split kernel.
+bool can_sparse_attn_unpack(int T, int sel_stride, const AttnScratch& scr);
+/// Decodes the selected kKvFp4 rows of queries t < T (a's) into scr's rows of queries t0 + t.
+void sparse_attn_unpack(const KvRows& ckv, const int* sel, int sel_stride, const AttnRows& a, int T,
+                        const AttnScratch& scr, int t0, cudaStream_t s);
+/// Runs sparse_attn for T queries whose selected rows sparse_attn_unpack put in scr.
+void sparse_attn_unpacked(const float* q, const uint16_t* win, const AttnRows& a, const float* sink, int heads, int d,
+                          int T, float scale, float* out, const AttnScratch& scr, cudaStream_t s);
 /// The window buffer: ext[r] = ring[(p0 - n + r) % n] for the n rows before p0 (zeros before position 0); afterwards
 /// ring[(p0 + t) % n] = ext[n + t] for t < T.  The ring's rows kKvFp8 (each group of 32 at the smallest power-of-two
 /// scale its BF16 values fit under: exact for values on the FP8 grid, the window's), the window buffer's BF16 (p0 = n:

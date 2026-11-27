@@ -2523,16 +2523,8 @@ void sparse_attn(const float* q, const uint16_t* win, const KvRows& ckv, const i
         if (strata::dsv41::metal_host::unpack_sel(ckv.base, sel, sel_stride, a.gen, a.p0, a.t0, a.R, a.kcap, a.nsel,
                 scr->cap, scr->rows, T, a.gen ? 1 : (T < kWin ? T : kWin), kv_row_bytes(kKvFp4, 512))) return;
 #endif
-        strata_ds4_launch(unpack_sel_kernel, dim3(cdiv(sel_stride, kStage), T), kThreads, 0, s, ckv, sel, sel_stride, a,
-                                                                               scr->cap, scr->rows);
-#if !defined(STRATA_USE_HIP)
-        if (T == 1)   // (V100: the loads ahead pay for the decode's kernel at one query, not at more)
-            strata_ds4_launch(sparse_attn_kernel<true, 8>, dim3(heads, T), kThreads, 0, s, q, win, scr->rows, nullptr, scr->cap, a, sink,
-                                                                             heads, d, scale, out);
-        else
-#endif
-            strata_ds4_launch(sparse_attn_kernel<true, 0>, dim3(heads, T), kThreads, 0, s, q, win, scr->rows, nullptr, scr->cap, a, sink,
-                                                                             heads, d, scale, out);
+        sparse_attn_unpack(ckv, sel, sel_stride, a, T, *scr, 0, s);
+        sparse_attn_unpacked(q, win, a, sink, heads, d, T, scale, out, *scr, s);
         return;
     }
     // DS4_FAST_ATTN=1: the chunked prompt's matrix-core path (16 heads a block, a 16-key tile).  The decode and the
@@ -2556,6 +2548,30 @@ void sparse_attn(const float* q, const uint16_t* win, const KvRows& ckv, const i
     else if (G == 4) strata_ds4_launch(sparse_attn_packed_kernel<4>, grid, kThreads, 0, s, q, win, c, sel, sel_stride, a, sink, heads, scale, out);
     else if (G == 2) strata_ds4_launch(sparse_attn_packed_kernel<2>, grid, kThreads, 0, s, q, win, c, sel, sel_stride, a, sink, heads, scale, out);
     else strata_ds4_launch(sparse_attn_packed_kernel<1>, grid, kThreads, 0, s, q, win, c, sel, sel_stride, a, sink, heads, scale, out);
+}
+
+bool can_sparse_attn_unpack(int T, int sel_stride, const AttnScratch& scr) {
+#if defined(STRATA_METAL)
+    return false;   // (sparse_attn decodes the rows through metal_host::unpack_sel there, the old engine's layout)
+#else
+    return !split_enabled() && scr.rows != nullptr && T <= scr.max_t && sel_stride <= scr.cap;
+#endif
+}
+void sparse_attn_unpack(const KvRows& ckv, const int* sel, int sel_stride, const AttnRows& a, int T,
+                        const AttnScratch& scr, int t0, cudaStream_t s) {
+    strata_ds4_launch(unpack_sel_kernel, dim3(cdiv(sel_stride, kStage), T), kThreads, 0, s, ckv, sel, sel_stride, a,
+                      scr.cap, scr.rows + (size_t) t0 * scr.cap * 512);
+}
+void sparse_attn_unpacked(const float* q, const uint16_t* win, const AttnRows& a, const float* sink, int heads, int d,
+                          int T, float scale, float* out, const AttnScratch& scr, cudaStream_t s) {
+#if !defined(STRATA_USE_HIP)
+    if (T == 1)   // (V100: the loads ahead pay for the decode's kernel at one query, not at more)
+        strata_ds4_launch(sparse_attn_kernel<true, 8>, dim3(heads, T), kThreads, 0, s, q, win, scr.rows, nullptr,
+                          scr.cap, a, sink, heads, d, scale, out);
+    else
+#endif
+        strata_ds4_launch(sparse_attn_kernel<true, 0>, dim3(heads, T), kThreads, 0, s, q, win, scr.rows, nullptr,
+                          scr.cap, a, sink, heads, d, scale, out);
 }
 
 void ring_to_ext(const uint8_t* ring, uint16_t* ext, int64_t p0, int n, int d, cudaStream_t s) {

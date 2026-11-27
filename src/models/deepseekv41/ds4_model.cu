@@ -1149,8 +1149,12 @@ struct Model::Impl {
     };
     std::vector<PipelineGroup> pipeline_groups;
     PipelineGroup* active_pipeline = nullptr; ///< Supplies stable cross-stage copies during a stage launch.
-    int active_row = 0; ///< Selects the independent row's copy slot.
+    /// Selects the independent row's copy slot, and its scratch slots when run_attention batches the attention.
+    int active_row = 0;
     std::vector<float*> pipeline_cpu_parts; ///< Keeps each stage's asynchronous CPU-result upload alive.
+    /// Gets the rows of the window buffer (Dev::ext) that run_attention sets aside for each window row when it batches
+    /// the attention: a run (conversation) of n rows gets n of these, room for the ring's g.win rows and its own n.
+    int ext_slice_rows() const { return g.win + 1; }
 
     bool spec_win = false;            // the window being run is a draft's verification (layer() keeps backups)
     float* h_taps = nullptr;          // pinned [kWin][targets][dim]: the last window's taps
@@ -3230,15 +3234,15 @@ struct Model::Impl {
                       dalloc(d, d.freqs_win, 64, err) && dalloc(d, d.freqs_comp, 64, err) &&
                       dalloc(d, d.topk, W * topk_stride(), err) && dalloc(d, d.cand, W * cand_stride(), err) &&
                       dalloc(d, d.tok, 16, err) && dalloc(d, d.emb_rows, W * D, err) &&
-                      dalloc(d, d.ext, ((size_t) g.win + W) * g.hd, err) && dalloc(d, d.xe, P * D, err) &&
+                      dalloc(d, d.ext, W * ext_slice_rows() * g.hd, err) && dalloc(d, d.xe, P * D, err) &&
                       dalloc(d, d.xg, P * g.ff, err) && dalloc(d, d.xu, P * g.ff, err) && dalloc(d, d.xhh, P * g.ff, err) &&
                       dalloc(d, d.ed, P * D, err) && dalloc(d, d.plan_ptr, P, err);
         if (ok && ds4_dbg("DS4_DBG_DEVH"))
             std::fprintf(stderr, "DBG devh: id=%d h=%p h2=%p\n", d.id, (void*) d.h, (void*) d.h2);
             if (!ok) return false;
-            d.attn_scr.max_t = kAttnScratchT;
+            d.attn_scr.max_t = 8;   // (run_attention's batch of independent rows; sparse_attn's own: kAttnScratchT)
             d.attn_scr.cap = (int) topk_stride();
-            if (!dalloc(d, d.attn_scr.rows, (size_t) kAttnScratchT * topk_stride() * g.hd, err)) return false;
+            if (!dalloc(d, d.attn_scr.rows, (size_t) d.attn_scr.max_t * topk_stride() * g.hd, err)) return false;
             if (!g.eg_layers.empty()) {
                 const int cols = (pk.eg_ngram - 1) * pk.eg_heads;
                 ok = dalloc(d, d.eg_rows, W * cols * (pk.eg_hd + pk.eg_hd / 32), err) &&
@@ -14963,6 +14967,10 @@ struct Model::Impl {
                 bases[i] = *fields[i];
             int* topk = d.topk;
             int* cand = d.cand;
+            uint16_t* ext = d.ext;
+            AttnRows batch_rows;
+            AttnRows* const batch = !multi && row_counts[0] < T && NHL > 0 && !l.mtp &&
+                                    can_sparse_attn_unpack(T, (int) topk_stride(), d.attn_scr) ? &batch_rows : nullptr;
             for (int row = 0, k = 0; row < T; ++k) {
                 int n = multi ? 1 : row_counts[row];
                 while (multi && row + n < T && wp.rseq[row + n] == wp.rseq[row])
@@ -14976,6 +14984,8 @@ struct Model::Impl {
                     *fields[i] = bases[i] + (size_t) row * strides[i];
                 d.topk = topk + (size_t) row * topk_stride();
                 d.cand = cand + (size_t) row * cand_stride();
+                if (batch != nullptr)
+                    d.ext = ext + (size_t) row * ext_slice_rows() * HD;
                 uint8_t* ring_bak = l.ring_bak;
                 float* c_snap = l.c_snap;
                 float* c_rows = l.c_rows;
@@ -14987,8 +14997,9 @@ struct Model::Impl {
                         l.c_rows += (size_t) row * HD;
                     }
                 }
-                const bool ok = multi ? run_attention_state(L0, mi, wp.rpos[row], n, wp, err, row)
-                                      : run_attention_state(L0, mi, row_positions[row], n, row_plans[row], err);
+                const bool ok = multi
+                                    ? run_attention_state(L0, mi, wp.rpos[row], n, wp, err, row)
+                                    : run_attention_state(L0, mi, row_positions[row], n, row_plans[row], err, 0, batch);
                 if (multi)
                     swap_seq_state(L0, mi, wp.rseq[row], wp.par);
                 l.ring_bak = ring_bak;
@@ -14998,9 +15009,16 @@ struct Model::Impl {
                     *fields[i] = bases[i];
                 d.topk = topk;
                 d.cand = cand;
+                d.ext = ext;
                 if (!ok)
                     return false;
                 row += n;
+            }
+            if (batch != nullptr) {   // every run's attention in one launch, then each run's output rotation
+                sparse_attn_unpacked(d.q, d.ext, *batch, l.sink, NHL, HD, T, 1.0f / std::sqrt((float) HD), d.o,
+                                     d.attn_scr, s);
+                for (int row = 0; row < T; row += row_counts[row])
+                    finish_attention(l, d, d.o + (size_t) row * HQ, row_positions[row], row_counts[row]);
             }
             if (multi && !multi_put(l, mi, d, wp, err))
                 return false;
@@ -15029,7 +15047,10 @@ struct Model::Impl {
 
     /// Updates the selected conversation's rings and compressors and reads its paged attention sources.  `r`: the row
     /// of the window (and of wp's per-row plans) that these T rows start at, past the rows of the runs before them.
-    bool run_attention_state(Layer& L0, int mi, int64_t p0, int T, const WinPlan& wp, std::string& err, int r = 0) {
+    /// `batch`: if not null, the attention is left to run_attention, which runs it for every run at once; this decodes
+    /// the run's selected rows into its scratch slots (from active_row) and puts its rows' AttnRows entries there.
+    bool run_attention_state(Layer& L0, int mi, int64_t p0, int T, const WinPlan& wp, std::string& err, int r = 0,
+                             AttnRows* batch = nullptr) {
         Layer& l = member(L0, mi);
         Dev& d = devs[(size_t) l.dev];
         cudaSetDevice(d.id);
@@ -15202,20 +15223,34 @@ struct Model::Impl {
             ckv_fmt = kKvBf16;
             iota_rows(d.topk, T, T, (int) topk_stride(), s);
         }
-        if (NHL > 0) {
+        if (NHL > 0 && batch != nullptr) {
+            const int r0 = active_row;
+            sparse_attn_unpack(ckv, d.topk, (int) topk_stride(), ar, T, d.attn_scr, r0, s);
+            for (int t = 0; t < T; ++t) {   // (batch's win0: rows of the whole ext, not of this run's slice)
+                batch->win0[r0 + t] = ar.win0[t] + r0 * ext_slice_rows();
+                batch->nwin[r0 + t] = ar.nwin[t];
+                batch->nsel[r0 + t] = ar.nsel[t];
+            }
+        } else if (NHL > 0) {
             sparse_attn(d.q, d.ext, ckv, d.topk, (int) topk_stride(), ar, l.sink, NHL, HD, T,
                         1.0f / std::sqrt((float) HD), d.o, s, ckv_fmt, 0, &d.attn_scr);
             dump_sub(d, "o", l.il, p0, T, d.o, (size_t) T * HQ * 4);
-            Finish fo;
-            fo.rd = g.rd;
-            fo.pos = (int) p0;
-            fo.vpp = NHL;
-            fo.freqs = freqs;
-            fo.inverse = 1;
-            fo.quant = 1;
-            finish(d.o, T * NHL, HD, HD, fo, s);
+            finish_attention(l, d, d.o, p0, T);
         }
         return true;
+    }
+
+    /// Rotates the attention output `o` of T rows at positions p0 .. back by their positions (DeepSeek's inverse RoPE
+    /// on the output) and rounds it to FP8 as the reference does before layer member l's output projection.
+    void finish_attention(const Layer& l, Dev& d, float* o, int64_t p0, int T) {
+        Finish fo;
+        fo.rd = g.rd;
+        fo.pos = (int) p0;
+        fo.vpp = l.ahn;
+        fo.freqs = l.ratio ? d.freqs_comp : d.freqs_win;
+        fo.inverse = 1;
+        fo.quant = 1;
+        finish(o, T * l.ahn, g.hd, g.hd, fo, d.st);
     }
 
     /// Computes the shared and routed experts for all rows in this layer.
