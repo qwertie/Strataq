@@ -81,6 +81,9 @@ Source setup does not make an unsupported model or backend compatible. Strata's 
   rules are checked by `python -m pytest tests/architecture`. The app's UI tests run with `npm test` in `apps/host`.
   Setup's own tests run without a GPU or downloads:
   `python tools/test_setup_<name>.py` (for example `tools/test_setup_amd.py`, `tools/test_setup_choices.py`).
+  On Windows with HIP, put the SDK's `bin` folder (pip SDK: `_rocm_sdk_devel\bin`) on `PATH` before `ctest`.
+  Without its `rocblas.dll` and `libhipblaslt.dll`, each test that needs them opens a "System Error" window and waits
+  for its timeout.
 - Keep the docs' style: plain words, short sentences, written for non-technical users first. Give measured numbers
   with what they were measured on. Make no claim without a measurement.
 
