@@ -456,7 +456,7 @@ __device__ __align__(4) int8_t iq4nl_values[16] = {
 };
 
 __device__ __forceinline__ int2 iq4_table_lookup(int q4) {
-#if defined(STRATA_HIP_GFX906)
+#if defined(__HIPCC__)
     // AMD: llama.cpp's HIP lookup (see iq_kernels.cu get_int_from_table_16): 4 v_perm_b32 per 8 values
     const uint32_t* v32 = reinterpret_cast<const uint32_t*>(iq4nl_values);
     const uint32_t q_even = (uint32_t) q4, q_odd = (uint32_t) q4 >> 4;
@@ -655,9 +655,8 @@ __device__ __forceinline__ float q6_q8_dot_impl(int vl, int vh, const int* __res
     }
     return d * sumf;
 }
-#if !defined(__HIPCC__)   // CUDA only: the native_mmvq_il_pf_kernel family below (itself CUDA only) is the only user
-// q6_q8_dot_impl with the two scales already in registers (the interleaved kernels' hoisted loads, P1): the same
-// expression in the same order
+// q6_q8_dot_impl with the two scales already in registers (Q6KTraits and the interleaved kernels' hoisted loads, P1):
+// the same expression in the same order
 __device__ __forceinline__ float q6_q8_dot_sc(int vl, int vh, const int* __restrict__ u, int sc0, int sc1, float d,
                                             const float* __restrict__ d8) {
     float sumf = 0.0f;
@@ -673,6 +672,7 @@ __device__ __forceinline__ float q6_q8_dot_sc(int vl, int vh, const int* __restr
     return d * sumf;
 }
 
+#if !defined(__HIPCC__)   // CUDA only: the native_mmvq_il_pf_kernel family below (itself CUDA only) is the only user
 // P1: loads the compiler may not sink into a later branch (it moved the Q6_K scale and d loads of the hoisted group
 // into the dot sections, where each one is a dependent L1 round trip); the same ld.global.nc the __restrict__ loads use
 __device__ __forceinline__ int ldg_nc_u16(const void* p) { unsigned v; asm volatile("ld.global.nc.u16 %0, [%1];" : "=r"(v) : "l"(p)); return int(v); }
@@ -1047,7 +1047,7 @@ struct Q6KTraits {
     [[maybe_unused]] static constexpr int TYPE = 14;   // ggml type
     static constexpr int DIV = 256, T = 32, KBY = 8, BPI = WARPS * WARP / 32;
     __device__ static int kqs(int tid) { return tid % 32; }
-    struct W { int vl, vh; float d; const int8_t* scales; int bq8_offset; };
+    struct W { int vl, vh, sc0, sc1; float d; int bq8_offset; };
     __device__ static W load(const Block* __restrict__ w, int iqs) {
         W r;
         r.bq8_offset = 4 * (iqs / 16) + (iqs % 16) / 8;
@@ -1055,7 +1055,8 @@ struct Q6KTraits {
         const int vh_shift = 2 * ((iqs % 16) / 8);
         r.vl = load_int_b2(w->ql, iqs);
         r.vh = load_int_b2(w->qh, 8 * (iqs / 16) + iqs % 8) >> vh_shift;
-        r.scales = w->scales + scale_offset;
+        r.sc0 = w->scales[scale_offset];
+        r.sc1 = w->scales[scale_offset + 4];
         r.d = w->d;
         return r;
     }
@@ -1067,7 +1068,7 @@ struct Q6KTraits {
             u[i] = reinterpret_cast<const int*>(x[r.bq8_offset + 2 * i].qs)[iqs % 8];
             d8[i] = __low2float(x[r.bq8_offset + 2 * i].ds);
         }
-        return q6_q8_dot_impl(r.vl, r.vh, u, r.scales, r.d, d8);
+        return q6_q8_dot_sc(r.vl, r.vh, u, r.sc0, r.sc1, r.d, d8);
     }
 };
 struct IQ4XSTraits {
@@ -1408,8 +1409,8 @@ template<> struct B6X<Q6KTraits> {
         W r;
         r.vl = t.vl;
         r.vh = t.vh;
-        r.sc[0] = t.scales[0];
-        r.sc[1] = t.scales[4];
+        r.sc[0] = t.sc0;
+        r.sc[1] = t.sc1;
         r.d = t.d;
         return r;
     }
@@ -1946,11 +1947,11 @@ struct IlQ6K {
         for (int c = 0; c < NC; ++c) {
             const int uc[2] = {u[0][c], u[1][c]};
             const float dc[2] = {d8[0][c], d8[1][c]};
-            out[c] = q6_q8_dot_impl(r.vl, r.vh, uc, r.scales, r.d, dc);
+            out[c] = q6_q8_dot_sc(r.vl, r.vh, uc, r.sc0, r.sc1, r.d, dc);
         }
     }
-    // P1: the two scale bytes loaded with the rest (F::W keeps a pointer into the block, which would put their loads
-    // in the compute phase); q6_q8_dot_sc is q6_q8_dot_impl's expression
+    // P1: the two scale bytes loaded with the rest, as ld.global.nc the compiler may not sink into the compute phase
+    // (F::load's plain loads it may); q6_q8_dot_sc is q6_q8_dot_impl's expression
     static constexpr bool HAS_PF = true;
     // a row's four lane-adjusted byte pointers (ql, qh, scales, d): a block's loads are then one IMAD.WIDE each from kbx
     struct RP { const uint8_t *ql, *qh, *sc, *d; };
