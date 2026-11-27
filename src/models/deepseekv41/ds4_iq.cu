@@ -938,6 +938,54 @@ __global__ void __launch_bounds__(kThreads) mv_kernel(const Jobs J) {
             if (lane == 0) b.y[c * b.ycs + row] = b.alpha * v + (b.bias != nullptr ? b.bias[row] : 0.0f);
         }
 }
+// mv_kernel for 2 to NC activation columns (mv_nc's), bit for bit: a block's warps (rows) read each run of 32
+// sub-blocks' int8 activations from shared memory, loaded there once for all of them.  On a Radeon 8060S, DeepSeek
+// V4.1's Q5_K matrices (40 layers) take 23.0 ms this way at 4 columns against mv_kernel's 26.4 (3: 22.1 against 24.3,
+// 2: 21.6 against 22.3); one column does not gain.
+template <int T, int NC>
+__global__ void __launch_bounds__(kThreads) mv_shared_x_kernel(const Jobs J) {
+    __shared__ uint32_t tab[Ty<T>::TAB > 0 ? Ty<T>::TAB : 1];
+    __shared__ int4 xs[NC][64];   // a run's activations: sub-block i of column c in xs[c][2 i], xs[c][2 i + 1]
+    __shared__ float xds[NC][32];   // their scales: sub-block i of column c in xds[c][i]
+    load_tab<T>(tab);
+    const MvJob& b = J.j[blockIdx.y];
+    if (blockIdx.x * kWarps >= b.n)
+        return;   // (the whole block: every warp takes part in the loads below)
+    const int row = blockIdx.x * kWarps + (threadIdx.x >> 5), lane = threadIdx.x & 31;
+    const bool live = row < b.n;
+    const uint8_t* w = b.w + (size_t) (live ? row : 0) * b.ld;
+    const int nsb = b.k / 32, ncol = min(NC, b.ncol);
+    float acc[NC];
+#pragma unroll
+    for (int c = 0; c < NC; ++c) acc[c] = 0.0f;
+    for (int kb0 = 0; kb0 < nsb; kb0 += 32) {
+        const int nk = min(32, nsb - kb0);
+        __syncthreads();
+        for (int i = threadIdx.x; i < ncol * 64; i += kThreads)
+            if ((i & 63) < 2 * nk)
+                xs[i >> 6][i & 63] = ((const int4*) (b.xq + (size_t) (i >> 6) * b.k + (size_t) kb0 * 32))[i & 63];
+        for (int i = threadIdx.x; i < ncol * 32; i += kThreads)
+            if ((i & 31) < nk)
+                xds[i >> 5][i & 31] = b.xd[(size_t) (i >> 5) * nsb + kb0 + (i & 31)];
+        __syncthreads();
+        if (!live || lane >= nk)
+            continue;
+        Sub s;
+        decode<T>(w, kb0 + lane, tab, s);
+#pragma unroll
+        for (int c = 0; c < NC; ++c)
+            if (c < ncol)
+                acc[c] = fmaf(xds[c][lane], sub_dot<T>(s, xs[c][2 * lane], xs[c][2 * lane + 1]), acc[c]);
+    }
+    if (!live)
+        return;
+#pragma unroll
+    for (int c = 0; c < NC; ++c)
+        if (c < ncol) {
+            const float v = warp_sum(acc[c]);
+            if (lane == 0) b.y[c * b.ycs + row] = b.alpha * v + (b.bias != nullptr ? b.bias[row] : 0.0f);
+        }
+}
 
 // ---------------------------------------------------------------- the prompt sets' light experts
 // A set's experts of a few rows (<= kLightRows: a prompt of a few hundred tokens spreads ~10 over most of 384 experts)
@@ -1305,7 +1353,7 @@ void mv_nc(const Jobs& J, int nj, int max_n, int max_c, cudaStream_t s) {
     }
 #endif
     if (max_c <= 1) strata_ds4_launch(mv_kernel<T, 1>, grid, kThreads, 0, s, J);
-    else if (max_c <= 4) strata_ds4_launch(mv_kernel<T, 4>, grid, kThreads, 0, s, J);
+    else if (max_c <= 4) strata_ds4_launch(mv_shared_x_kernel<T, 4>, grid, kThreads, 0, s, J);
     else strata_ds4_launch(mv_kernel<T, 16>, grid, kThreads, 0, s, J);
 }
 
