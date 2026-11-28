@@ -213,7 +213,7 @@ def nvidia_gpus() -> tuple[list[dict], str | None, str | None]:
 
 
 def other_gpus() -> tuple[list[dict], str | None]:
-    """AMD (rocm-smi, or the Windows registry), Apple silicon: -> (cards, driver version)."""
+    """AMD (rocm-smi, amd-smi, or the Windows registry): -> (cards, driver version)."""
     cards, driver = [], None
     rocm = run_cmd(["rocm-smi", "--showproductname"])
     names = re.findall(r"Card [Ss]eries:\s*(.+)", rocm) or re.findall(r"Card [Mm]odel:\s*(.+)", rocm)
@@ -233,7 +233,7 @@ def other_gpus() -> tuple[list[dict], str | None]:
             driver = next((c.get("driver") for c in found if c.get("driver")), None)
         except Exception:                               # noqa: BLE001 - a report without the card's name is still a report
             pass
-    elif os.name != "nt" and sys.platform != "darwin":      # (a Mac has no AMD card to ask for; its chip is read below)
+    else:
         # ROCm 7 and newer ship amd-smi and no rocm-smi (verified on ROCm 10.1). Different grammar: `static --asic`
         # gives the marketing name, `static --driver` the kernel driver's version, and the PCI address only comes
         # from `amd-smi list`; the VRAM size is the amdgpu driver's sysfs file for that address.
@@ -264,11 +264,6 @@ def other_gpus() -> tuple[list[dict], str | None]:
                     pass
             cards.append({"device_index": i, "name": name, "memory_bytes": vram, "memory_kind": "dedicated",
                           "power_limit_w": None})
-    elif sys.platform == "darwin":
-        chip = cpu_name()
-        if chip:
-            cards = [{"device_index": 0, "name": chip, "memory_bytes": ram_bytes(), "memory_kind": "shared",
-                      "power_limit_w": None}]
     return cards, driver
 
 
@@ -447,7 +442,7 @@ def engine_build_runtime(exe: str | None) -> dict | None:
         record = json.loads((Path(exe).parent / "engine-component.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    match = re.search(r"\+(cuda|rocm|hip|sycl)([\d.]+)\Z", str(record.get("build_id") or "")) if isinstance(record, dict) else None
+    match = re.search(r"\+(cuda|rocm|hip)([\d.]+)\Z", str(record.get("build_id") or "")) if isinstance(record, dict) else None
     return {"name": "rocm" if match.group(1) == "hip" else match.group(1), "version": match.group(2)} if match else None
 
 
@@ -464,8 +459,6 @@ def software(why: Why, machine: dict, *, engine_version: str | None, build_optio
         runtime.append({"name": "cuda", "version": machine["cuda"]})
     if machine.get("rocm") and not any(r.get("name") == "rocm" for r in runtime):
         runtime.append({"name": "rocm", "version": machine["rocm"]})
-    if sys.platform == "darwin":
-        runtime.append({"name": "metal", "version": platform.mac_ver()[0] or sysinfo.release()})
     drivers = [{"name": "gpu-driver", "version": machine["driver"]}] if machine.get("driver") else []
     block = {"os": os_info(), "drivers": drivers or None, "runtime": runtime or None,
              "strata_commit": commit, "engine_version": engine_version,
@@ -474,7 +467,7 @@ def software(why: Why, machine: dict, *, engine_version: str | None, build_optio
     if not drivers:
         why.add("/software/drivers", "no GPU driver version was reported by the local tools")
     if not runtime:
-        why.add("/software/runtime", "no CUDA, ROCm or Metal runtime version was reported by the local tools")
+        why.add("/software/runtime", "no CUDA or ROCm runtime version was reported by the local tools")
     if commit is None:
         for field in ("strata_commit", "runner_commit"):
             why.add(f"/software/{field}", "not a git checkout and no COMMIT file in this install; a release must carry its commit")

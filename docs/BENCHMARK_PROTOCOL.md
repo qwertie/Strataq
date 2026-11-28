@@ -237,12 +237,8 @@ remote/network measurements belong in a separate nonstandard report. Record all 
 indices, dedicated or shared memory, CPU, RAM, storage, OS, driver/runtime versions, power limits when available,
 and other workloads. Use bytes for memory, watts for power, seconds for durations, and tokens/second for rates.
 
-On Apple silicon (Metal) the GPU and the CPU share one memory pool: record one GPU entry named after the chip,
-`memory_kind: "shared"`, `memory_bytes` equal to the installed memory, and `power_limit_w: null` with a reason.
-There is no separate GPU driver (`drivers` stays `null` with a reason); put the macOS version in `runtime` as
-`{"name": "metal", "version": "<macOS version>"}`. AMD APUs such as Strix Halo also use shared memory; the runner
-reports `shared` only for Apple silicon and the operator must correct any other unified-memory machine in the
-README.
+AMD APUs such as Strix Halo share one memory pool between the GPU and the CPU. The runner does not detect this:
+record `memory_kind: "shared"` and `memory_bytes` equal to the installed memory in the README.
 
 | Metric | Definition and evidence |
 | --- | --- |

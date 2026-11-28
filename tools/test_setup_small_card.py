@@ -27,12 +27,6 @@ class Estimate(unittest.TestCase):
     def test_a_bigger_card_has_room(self):
         self.assertGreater(setup.unsloth_vram_slack_mib(12.0, 32768, "int8", 700), setup.UD_FIT_MIN_SLACK_MIB)
 
-    def test_cuda_and_hip_pay_for_the_runtime_sycl_does_not(self):
-        self.assertEqual(setup.unsloth_runtime_mib({"driver": "i915"}), 0)
-        self.assertEqual(setup.unsloth_runtime_mib({"driver": "xe"}), 0)
-        self.assertEqual(setup.unsloth_runtime_mib({"driver": "580.97"}), setup.UD_FIT_RUNTIME_MIB)
-        self.assertEqual(setup.unsloth_runtime_mib({"driver": "amdgpu"}), setup.UD_FIT_RUNTIME_MIB)
-
 
 class Plan(unittest.TestCase):
     def test_a_card_that_fits_is_not_changed(self):

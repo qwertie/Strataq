@@ -4313,8 +4313,7 @@ void launch_down(dim3 grid, cudaStream_t s, const unsigned long long* grp_ptr, c
 // 0x7777 masks).  An item's int32 sum is the sum of the same int8 x int8 products, so every output is bit for bit
 // native_down_multi_kernel's (memcmp equal on all 48 layers of the Swift 1.5 IQ3_S pack, all 512 experts, 1-6
 // entries a group and T = 1..4 plans; native_expert_bench checks it against mode 0 and mode 8 by output hash).
-#if defined(STRATA_EXPERIMENTAL_SM60) && !defined(__HIPCC__) && !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && \
-    !defined(STRATA_GPU_METAL)
+#if defined(STRATA_EXPERIMENTAL_SM60) && !defined(__HIPCC__) && !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906)
 #define STRATA_DOWN_WS_BUILT 1   // the CUDA build with STRATA_EXPERIMENTAL_SM60 only
 #else
 #define STRATA_DOWN_WS_BUILT 0

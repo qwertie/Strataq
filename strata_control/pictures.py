@@ -100,9 +100,9 @@ def family_of(cfg: dict, gguf: Path | None, asked: str | None = None) -> str | N
     without it the model's own file name and name decide (Swift's files are called Swift-..., Qwen3.6's start with Qwen3.6)."""
     if asked:
         return asked.lower() if asked.lower() in PROJECTOR_BY_FAMILY else None
-    arch = str(cfg.get("arch") or "").lower()
     names = [str(cfg.get("model_name") or "").lower(), (gguf.name.lower() if gguf else "")]
-    if arch == "deepseek41" or any("deepseek" in n for n in names) or "strata-dsv41" in str(cfg.get("exe") or "").lower():
+    from strata_control.speed_switches import is_deepseek
+    if is_deepseek(cfg) or any("deepseek" in n for n in names):
         return None
     if any(n.startswith("qwen3.6") or "qwen3.6-35b" in n for n in names):
         return None
@@ -257,20 +257,16 @@ def threads(logical: int | None = None) -> int:
 
 def reader_section(engine_dir: Path, mmproj: Path, gguf: Path, asked: str, hardware: dict | None = None, previous: dict | None = None) -> tuple[dict | None, str]:
     """The run config's ``vision`` section for this engine folder and card, and one plain note when it is not what was asked for.
-    The same rule as setup (strata_control/vision_reader.py is the one place): the CPU reader under 24 GB of VRAM, the GPU reader from 24 GB; AMD and
-    Intel Arc get their GPU reader with the CPU one behind it; a Mac has one program for both. (None, note) when the folder has no reader at all."""
+    The same rule as setup (strata_common/vision_reader.py is the one place): the CPU reader under 24 GB of VRAM, the GPU reader from 24 GB; AMD
+    gets its GPU reader with the CPU one behind it. (None, note) when the folder has no reader at all."""
     hw = hardware or {}
-    make = str(hw.get("make") or "").lower()
-    mac = make == "apple" or sys.platform == "darwin"
     windows = os.name == "nt"
-    wanted = vision_reader.wanted(asked, hw.get("vram_gb"), make, unified=mac)
+    wanted = vision_reader.wanted(asked, hw.get("vram_gb"))
     if wanted == "none":
         return None, ""
-    have = vision_reader.find(engine_dir, windows, mac=mac)
+    have = vision_reader.find(engine_dir, windows)
     arch = hw.get("arch")
-    if mac:
-        reader = vision_reader.choose(engine_dir, wanted, windows=False, mac=True)
-    elif have["gpu"] is not None:
+    if have["gpu"] is not None:
         reader = vision_reader.choose(engine_dir, wanted, windows=windows, gpu_arch=str(arch or ""), archs=_reader_archs(engine_dir))
     elif have["cpu"] is not None:
         mode, note = wanted, ""

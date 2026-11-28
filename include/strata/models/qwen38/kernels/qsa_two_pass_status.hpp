@@ -1,7 +1,8 @@
 #pragma once
 // STRATA_SELECT_TWO_PASS: the request, read once, and the line a set switch prints where the two-pass scorer cannot
 // run.  The scorer runs only in the CUDA prompt path's chunked walk, on a card where qsa_block_scores_tc runs its
-// tensor-core kernel (sm_80+, STRATA_QSA_WARP not set).  Elsewhere (HIP, Metal, SYCL, an older card or the warp
+// tensor-core kernel (sm_80+, STRATA_QSA_WARP not set).  Elsewhere (HIP, an older card or the warp
+
 // scorer, the layer-major prompt path) the selection runs as without the switch; that was silent, so the switch read
 // as active.  Header-only, so the rule and the line are tested without a GPU (qsa_two_pass_status_test).
 #include <atomic>

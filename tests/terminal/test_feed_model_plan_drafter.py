@@ -6,13 +6,10 @@ import unittest
 from unittest import mock
 
 from strata_cli.launch import settings as S
-from tests.terminal.launch_support import HW_12, Home, catalog, not_intel
+from tests.terminal.launch_support import HW_12, Home, catalog
 
 
 class PlanLineOfAFeedModel(unittest.TestCase):
-    def setUp(self):
-        not_intel(self)
-
     def runner(self, home, family):
         from strata_cli.launch.runner import Runner
         cat = catalog(HW_12)

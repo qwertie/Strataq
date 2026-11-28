@@ -70,7 +70,7 @@ _RADEON_9000 = re.compile(r"\b(?:RX\s*9\d{3}|AI\s*PRO\s*R97\d{2}|R97\d{2})\b", r
 def _small_nvidia(gpus: Iterable[Mapping[str, Any]] | None) -> bool:
     """A discrete NVIDIA card of 13 GiB or less (the engine's rule for residency-biased routing: not an integrated chip, not a card that shares system memory)."""
     for g in gpus or []:
-        if g.get("usable") is False or g.get("uma") or g.get("integrated") or (g.get("unified_gb") or 0) > 0:
+        if g.get("usable") is False or g.get("uma") or g.get("integrated"):
             continue
         vendor = str(g.get("vendor") or "").lower()
         if vendor not in ("nvidia", "") or (vendor == "" and not re.search(r"nvidia|geforce|\brtx\b|\bgtx\b|quadro|tesla", str(g.get("name") or ""), re.IGNORECASE)):
@@ -83,7 +83,7 @@ def _small_nvidia(gpus: Iterable[Mapping[str, Any]] | None) -> bool:
 
 def is_deepseek(cfg: Mapping[str, Any] | None) -> bool:
     cfg = cfg or {}
-    return cfg.get("arch") == "deepseek41" or bool(re.search(r"strata-dsv41", str(cfg.get("exe") or ""), re.IGNORECASE))
+    return cfg.get("arch") == "deepseek41" or bool(re.search(r"strata-dsv?41", str(cfg.get("exe") or ""), re.IGNORECASE))
 
 
 def _radeon_9000(gpus: Iterable[Mapping[str, Any]] | None) -> bool:
@@ -97,7 +97,7 @@ def _radeon_9000(gpus: Iterable[Mapping[str, Any]] | None) -> bool:
 
 
 def applies(switch: Switch | str, cfg: Mapping[str, Any] | None, gpus: Iterable[Mapping[str, Any]] | None, backend: str | None = None) -> bool:
-    """Does the switch make sense for this model on this PC? ``backend`` is the engine's (cuda, hip, sycl, metal, cpu); the run config's own wins.
+    """Does the switch make sense for this model on this PC? ``backend`` is the engine's (cuda, hip, cpu); the run config's own wins.
     "Faster long prompts" is for Qwen3.8-Flash-Next models only (a config without an "arch")."""
     sw = BY_ID[switch] if isinstance(switch, str) else switch
     if sw.only == "deepseek":

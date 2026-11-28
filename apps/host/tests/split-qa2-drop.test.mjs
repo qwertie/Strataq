@@ -1,4 +1,4 @@
-// Files dropped on the app window on Linux and macOS: the shell hands the paths to the host, the page fetches each file once.
+// Files dropped on the app window on Linux: the shell hands the paths to the host, the page fetches each file once.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -74,7 +74,7 @@ test('the page reads what the shell announced and makes Files of it', async () =
   assert.equal(dragHasFiles(['text/uri-list', 'text/html']), true); assert.equal(dragHasFiles(['Files']), true); assert.equal(dragHasFiles(['text/plain']), false); assert.equal(dragHasFiles(null), false);
 });
 
-test('the window passes the drop on (Linux and macOS) and ignores a file dropped outside the chat', async () => {
+test('the window passes the drop on (Linux) and ignores a file dropped outside the chat', async () => {
   const rust = await readFile(new URL('../../desktop/src-tauri/src/main.rs', import.meta.url), 'utf8');
   assert.match(rust, /#\[cfg\(windows\)\]\s+let builder = builder\.disable_drag_drop_handler\(\);/);
   assert.match(rust, /window\.on_webview_event\(/); assert.match(rust, /\/api\/app\/drop/);

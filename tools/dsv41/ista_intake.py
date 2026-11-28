@@ -177,6 +177,9 @@ def tensor_names(setdir: pathlib.Path) -> list[str]:
     return names
 
 
+# TODO(delete-old-engines): pack_info and speed_smoke ran strata-dsv41's one-shot modes (--pack-info; --ids/--n),
+# which strata-ds41 does not have: a pack check in strata-ds41, and a speed run through its serve protocol, would
+# replace them.
 def pack_info(pack: pathlib.Path) -> str:
     r = run(["bash", "-lc", ". /data/dsv41-port/env.sh; cd /data/dsv41-port && ./build/strata-dsv41 --pack-info --pack %s"
              % pack])

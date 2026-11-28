@@ -143,9 +143,6 @@ class RulesTest(unittest.TestCase):
         self.assertFalse(tune_knobs.default_unsteady(ctx))
         ctx.facts = {"workers": 6, "resident_ram": True}            # the RTX 3060 in resident-RAM mode
         self.assertTrue(tune_knobs.default_unsteady(ctx))
-        sy = make_ctx()
-        sy.backend = "sycl"
-        self.assertTrue(tune_knobs.default_unsteady(sy))
         from strata_common import presets
         steady = {"answers": {"class": "exact", "default_repeatable": True}}
         unsteady = {"answers": {"class": "exact", "default_repeatable": False}}
@@ -197,17 +194,13 @@ class RulesTest(unittest.TestCase):
         self.assertFalse(any(p.arm.id == "kv_resident_64k" for p in arms))
         self.assertTrue(any("does not accept" in s["reason"] for s in skipped))
 
-    def test_qwen36_and_sycl_lists(self):
+    def test_qwen36_list(self):
         q = make_ctx()
         q.family = "qwen36"
         q.facts = {"workers": 6, "hybrid_experts": True}
         ids = [p.arm.id for p in tune_knobs.plan_arms(q, mode="thorough")[0]]
         self.assertIn("q36_workers_explicit", ids)
         self.assertNotIn("kv_resident_64k", ids)
-        s = make_ctx(allow_placement=True)
-        s.backend = "sycl"
-        ids = [p.arm.id for p in tune_knobs.plan_arms(s, mode="thorough")[0]]
-        self.assertEqual(set(ids) - {"adapt_decay_09", "pcie_start_02"}, set())
 
     def test_workers_arm_never_goes_below_a_quarter(self):
         c = make_ctx()

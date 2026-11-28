@@ -193,7 +193,7 @@ def resolve(folder, archs_present, *, environ=None, cfg: dict | None = None) -> 
         return Decision(None, f"hipBLASLt tuning table: {chosen} (set by you; the engine checks it against this GPU and hipBLASLt)")
     tuning = folder / TABLE_DIR
     if not tuning.is_dir():
-        return Decision(None, "")                      # a package without tables (CUDA, Metal, an older HIP package): nothing to say
+        return Decision(None, "")                      # a package without tables (CUDA, an older HIP package): nothing to say
     version = package_version(folder)
     archs = [a for a in archs_present if isinstance(a, str)]
     if version is None:

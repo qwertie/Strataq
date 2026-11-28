@@ -51,14 +51,14 @@ class TuningCase(unittest.TestCase):
 class TestDimensionValidation(TuningCase):
     """A backend is offered only the levers its engine can actually accept."""
 
-    def test_metal_is_not_offered_nvidia_only_dimensions(self):
-        offered, excluded = tuning.validate_dimensions("metal")
+    def test_cpu_is_not_offered_gpu_only_dimensions(self):
+        offered, excluded = tuning.validate_dimensions("cpu")
         ids = {d.id for d in offered}
         self.assertNotIn("vram_reserve", ids)
         self.assertNotIn("pcie_frac", ids)
         reasons = {e["id"]: e["reason"] for e in excluded}
         self.assertIn("vram_reserve", reasons)
-        self.assertIn("NVIDIA/AMD", reasons["vram_reserve"])
+        self.assertIn("not a cpu setting", reasons["vram_reserve"])
 
     def test_cuda_is_offered_the_nvidia_dimensions(self):
         offered, _ = tuning.validate_dimensions("cuda")
@@ -113,12 +113,12 @@ class TestDimensionValidation(TuningCase):
         binary does not accept them. What must never happen is a dimension with no reason being
         dropped silently.
         """
-        offered, excluded = tuning.validate_dimensions("metal", engine_flags=["--unrelated"])
+        offered, excluded = tuning.validate_dimensions("cpu", engine_flags=["--unrelated"])
         self.assertEqual(offered, [])
         self.assertEqual(len(excluded), len(tuning.DIMENSIONS))
         for e in excluded:
             self.assertTrue(e["reason"].strip(), f"{e['id']} was excluded with no reason given")
-        # The dimensions that ARE Metal concepts are excluded specifically because the binary lacks
+        # The dimensions that ARE CPU settings are excluded specifically because the binary lacks
         # their flags, which is the check that matters.
         by_id = {e["id"]: e["reason"] for e in excluded}
         for dim_id in ("kv", "ple_io", "kv_grow", "spec_min_p"):

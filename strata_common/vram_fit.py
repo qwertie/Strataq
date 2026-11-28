@@ -5,8 +5,8 @@ the context, and a start that spills to the SSD is slow where a smaller context 
 work off the card in the order of least speed cost: a smaller --kv-resident window (more of the KV streams from RAM), fewer expert-cache slots (the engine's
 auto sizing gives the cache what is left, so this needs no flag), a smaller prompt chunk (--prefill), a smaller reserve (--vram-reserve-mib, within the
 engine's floor), and what only the engine can do (it sizes around what it cannot spill).  Which knobs a backend takes is KNOBS below, from what was measured
-on it.  One plain note says it: short of GPU memory, more is read from RAM and the SSD, expect it to be slower.  Pure functions, no I/O: sycl/setup_intel.py
-(setup), strata_cli/launch (strata launch) and serve/server.py (every engine start, fit_start) import it.
+on it.  One plain note says it: short of GPU memory, more is read from RAM and the SSD, expect it to be slower.  Pure functions, no I/O: strata_cli/launch
+(strata launch) and serve/server.py (every engine start, fit_start) import it.
 
 The arithmetic (MiB), measured on the Arc A750 (8 GB, i915) with the SYCL engine of 0.2.2, Gyro-M and Gyro-S, 12 starts, and on the CUDA engine (RTX PRO 5000
 held to 7942 / 8966 / 9990 / 12000 MiB by a memory hog, DF2-MEM RESULTS-DF2MEM.md):
@@ -14,7 +14,7 @@ held to 7942 / 8966 / 9990 / 12000 MiB by a memory hog, DF2-MEM RESULTS-DF2MEM.m
     slack = card - gap - base - session(ctx) - head - reserve - prompt buffers(chunk)      # what is left for the expert cache
     fits  = slack >= what the cache needs (the engine's one slot, or the working cache the CUDA engine asks for) + MARGIN
 
-* gap: the part of the card the driver does not give (Arc: 471 MiB, the engine sees 7.54 GiB of 8; CUDA / HIP: the runtime's context, 250).
+* gap: the part of the card the driver does not give (CUDA / HIP: the runtime's context, 250).
 * base: dense weights, the draft layer, the n-gram head's buffers and the engine's own allocations that do not depend on the context.
   Gyro-M 5945 (measured "holds" 6.02 GiB at 8K minus the 234 MiB session), Gyro-S 4720; any other model: 2448 (1.4 GiB dense + 0.8 GiB
   draft layer + slack), a figure that only a card under about 5 GB can get past, so a default that fits today is never changed.
@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from strata_common import user_args
 
 CHUNK_STEPS = (1024, 512, 256)                   # a smaller prompt chunk, tried after the default one (1024 is the value measured end to end)
-RESERVE_FLOOR_MIB = 100                 # the lowest reserve the engine accepts without complaint (docs/INTEL.md); never raised
+RESERVE_FLOOR_MIB = 100                 # the lowest reserve the engine accepts without complaint; never raised
 AUTO_CHUNK = 2048                       # what --prefill auto came to on the 8 GB card
 MIN_SLOTS = 128                         # the engine wants 128 cache slots to lend the prompt path; below that it is slow
 SLOT_MIB = 1.243
@@ -52,7 +52,6 @@ KV_BYTES = {"fp16": 2112, "int8": 1056, "q4_0": 576, "k8v4": 816}   # per token 
 KV_MEASURED_FACTOR = 1.054              # the engine's session is 5.4% over the bare cache (scales)
 PROMPT_BASE_MIB = 170
 PROMPT_PER_TOKEN_MIB = 0.66
-GAP_MIB = {"intel": 471}
 GAP_OTHER_MIB = 250
 MIN_CARD_GB = 5.0                       # under this nothing here is claimed (the engine lowers its own reserve there, #496)
 
@@ -72,8 +71,8 @@ BASE_GENERIC_MIB = 2448
 # 8 GB (7800 MiB left, the same engine): --batch 2 has 0.83 GiB free after the two slot sessions, the MTP layer takes 835 and the head upload dies "out of memory
 # (7 MiB free)"; --batch 4 fits three sessions and the MTP layer's dense weights die "out of memory (99 MiB free)".  The formula says -1765 MiB for the first (the engine's own
 # figures say -1757), so both are refused by the plan and given a context or fewer requests that fit.
-BASE_SLOTTED_MIB = {("intel", "flash-next"): 4500, ("cuda", "flash-next"): 4990,
-                    ("hip", "flash-next"): 3900}      # (vendor, model family): the A750, the CUDA engine, and a discrete AMD card (R9700, see the HIP lines below)
+BASE_SLOTTED_MIB = {("cuda", "flash-next"): 4990,
+                    ("hip", "flash-next"): 3900}      # (vendor, model family): the CUDA engine, and a discrete AMD card (R9700, see the HIP lines below)
 SLOT_SLOTTED_MIB = 2.22
 # CUDA, 8 GB mimic (7942 MiB left), 2 requests at 4K: a start the plan counted 177 MiB over the one-slot limit loaded, sized a 336-slot cache with the reserve lowered
 # to 424 MiB ("a working cache needs 263"), had 59 MiB free, and aborted at its first request ("ggml-cuda (strata mmq): out of memory").  The threshold for request
@@ -89,8 +88,8 @@ HIP_BASE_NOTE = ("measured on an R9700 (gfx1201, p620) squeezed by a memory hog,
 DRAFTER_DELTA_MIB = {"mtp": 0, "dflash2": -119, "dflash2+mtp": 502, "none": -835}
 # The knobs a start short of VRAM turns, mildest first, per backend.  CUDA: only the KV window; its engine sizes the expert cache and the prompt chunk itself
 # (an explicit --prefill N is larger than the engine's own step-down on a card this tight, and a lower --vram-reserve-mib starves DFlash2's prompt staging: both
-# measured on the 8 GB mimic).  Arc: the prompt chunk is the biggest cheap knob (DF2-SYCL, A750: 1522 MiB of buffers at chunk 2048, 508 at 512), then the reserve.
-KNOBS = {"cuda": ("kv_resident",), "hip": ("kv_resident",), "intel": ("chunk", "reserve", "kv_resident"), "other": ("chunk", "reserve")}
+# measured on the 8 GB mimic).  Any other backend: the prompt chunk (1522 MiB of buffers at chunk 2048, 508 at 512 on the A750), then the reserve.
+KNOBS = {"cuda": ("kv_resident",), "hip": ("kv_resident",), "other": ("chunk", "reserve")}
 NOTE_SLOW = "short of GPU memory: more is read from RAM and the SSD, expect it to be slower"
 SLOT_RUN_MIN = 1                                       # the engine's minimum: generate.cpp refuses a start whose auto sizing leaves the cache no slot
 KV_RESIDENT_MIN = 4096                                 # qsa_kv_resident_min(): a smaller --kv-resident is raised to this (was 20480; 4096 and 8192 gave the same tokens, RESULTS-DF2MEM.md section 18)
@@ -107,7 +106,7 @@ def base_mib(model: str) -> int:
     return BASE_GENERIC_MIB
 
 
-def slotted_base_mib(model: str, vendor: str = "intel", drafter: str = "mtp") -> int | None:
+def slotted_base_mib(model: str, vendor: str = "other", drafter: str = "mtp") -> int | None:
     """The measured Flash-Next base for this vendor's cards with this drafter, None where none was measured."""
     low = str(model or "").lower().replace("_", "-")
     for (v, key), mib in BASE_SLOTTED_MIB.items():
@@ -148,10 +147,10 @@ def measured(model: str, slots: int, vendor: str, drafter: str = "mtp") -> bool:
 
 
 def slack_mib(model: str, vram_gb: float, ctx: int, kv: str = "int8", reserve_mib: int = 300, prefill="auto",
-              vendor: str = "intel", slots: int = 0, kv_resident: int = 0, drafter: str = "mtp") -> float:
+              vendor: str = "other", slots: int = 0, kv_resident: int = 0, drafter: str = "mtp") -> float:
     """MiB the estimate leaves for the expert cache (negative: the engine would stop with "no VRAM is left for the expert cache").
     `slots` >= 2: a start with that many request slots, each one a session of the main one's size."""
-    gap = GAP_MIB.get(str(vendor or "").lower(), GAP_OTHER_MIB)
+    gap = GAP_OTHER_MIB
     prompt = PROMPT_BASE_MIB + PROMPT_PER_TOKEN_MIB * chunk_of(prefill)
     base = base_mib(model)
     extra = 0.0
@@ -164,7 +163,7 @@ def slack_mib(model: str, vram_gb: float, ctx: int, kv: str = "int8", reserve_mi
     return vram_gb * 1024 - gap - base - main - extra - HEAD_MIB - max(int(reserve_mib), 0) - prompt
 
 
-def needed_mib(model: str = "", slots: int = 0, vendor: str = "intel", drafter: str = "mtp") -> float:
+def needed_mib(model: str = "", slots: int = 0, vendor: str = "other", drafter: str = "mtp") -> float:
     if measured(model, slots, vendor, drafter):
         if slots >= 2 and str(vendor or "").lower() in WORKING_CACHE_MIB:    # CUDA: a cache the engine calls working, not its one-slot refusal limit
             return WORKING_CACHE_MIB[str(vendor).lower()] + MARGIN_MIB
@@ -172,7 +171,7 @@ def needed_mib(model: str = "", slots: int = 0, vendor: str = "intel", drafter: 
     return MIN_SLOTS * SLOT_MIB + MARGIN_MIB
 
 
-def fits(model: str, vram_gb: float, ctx: int, kv: str = "int8", reserve_mib: int = 300, prefill="auto", vendor: str = "intel", slots: int = 0,
+def fits(model: str, vram_gb: float, ctx: int, kv: str = "int8", reserve_mib: int = 300, prefill="auto", vendor: str = "other", slots: int = 0,
          kv_resident: int = 0, drafter: str = "mtp") -> bool:
     return slack_mib(model, vram_gb, ctx, kv, reserve_mib, prefill, vendor, slots, kv_resident, drafter) >= needed_mib(model, slots, vendor, drafter)
 
@@ -195,7 +194,7 @@ class Fit:
     slots: int = 0                      # the request slots of this start: always the number asked for
 
 
-def plan(model: str, vram_gb: float, ctx: int, kv: str = "int8", reserve_mib: int = 300, prefill="auto", vendor: str = "intel",
+def plan(model: str, vram_gb: float, ctx: int, kv: str = "int8", reserve_mib: int = 300, prefill="auto", vendor: str = "other",
          title: str = "", ctx_fixed: bool = False, reserve_fixed: bool = False, prefill_fixed: bool = False, slots: int = 0, kv_resident: int = 0,
          drafter: str = "mtp", kv_fixed: bool = False) -> Fit:
     """The start that runs on this card, as close to the one asked for as possible; the SAME values back when that one already fits (byte-identical).
@@ -281,12 +280,12 @@ def drafter_of(args: list) -> str:
 
 def fit_start(cfg: dict, args: list, vram_mib: float | None, backend: str | None) -> tuple[list, int | None, str]:
     """The engine arguments of one start, moved off the GPU where the card is short: (args, parallel, note).  Never the context (--max-context) and never the number of
-    requests at once: `parallel` comes back None.  The knobs are the backend's (KNOBS): on CUDA the KV window (--kv-resident); on Arc the prompt chunk and the
+    requests at once: `parallel` comes back None.  The knobs are the backend's (KNOBS): on CUDA the KV window (--kv-resident); elsewhere the prompt chunk and the
     reserve first.  A value the person set (``user_args``) is kept.  Nothing changes without a single card's memory (several cards, a shared-memory chip: None), on a
     layer split, or for DeepSeek, which size themselves."""
     n = cfg.get("parallel")
     n = n if isinstance(n, int) and not isinstance(n, bool) and n >= 2 else 0
-    if not vram_mib or backend in (None, "", "metal"):
+    if not vram_mib or backend in (None, ""):
         return args, None, ""
     if (cfg.get("arch") or "") == "deepseek41" or cfg.get("layer_split") or "--layer-split" in args:
         return args, None, ""
@@ -302,7 +301,7 @@ def fit_start(cfg: dict, args: list, vram_mib: float | None, backend: str | None
     reserve = int(reserve_s) if reserve_s and str(reserve_s).isdigit() else 700      # the engine's default reserve
     user = [str(a) for a in (cfg.get("user_args") or [])]
     model = str(cfg.get("model_name") or user_args.find_model_file(args) or "")
-    vendor = {"sycl": "intel", "cuda": "cuda", "hip": "hip"}.get(str(backend), "other")
+    vendor = backend if backend in ("cuda", "hip") else "other"
     if not n and ("--batch" in args or "--slots" in args):
         b = flag("--batch") or flag("--slots") or "0"
         n = int(b) if str(b).isdigit() and int(b) >= 2 else 0
@@ -329,7 +328,7 @@ def fit_start(cfg: dict, args: list, vram_mib: float | None, backend: str | None
     return out, None, fr.line
 
 
-def fit_context(model: str, vram_gb: float, ctx: int, kv: str = "int8", reserve_mib: int = 300, vendor: str = "intel") -> int:
+def fit_context(model: str, vram_gb: float, ctx: int, kv: str = "int8", reserve_mib: int = 300, vendor: str = "other") -> int:
     """The context to recommend: always `ctx`.  A fit does not change the context any more (owner, 2026-11-02); kept for the callers that ask."""
     return int(ctx)
 

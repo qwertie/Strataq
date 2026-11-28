@@ -8,8 +8,8 @@ weight 1/N each to make the group count once.
 
     python tools/make_profile_mix.py TRACE[:WEIGHT] [TRACE[:WEIGHT] ...] [--out PATH] [--n-expert 512]
 
-A trace is a `--dump-routing` file, or a `STRATA_USAGE_DUMP` file of the SYCL engine (same record format).  The output
-is a profile for `--expert-profile`; the pairs no trace uses are appended in make_profile.py's fill order.
+A trace is a `--dump-routing` file.  The output is a profile for `--expert-profile`; the pairs no trace uses are
+appended in make_profile.py's fill order.
 
 Measured on an Arc Pro B70 (IQ3_S, 11.5k cached experts, decode of 250-300 tokens): the shipped profile holds 60% of the
 experts 45 chat/code/language prompts route and 85% of those a document summary routes; a profile from the 45 chat prompts

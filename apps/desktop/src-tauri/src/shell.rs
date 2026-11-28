@@ -8,7 +8,7 @@
 //! * `port`: the port the window's origin uses. 0 is the default, 47831. When the port is busy the shell takes a free one and tells the
 //!   host (`STRATA_PORT_NOTICE=busy:<wanted>:<used>`), which shows the person a warning: the chats and settings of the page are kept per
 //!   port, so a different port starts empty.
-//! * `tray`: closing the window hides it and keeps Strata running in the tray (Windows, macOS). The tray menu follows `language`.
+//! * `tray`: closing the window hides it and keeps Strata running in the tray (Windows). The tray menu follows `language`.
 //! * `/shell/notify` on the loopback bridge shows a desktop notification (an approval is waiting) whether the window is open or hidden.
 
 use std::path::PathBuf;

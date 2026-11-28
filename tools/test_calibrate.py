@@ -57,7 +57,7 @@ class FakeEngine:
                 self.reads.append(tune["prefill_pipe"])
 
 
-BASE = ["--pack", "p", "--spec", "4", "--spec-min-p", "0.5", "--max-context", "8192"]
+BASE = ["--pack", "p", "--spec-min-p", "0.5", "--max-context", "8192"]
 
 
 class Calibrate(unittest.TestCase):
@@ -330,23 +330,21 @@ class Calibrate(unittest.TestCase):
         self.assertEqual(b.count("--spec-min-p"), 1)
 
     def test_engine_args_are_the_servers(self):
-        # #447: a "gpu" list is a layer split only with two or more cards; "0,2" is one too; split_skip_if_fits counts
-        helper = {"args": BASE + ["--expert-cache-device1", "1800"], "gpu": [0], "env": {"CUDA_VISIBLE_DEVICES": "0,1"}}
+        # #447: a "gpu" list is a layer split only with two or more cards; "0,2" is one too
+        helper = {"args": BASE, "gpu": [0], "env": {"CUDA_VISIBLE_DEVICES": "0,1"}}
         self.assertEqual(CAL.engine_args(helper), helper["args"])                 # one stage + a helper card: no split
         self.assertEqual(CAL.engine_args({"args": BASE, "gpu": 1}), BASE)
         self.assertEqual(CAL.engine_args({"args": BASE, "gpu": [0, 2]}), BASE + ["--layer-split", "auto"])
         self.assertEqual(CAL.engine_args({"args": BASE, "gpu": "0,2", "layer_split": "18"}),
                          BASE + ["--layer-split", "18"])
-        self.assertEqual(CAL.engine_args({"args": BASE, "gpu": [0, 1], "split_skip_if_fits": True}),
-                         BASE + ["--layer-split", "auto", "--split-skip-if-fits"])
         own = BASE + ["--layer-split", ""]                                       # the config's own value wins
         self.assertEqual(CAL.engine_args({"args": own, "gpu": [0, 1]}), own)
 
     def test_run_measures_with_the_servers_args(self):
         seen = []
         saved = CAL.measure
-        CAL.measure = lambda args, ids_list, start_engine, say=print, extra=(), long_prompt=None, hip=False: (
-            seen.append((args, hip)) or {})
+        CAL.measure = lambda args, *a, **kw: (
+            seen.append((args, kw.get("hip"), kw.get("measure_workers"))) or {})
         fake = type("ST", (), {"load_folder": lambda *a: type("T", (), {"encode": lambda s, t, **k: [0]})()})
         try:
             with mock.patch.dict(sys.modules, {"strata_tokenizer": fake}):
@@ -354,7 +352,17 @@ class Calibrate(unittest.TestCase):
                 CAL.run({"tokenizer": "tok", "args": list(BASE), "gpu": [0], "backend": "hip"}, start_engine=lambda a: None)
         finally:
             CAL.measure = saved
-        self.assertEqual(seen, [(BASE, False), (BASE, True)])         # the shared-expert step runs on AMD only
+        self.assertEqual(seen, [(BASE, False, False), (BASE, True, False)])
+
+    def test_paged_engine_skips_unsupported_worker_trials(self):
+        starts = []
+        result = CAL.measure(
+            BASE, [[1, 2, 3]] * 3,
+            lambda args: FakeEngine(args, lambda f, p, w: 50.0, starts=starts),
+            say=lambda *_: None, measure_workers=False)
+        self.assertNotIn("workers", result["report"])
+        self.assertNotIn("--pool-workers", result["settings"])
+        self.assertTrue(all("--pool-workers" not in args for args in starts))
 
     def test_engine_error(self):
         with tempfile.TemporaryDirectory() as d:

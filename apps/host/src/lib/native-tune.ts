@@ -76,7 +76,7 @@ export const ANSWER_NOTICE: Record<string, string> = {
   quality: 'Includes a quality setting that changes the numbers.',
 };
 
-/** Where the standard setup is itself not repeatable (RTX 3060 in low-RAM mode, Arc A750), an exact setting cannot promise identical answers. */
+/** Where the standard setup is itself not repeatable (RTX 3060 in low-RAM mode), an exact setting cannot promise identical answers. */
 export const answerNotice = (cls?: string, defaultRepeatable?: boolean) =>
   cls === 'exact' && defaultRepeatable === false ? 'Answers can differ from run to run on this PC even with the standard setup; this setting does not add to that.' : ANSWER_NOTICE[cls ?? ''] ?? '';
 

@@ -94,24 +94,6 @@
 #include <exception>
 #include "strata/base/platform/cpu_relax.hpp"
 
-#if defined(STRATA_GPU_METAL)
-// The Metal backend's decode window (metal/src/engine/window.cpp): this file's init/run/commit hand over to it.
-namespace strata::metal_engine {
-void window_destroy(void* w);
-void* window_create();
-bool window_init(void* w, const strata::core::ModelGeometry& g, strata::core::SessionState& ss, int max_t, int64_t max_cells,
-                 int64_t* n_vocab, std::string& err);
-bool window_run(void* w, int T, const int32_t* tokens, int64_t pos0, bool head, int32_t* out, std::string& err);
-bool window_commit(void* w, int n_keep, std::string& err);
-bool window_copy_logits(void* w, int t, float* host);
-void window_set_sampling(void* w, const strata::kernels::SamplerParams* sp, const int32_t* hist, int hist_len);
-bool window_sample_slot_row(void* w, int row, const strata::kernels::SamplerParams& sp, const int32_t* hist, int hist_len, int32_t* tok, std::string& err);
-bool window_init_slots(void* w, const std::vector<strata::core::SessionState*>& slots, std::string& err);
-bool window_run_slots(void* w, const int* rows, int S, const int32_t* tokens, const int64_t* pos, int32_t* out, std::string& err);
-bool window_taps(void* w, const std::vector<int>& layers, const float** tap_dev, std::string& err);   // dflash2.inc
-}  // namespace strata::metal_engine
-#endif
-
 namespace strata::core {
 namespace {
 
@@ -236,7 +218,7 @@ inline bool g_qfuse_hc() {
 // STRATA_GRAPH_PRIO=1 (opt-in): the window graph's kernel nodes keep their capturing stream's
 // priority (side_ high, sh_cs_ low).  Unset / 0: every node at the launch stream's priority, as before.
 [[maybe_unused]] inline bool graph_prio_on() {   // (every HIP caller is guarded off)
-#if defined(STRATA_USE_HIP) || defined(STRATA_HIP_GFX906) || defined(STRATA_GPU_METAL)
+#if defined(STRATA_USE_HIP) || defined(STRATA_HIP_GFX906)
     return false;
 #else
     static const bool on = [] { const char* v = std::getenv("STRATA_GRAPH_PRIO"); return v != nullptr && std::atoi(v) != 0; }();
@@ -245,7 +227,7 @@ inline bool g_qfuse_hc() {
 }
 // STRATA_GRAPH_PRIO: the capture and graph queries by CUDA version (13 renamed the edge-data forms: the same split as
 // verify_kernels.cu's and the PDL edge check above).  Nothing is returned for the edge data.
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && !defined(STRATA_GPU_METAL)
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906)
 inline cudaError_t prio_capture_deps(cudaStream_t s, cudaStreamCaptureStatus* st, const cudaGraphNode_t** deps, size_t* n) {
 #if CUDART_VERSION >= 13000
     return cudaStreamGetCaptureInfo(s, st, nullptr, nullptr, deps, nullptr, n);
@@ -271,7 +253,7 @@ inline cudaError_t prio_node_deps(cudaGraphNode_t node, cudaGraphNode_t* deps, s
 inline int g_side_mixer() {
     static const int env = [] { const char* v = std::getenv("STRATA_SIDE_MIXER"); return v ? std::max(0, std::min(2, std::atoi(v))) : -1; }();
     if (env >= 0) return env;
-#if defined(STRATA_USE_HIP) || defined(STRATA_GPU_METAL)
+#if defined(STRATA_USE_HIP)
     return 0;
 #else
     static int per_dev[64];   // 0 unknown, else mode + 1
@@ -704,10 +686,6 @@ Verifier::~Verifier() {
         for (auto& entry : group_scratch_)
             (void) strata::core::release_device(entry.second.data);
     }
-#if defined(STRATA_GPU_METAL)
-    strata::metal_engine::window_destroy(metal_);
-    metal_ = nullptr;
-#endif
     const Verifier* self = this;
     g_diag_verifier.compare_exchange_strong(self, nullptr);
     for (auto& slot : g_live) {
@@ -747,10 +725,8 @@ Verifier::~Verifier() {
     if (d_spec_)
         strata::core::release_device(d_spec_);
     if (tap_file_) std::fclose(tap_file_);
-#if !defined(STRATA_GPU_METAL)   // (on Metal tap_dev_ is the window's unified-memory buffer, not an allocation of this object)
     if (tap_dev_)
         strata::core::release_device(tap_dev_);
-#endif
     if (tap_scratch_)
         strata::core::release_device(tap_scratch_);
     if (h_tap_)
@@ -885,7 +861,7 @@ void Verifier::tap_write(int T, const int32_t* tokens, int64_t pos0) {
 
 bool Verifier::set_logit_bias(const std::vector<float>& bias, std::string& err) {
     if (next_ && !next_->set_logit_bias(bias, err)) return false;
-    if (le_ >= 0 && le_ < g_->n_layers) return true;   // (the Metal window never sets le_: -1 = the last stage)
+    if (le_ >= 0 && le_ < g_->n_layers) return true;   // (-1 = the last stage)
     const OnDevice on_device(device_);
     if (!bias.empty() && bias.size() != (size_t) n_vocab_) {
         err = "logit_bias vocabulary size mismatch"; return false;
@@ -926,18 +902,6 @@ bool Verifier::init(const WeightTable& wt, const ModelGeometry& g, SessionState&
     max_t_ = max_t;
     sampling_.greedy = true;      // a fresh verifier samples greedily until set_sampling says otherwise
     sampling_.temperature = 0.0f;
-#if defined(STRATA_GPU_METAL)
-    if (metal_ == nullptr) metal_ = strata::metal_engine::window_create();
-    if (!strata::metal_engine::window_init(metal_, g, ss, max_t, ss.qsa_states[ss.qsa_primary()].max_cells, &n_vocab_, err)) return false;
-    if (!tap_req_.empty()) {   // DFlash2: the Metal window writes the taps itself (metal/src/engine/dflash2.inc); tap_dev() is its unified-memory buffer
-        const float* tp = nullptr;
-        if (!strata::metal_engine::window_taps(metal_, tap_req_, &tp, err)) return false;
-        tap_layers_ = tap_req_;
-        tap_dev_ = const_cast<float*>(tp);
-        tap_on_ = true;
-    }
-    return true;
-#endif
     // a window past kVerifyMaxT tokens runs as two token groups of at most kVerifyMaxT (record_window): the CPU experts
     // see one group at a time (and take a wider group as jobs of at most cpu::MAXT tokens)
     if (max_t < 2 || max_t > strata::kernels::kVerifyLongT) {
@@ -2528,7 +2492,7 @@ bool Verifier::record_window(int T, cudaStream_t cs, std::string& err) {
 #if defined(STRATA_HAVE_DFLASH2)
             strata::kernels::df2_tap_gr(Rt(tb), HC * N, bo_ + tb * N, N, inj2_ + tb * HC, HC, tap_dev_ + ((size_t) tb * nt + (size_t) tap_slot_[(size_t) l]) * N,
                                         nt * N, n, N, (int) HC, cs);
-#else   // builds without the DFlash2 kernels (Metal, SYCL): the research dump's per-row path
+#else   // builds without the DFlash2 kernels: the research dump's per-row path
             for (int t = tb; t < te; ++t) {
                 cudaMemcpyAsync(tap_scratch_, Rt(t), (size_t) HC * N * 4, cudaMemcpyDeviceToDevice, cs);
                 gr_write(tap_scratch_, bo_ + t * N, inj2_ + t * HC, gs, tap_scratch_, cs);
@@ -2805,7 +2769,7 @@ bool Verifier::capture(int T, std::string& err) {
         err = "verify: begin capture failed";
         return false;
     }
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && !defined(STRATA_GPU_METAL)
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906)
     prio_forks_.clear();
     prio_tails_.clear();
 #endif
@@ -2861,7 +2825,7 @@ bool Verifier::capture(int T, std::string& err) {
         std::fprintf(stderr, "\n%s\n", seq.c_str());
     }
 #endif
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_GPU_METAL)   // a CUDA debug listing (node types, kernel names)
+#if !defined(STRATA_USE_HIP)   // a CUDA debug listing (node types, kernel names)
     if (std::getenv("STRATA_VERIFY_NODES") != nullptr) {   // what the window graph holds
         size_t nn = 0;
         cudaGraphGetNodes(graph, nullptr, &nn);
@@ -2920,7 +2884,7 @@ bool Verifier::capture(int T, std::string& err) {
     }
 #endif
     unsigned long long iflags = 0;
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && !defined(STRATA_GPU_METAL)
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906)
     if (graph_prio_on()) {   // STRATA_GRAPH_PRIO: the nodes run at their own (captured or repaired) priorities
         apply_node_priorities(graph, T);
         iflags = cudaGraphInstantiateFlagUseNodePriority;
@@ -3255,22 +3219,6 @@ bool Verifier::run(int T, const int32_t* tokens, int64_t pos0, PoolMultiFn pool,
     if (measure && (!head_sampling_ || sampling_.greedy || sampling_.temperature <= 0.0f)) {
         err = "verify: proposal requires sampled head"; return false;
     }
-#if defined(STRATA_GPU_METAL)
-    if (measure) { err = "verify: proposal unsupported on Metal"; return false; }
-    (void) pool;
-    (void) user;
-    {   // a sampled, penalised or biased request: the head rows are sampled on the GPU (metal/kernels/sample.metal), Philox(seed, pos0 + t) as the CUDA head
-        const bool sampled_m = !sampling_.greedy && sampling_.temperature > 0.0f;
-        if (head_sampling_ && (sampled_m || hist_d_ != nullptr || sampling_.logit_bias != nullptr)) {
-            strata::kernels::SamplerParams sp_m = sampling_;
-            sp_m.counter = (uint64_t) pos0;
-            strata::metal_engine::window_set_sampling(metal_, &sp_m, hist_d_, hist_len_);
-        } else {
-            strata::metal_engine::window_set_sampling(metal_, nullptr, nullptr, 0);
-        }
-    }
-    return strata::metal_engine::window_run(metal_, T, tokens, pos0, head_sampling_, out, err);
-#endif
     using namespace strata::kernels;
     const OnDevice on_device(device_);
     last_batch_ = false;
@@ -3795,19 +3743,6 @@ bool Verifier::window_logprobs(const int32_t* targets, int T, int64_t pos0, int3
                                std::string& err) {
     if (next_ != nullptr) return next_->window_logprobs(targets, T, pos0, extra_id, out, err);
     const OnDevice on_device(device_);
-#if defined(STRATA_GPU_METAL)
-    // the head logits are the Metal window's (window_copy_logits, row by row)
-    if (n_vocab_ <= 0 || T <= 0 || targets == nullptr || out == nullptr) {
-        err = "window_logprobs: no head logits for this window";
-        return false;
-    }
-    std::vector<float> h((size_t) T * (size_t) n_vocab_);
-    for (int t = 0; t < T; ++t)
-        if (!strata::metal_engine::window_copy_logits(metal_, t, h.data() + (size_t) t * (size_t) n_vocab_)) {
-            err = "window_logprobs: the head logits copy failed";
-            return false;
-        }
-#else
     if (head_logits_ == nullptr || n_vocab_ <= 0 || T <= 0 || targets == nullptr || out == nullptr) {
         err = "window_logprobs: no head logits for this window";
         return false;
@@ -3819,7 +3754,6 @@ bool Verifier::window_logprobs(const int32_t* targets, int T, int64_t pos0, int3
         return false;
     }
     count_gpu_traffic(device_, 0, h.size() * sizeof(float));
-#endif
     // STRATA_FORCE_FAULT=<m>:<bias> (test only, off by default, no output): adds <bias> to the logit of every token id divisible by <m>
     // before the rows are scored, so the token-forcing checker (tools/force_check.py) can be shown to reject a faulty build
     {
@@ -3880,9 +3814,6 @@ namespace { bool g_commit_async = false; }
 void Verifier::set_commit_async(bool on) { g_commit_async = on && std::getenv("STRATA_COMMIT_SYNC") == nullptr; }
 
 bool Verifier::commit(int n_keep, std::string& err) {
-#if defined(STRATA_GPU_METAL)
-    return strata::metal_engine::window_commit(metal_, n_keep, err);
-#endif
     const OnDevice on_device(device_);
     if (n_keep < 1 || n_keep > last_t_) { err = "verify: commit count out of range"; return false; }
     const Clock::time_point t0 = Clock::now();
@@ -3933,10 +3864,6 @@ bool Verifier::commit(int n_keep, std::string& err) {
 }
 
 bool Verifier::wait_commit(std::string& err) {
-#if defined(STRATA_GPU_METAL)
-    (void) err;
-    return true;
-#endif
     if (commit_pending_) {
         const OnDevice on_device(device_);
         commit_pending_ = false;
@@ -3963,19 +3890,6 @@ bool Verifier::init_slots(const std::vector<SessionState*>& slots, std::string& 
             return false;
         }
     }
-#if defined(STRATA_GPU_METAL)
-    // the Metal window keeps each slot's running state itself (metal/src/engine/window.cpp): none of the CUDA batch buffers
-    slots_ = slots;
-    slot_sp_.assign(slots.size(), sampling_);
-    slot_bias_dev_.assign(slots.size(), nullptr);
-    slot_tail_.assign(slots.size(), {});
-    if (metal_ == nullptr || !strata::metal_engine::window_init_slots(metal_, slots, err)) {
-        if (err.empty()) err = "verify: the Metal window is not up";
-        return false;
-    }
-    std::fprintf(stderr, "strata verify: batch windows of up to %d sequences, run slot by slot in the Metal window\n", (int) slots.size());
-    return true;
-#endif
     const strata::kernels::QsaShapes s = shapes_of(*g_);
     const int64_t S = (int64_t) slots.size(), CB = 2 + max_t_;
     const int64_t TS = (s.idx_block - 1) * g_->idx_key_dim, nQ = g_->n_qsa_layers();
@@ -4420,9 +4334,9 @@ bool Verifier::evict_window_graph(int keep_t, bool& evicted, std::string& err) {
 
 // STRATA_GRAPH_PRIO: the capture-time notes.  A fork note keeps cs's current tail (the node the branch's first kernel
 // will depend on); a tail note keeps a priority stream's current tail and the priority its nodes should run at
-// (1 = the device's highest, -1 = its lowest).  No-ops with the switch off, outside a capture, and on HIP / Metal.
+// (1 = the device's highest, -1 = its lowest).  No-ops with the switch off, outside a capture, and on HIP.
 void Verifier::note_prio_fork(cudaStream_t from) {
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && !defined(STRATA_GPU_METAL)
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906)
     if (!graph_prio_on()) return;
     cudaStreamCaptureStatus st = cudaStreamCaptureStatusNone;
     const cudaGraphNode_t* deps = nullptr;
@@ -4438,7 +4352,7 @@ void Verifier::note_prio_fork(cudaStream_t from) {
 }
 
 void Verifier::note_prio_tail(cudaStream_t on, int prio) {
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && !defined(STRATA_GPU_METAL)
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906)
     if (!graph_prio_on()) return;
     cudaStreamCaptureStatus st = cudaStreamCaptureStatusNone;
     const cudaGraphNode_t* deps = nullptr;
@@ -4457,7 +4371,7 @@ void Verifier::note_prio_tail(cudaStream_t on, int prio) {
 // capture copied none from the streams (design 1's R1: some drivers read back 0 everywhere), each priority stream's
 // nodes are found by walking its noted tails back to the noted forks and the attribute is set per node.
 void Verifier::apply_node_priorities(cudaGraph_t graph, int T) {
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && !defined(STRATA_GPU_METAL)
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906)
     int lo = 0, hi = 0;
     if (cudaDeviceGetStreamPriorityRange(&lo, &hi) != cudaSuccess) { (void) cudaGetLastError(); return; }
     auto histogram = [&](std::map<int, int>& h) {
@@ -4563,11 +4477,6 @@ bool Verifier::instantiate_evicting(cudaGraphExec_t& ex, cudaGraph_t graph, cons
 
 bool Verifier::prepare(int T, bool& no_vram, std::string& err) {
     no_vram = false;
-#if defined(STRATA_GPU_METAL)
-    (void) T;
-    (void) err;
-    return true;
-#else
     if (T < 1 || T > max_t_) { err = "verify: window size out of range"; return false; }
     if (next_ != nullptr || lb_ > 0) return true;
     const OnDevice on_device(device_);
@@ -4577,7 +4486,6 @@ bool Verifier::prepare(int T, bool& no_vram, std::string& err) {
     if (capture(T, err)) return true;
     no_vram = capture_oom_;
     return false;
-#endif
 }
 
 bool Verifier::stage_batch(const int* rows, int S, int hbase, const int32_t* tokens, const int64_t* pos,
@@ -4670,30 +4578,6 @@ bool Verifier::run_slots(int S, const int32_t* tokens, const int64_t* pos, PoolM
 
 bool Verifier::run_slot_rows(const int* rows, int S, const int32_t* tokens, const int64_t* pos, PoolMultiFn pool,
                              void* user, int32_t* out, std::string& err) {
-#if defined(STRATA_GPU_METAL)
-    // each row runs in its slot's state and commits there (a one-token window); nothing is left for commit_slots
-    if (S < 1 || S > (int) strata::kernels::kVerifyMaxT) { err = "verify: batch window size out of range"; return false; }
-    (void) pool; (void) user;
-    if (!strata::metal_engine::window_run_slots(metal_, rows, S, tokens, pos, out, err)) return false;
-    last_t_ = S;
-    for (int t = 0; t < S; ++t) { last_rows_[t] = rows[t]; last_tokens_[t] = tokens[t]; last_pos_b_[t] = pos[t]; }
-    last_batch_ = true;
-    // a slot with its own sampling, penalties or logit bias (set_slot_sampling / set_slot_history / set_slot_logit_bias): its row is drawn again from the
-    // window's logits with Philox(seed, position), as a solo window draws it; a plain greedy slot keeps the window's argmax token
-    {
-        std::vector<int32_t> hrows;
-        for (int t = 0; t < S; ++t) {
-            strata::kernels::SamplerParams sp;
-            const int32_t* hist = nullptr;
-            int hlen = 0;
-            const int r = slot_row_draw(S, t, sp, hist, hlen, hrows, err);
-            if (r < 0) return false;
-            if (r == 0) continue;
-            if (!strata::metal_engine::window_sample_slot_row(metal_, t, sp, hist, hlen, &out[t], err)) return false;
-        }
-    }
-    return true;
-#endif
     using namespace strata::kernels;
     const OnDevice on_device(device_);
     const ModelGeometry& g = *g_;
@@ -4808,12 +4692,6 @@ bool Verifier::commit_slots(std::string& err) {
 }
 
 bool Verifier::commit_slot_prefixes(const int* keep, std::string& err, bool chain) {
-#if defined(STRATA_GPU_METAL)
-    (void) keep;   // (greedy one-row windows, committed by window_run_slots)
-    (void) chain;
-    if (!last_batch_ || last_t_ < 1) { err = "verify: commit_slots without a batch window"; return false; }
-    return true;
-#endif
     const OnDevice on_device(device_);
     if (!last_batch_ || last_t_ < 1) { err = "verify: commit_slots without a batch window"; return false; }
     const int S = last_t_;
@@ -4904,23 +4782,14 @@ int Verifier::slot_row_draw(int S, int t, strata::kernels::SamplerParams& sp, co
         }
         slot_hist_cap_ = need;
     }
-#if defined(STRATA_GPU_METAL)
-    if (cudaMemcpy(slot_hist_d_ + (size_t) t * (size_t) hlen, hrows.data() + (size_t) t * (size_t) hlen, (size_t) hlen * sizeof(int32_t), cudaMemcpyHostToDevice) != cudaSuccess)
-#else
     if (cudaMemcpyAsync(slot_hist_d_ + (size_t) t * (size_t) hlen, hrows.data() + (size_t) t * (size_t) hlen, (size_t) hlen * sizeof(int32_t),
                         cudaMemcpyHostToDevice, cs_) != cudaSuccess)
-#endif
     { err = "verify batch: the penalty-history copy failed"; return -1; }
     hist = slot_hist_d_ + (size_t) t * (size_t) hlen;
     return 1;
 }
 
 bool Verifier::sample_rows(int S, std::string& err) {
-#if defined(STRATA_GPU_METAL)
-    (void) S;
-    err = "verify batch: sample_rows is the CUDA / HIP path";
-    return false;
-#else
     tap_write(S, last_tokens_, 0);
     bool any = false;
     if (batch_histories_.empty()) {
@@ -4998,7 +4867,6 @@ bool Verifier::sample_rows(int S, std::string& err) {
         return false;
     }
     return true;
-#endif
 }
 
 int32_t* Verifier::stage_drafts(const int32_t* drafts, int n) {
@@ -5350,9 +5218,6 @@ void Verifier::note_nonfinite(int T, const int64_t* pos_b) {
 }
 
 bool Verifier::copy_logits(int t, float* host) const {
-#if defined(STRATA_GPU_METAL)
-    return strata::metal_engine::window_copy_logits(metal_, t, host);
-#endif
     if (next_ != nullptr) return next_->copy_logits(t, host);   // a layer split: the head is on the last stage
     if (head_logits_ == nullptr || host == nullptr || t < 0 || n_vocab_ <= 0) return false;
     count_gpu_traffic(device_, 0, (uint64_t) n_vocab_ * sizeof(float));
@@ -5766,12 +5631,8 @@ bool Verifier::finish_commit_launch(bool async, std::string& err) {
 namespace {
 /// Keeps the existing per-layer override available to both verifier commit paths.
 bool is_layer_commit_enabled() {
-#if defined(STRATA_GPU_METAL)
-    return false;
-#else
     static const bool on = !strata::platform::is_env_off("STRATA_COMMIT_BATCH");
     return on;
-#endif
 }
 }  // namespace
 

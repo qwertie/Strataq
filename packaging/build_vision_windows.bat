@@ -1,5 +1,5 @@
 @echo off
-rem The Windows CUDA picture reader for an engine package: strata-vision.exe built for the SAME architectures as the package's strata.exe.
+rem The Windows CUDA picture reader for an engine package: strata-vision.exe built for the SAME architectures as the package's strata-q38.exe.
 rem
 rem   packaging\build_vision_windows.bat cuda12 <stage folder>     CUDA 12.9: 60;61;70;75;80;86;89 (+ 89 PTX)  the Pascal / Volta package
 rem   packaging\build_vision_windows.bat cuda13 <stage folder>     CUDA 13.0: 75;86;89;120 (+ 120 PTX)
@@ -65,5 +65,5 @@ echo built: %STAGE%\strata-vision.exe  (%VARIANT%, archs %ARCHS%)
 exit /b 0
 
 :usage
-echo usage: packaging\build_vision_windows.bat cuda12^|cuda13 ^<stage folder with strata.exe^>
+echo usage: packaging\build_vision_windows.bat cuda12^|cuda13 ^<stage folder with strata-q38.exe^>
 exit /b 2

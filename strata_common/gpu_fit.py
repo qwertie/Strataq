@@ -39,11 +39,11 @@ def _round1(x: float) -> float:
 
 
 # ---- one engine, one vendor -----------------------------------------------------------------------------------------------
-# Every Strata engine package drives the cards of ONE vendor (CUDA: NVIDIA, HIP: AMD, SYCL: Intel, Metal: Apple). A model is never split
+# Every Strata engine package drives the cards of ONE vendor (CUDA: NVIDIA, HIP: AMD). A model is never split
 # across vendors, and two models at once, one per vendor, is not supported yet. So the cards offered for running and splitting are the
 # ones the engine can drive; a better card of the other vendor is mentioned in one plain line (recommend, never force).
-BACKEND_VENDOR = {"cuda": "nvidia", "hip": "amd", "sycl": "intel", "metal": "apple"}
-VENDOR_NAME = {"nvidia": "NVIDIA", "amd": "AMD", "intel": "Intel", "apple": "Apple"}
+BACKEND_VENDOR = {"cuda": "nvidia", "hip": "amd"}
+VENDOR_NAME = {"nvidia": "NVIDIA", "amd": "AMD"}
 SECOND_MODEL_SENTENCE = ("Running two models at the same time, one on each make of graphics card, is not supported yet. "
                          "Strata runs one model at a time on the cards of one make.")
 
@@ -150,21 +150,9 @@ def other_vendor_note(cards: list[dict], vendor: str | None) -> str | None:
     if not vendor:
         return None
     mine, others = for_vendor(usable_cards(cards)[0], vendor)
-    others = [c for c in others if _vendor(c) and not _shares_memory(c)]
+    others = [c for c in others if _vendor(c) in VENDOR_NAME and not _shares_memory(c)]
     if not others:
         return None
-    intel = [c for c in others if _vendor(c) == "intel"]
-    if intel:
-        # Intel Arc cards beside another make: always said (the engine for one make runs at a time; the person chooses which), never refused
-        total = sum(float(c.get("vram_gb") or 0) for c in intel)
-        cards = (f"{len(intel)} Intel Arc cards ({total:.0f} GB together)" if len(intel) > 1
-                 else f"an {_short_name(intel[0], 'intel')} ({total:.0f} GB)")
-        return (f"This computer also has {cards}. Strata uses the {VENDOR_NAME.get(vendor, vendor)} card; to use the Intel card"
-                f"{'s' if len(intel) > 1 else ''} instead, add --backend intel (it is remembered; --backend auto goes back).")
-    if vendor == "intel":
-        names = ", ".join(sorted({_short_name(c, _vendor(c)) for c in others}))
-        return (f"This computer also has {names}. Strata uses the Intel cards; --backend auto goes back to the PC's own choice "
-                "(NVIDIA first).")
     best = max(others, key=lambda c: float(c.get("vram_gb") or 0))
     mine_best = max((float(c.get("vram_gb") or 0) for c in mine), default=0.0)
     if float(best.get("vram_gb") or 0) <= mine_best:
@@ -208,15 +196,15 @@ def verdict(f: dict) -> str:
 
 
 def _shares_memory(c: dict) -> bool:
-    """An integrated chip or a unified-memory chip (Apple, Strix Halo): its memory is the system RAM."""
-    return bool(c.get("integrated") or c.get("uma") or c.get("unified_memory") or c.get("unified_gb") or str(c.get("vendor")) == "apple")
+    """An integrated chip or a unified-memory chip (Strix Halo): its memory is the system RAM."""
+    return bool(c.get("integrated") or c.get("uma") or c.get("unified_memory") or c.get("unified_gb"))
 
 
 def usable_cards(cards: list[dict]) -> tuple[list[dict], list[dict]]:
     """(cards that count, cards ignored with a plain reason in 'why_ignored'). Largest memory first, then the card number.
 
     A chip that shares the system memory is ignored when the computer has a card with memory of its own (it adds nothing to it); when it is
-    the only device (a Mac, a Strix Halo PC) it is the one that counts. A card under MIN_CARD_GB cannot hold the dense weights."""
+    the only device (a Strix Halo PC) it is the one that counts. A card under MIN_CARD_GB cannot hold the dense weights."""
     flagged = [c for c in (cards or []) if c.get("usable") is not False]
     has_real = any(not _shares_memory(c) and float(c.get("vram_gb") or 0) >= MIN_CARD_GB for c in flagged)
     keep, ignored = [], []

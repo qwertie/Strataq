@@ -7,7 +7,7 @@ import { readFile } from 'node:fs/promises';
 
 const read = path => readFile(new URL(path, import.meta.url), 'utf8').then(s => s.replace(/\r\n/g, '\n'));
 
-test('the Linux shell hooks the drag signals of the page and keeps Windows and macOS on their own paths', async () => {
+test('the Linux shell hooks the drag signals of the page and keeps Windows on its own path', async () => {
   const rust = await read('../../desktop/src-tauri/src/main.rs');
   assert.match(rust, /#\[cfg\(target_os = "linux"\)\]\s+hook_linux_drops\(&window, port, shell_token\);/);
   assert.match(rust, /view\.connect_drag_data_received\(/); assert.match(rust, /file_uri_to_path\(u\.as_str\(\)\)/);

@@ -21,12 +21,10 @@ class ComponentError(RuntimeError):
 
 #: The OS × backend families the handoff commits to. A component may only be activated where its
 #: family is listed here, so an unqualified combination is refused rather than attempted: the packet
-#: is explicit that Windows SYCL and Intel Macs are not supported rather than merely untested.
+#: is explicit that an unlisted combination is not supported rather than merely untested.
 BACKEND_MATRIX: dict[str, tuple[str, ...]] = {
-    "metal": ("macos-arm64",),
     "cuda": ("windows-x86_64", "linux-x86_64", "linux-aarch64"),   # linux-aarch64: the NVIDIA DGX Spark (GB10, sm_121) only
     "hip": ("windows-x86_64", "linux-x86_64"),
-    "sycl": ("linux-x86_64",),
     "cpu": ("macos-arm64", "macos-x86_64", "windows-x86_64", "linux-x86_64"),
 }
 

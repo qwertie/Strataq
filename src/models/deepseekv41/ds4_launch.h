@@ -1,8 +1,8 @@
-// strata_ds4_launch(kernel, grid, block, shared, stream, args...): the engine's one spelling of a kernel launch.  On CUDA it is
-// kernel<<<grid, block, shared, stream>>>(args...); on Metal metal/include/metal_compat/cuda_launch.h maps the same call onto
-// a dispatch.  (Every file that launches kernels includes this header.)
+// strata_ds4_launch(kernel, grid, block, shared, stream, args...): the engine's one spelling of a kernel launch,
+// kernel<<<grid, block, shared, stream>>>(args...) with an optional check (DS4_LAUNCH_CHECK).  (Every file that launches
+// kernels includes this header.)
 #pragma once
-#if (defined(__CUDACC__) || defined(__HIPCC__) || defined(__HIP__)) && !defined(STRATA_METAL)
+#if (defined(__CUDACC__) || defined(__HIPCC__) || defined(__HIP__))
 #include <cuda_runtime.h>
 #include <cstdio>
 #include <cstdlib>
@@ -20,18 +20,13 @@ inline void strata_ds4_launch_at(const char* file, int line, void (*kernel)(KA..
 }
 #define strata_ds4_launch(...) strata_ds4_launch_at(__FILE__, __LINE__, __VA_ARGS__)
 
-// (the Metal debug dumps in ds4_model.cu name these; on CUDA there is no deferred queue and a device pointer is not a host view)
-inline void ds4_metal_flush() {}
+// Gets the host address of device memory: `p` itself, so only the ds4_dbg dumps in ds4_model.cu (compiled out) call it.
 namespace strata::gpu {
 inline void* host_view(const void* p) { return const_cast<void*>(p); }
 }
 #endif
 
-// ds4_dbg("NAME"): the Mac engine's opt-in diagnostics (DS4_DBG_*, DS4_CPU_LOG, DS4_TLOG, ...).  On Metal it is an environment
-// lookup; everywhere else it is the constant false, so the CUDA and HIP engines carry none of those checks on their hot paths.
-#if defined(STRATA_METAL)
-#include <cstdlib>
-inline bool ds4_dbg(const char* name) { return std::getenv(name) != nullptr; }
-#else
+// ds4_dbg("NAME"): diagnostics written for a unified-memory GPU (DS4_DBG_*, DS4_CPU_LOG, DS4_TLOG, ...): the constant false, so
+// the CUDA and HIP engines compile them out.  Several read device memory from the host (strata::gpu::host_view), which a
+// discrete card does not allow, so they must not be switched on as they are.  TODO: delete them, or port them to copies.
 constexpr bool ds4_dbg(const char*) { return false; }
-#endif

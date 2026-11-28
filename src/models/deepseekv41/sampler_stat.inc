@@ -1,6 +1,5 @@
-// sampler_stat.inc - a statistics harness for the sampler (sample_tokens / sample_draft / sample_verify): the same text is compiled
-// into the Metal engine (--sampler-test) and into a CUDA standalone, so the host sampler (Metal) and the CUDA kernel can be compared
-// sample by sample (same Philox counters -> identical picks when the arithmetic agrees) and against the chain's own distribution.
+// sampler_stat.inc - a statistics harness for the sampler (sample_tokens / sample_draft / sample_verify): it compares the CUDA
+// kernel's picks with the chain's own distribution.
 //   sampler_stat ROWS.bin N_VOCAB N_SAMPLES OUTPREFIX     ROWS.bin: 4 float32 rows of N_VOCAB: peaked, flat, penalty case, draft
 // Writes OUTPREFIX_A.bin (peaked, top_k 20 top_p 0.95 T 0.8), _B.bin (flat, top_k 64, T 1), _C.bin (penalties on a 64-token history,
 // top_k 20 top_p 0.9 T 0.7), _D.bin (speculative: the draft tokens, then the verify's outputs, int32 each).

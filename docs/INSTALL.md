@@ -21,17 +21,17 @@ install does not need a source checkout or a startup `.bat` file.
 | --- | --- |
 | Windows 10/11 or Linux x86-64 with an NVIDIA RTX GPU | Use the app or the Terminal. The engine for your card is downloaded for you. [Older NVIDIA cards](OLDER_GPUS.md) use the CUDA 12 engine. DeepSeek V4.1-Flash runs on RTX 30, 40 and 50 cards in the app and the Terminal. |
 | Windows or Linux x86-64 with a supported AMD Radeon | [AMD guide](AMD_HIP.md), including the card-to-package table. DeepSeek V4.1-Flash runs on the Radeon AI PRO R9700 under Linux, in the app and the Terminal. |
-| Linux x86-64 with Intel Arc | [Intel Arc guide](INTEL_ARC.md); install the driver/compute runtime and check model preparation requirements |
-| Apple Silicon Mac, macOS 15 or newer | [Mac guide](MAC.md). Intel Macs are not supported by the Mac package. |
 | AMD Ryzen AI Max / Strix Halo | [Strix Halo guide](STRIX_HALO.md) |
 | NVIDIA DGX Spark (Linux ARM64) | [DGX Spark guide](DGX_SPARK_LINUX.md). Use the Terminal; there is no desktop app for ARM64 Linux. |
+
+Strataq has no engine for Macs or Intel Arc cards.
 
 Memory and disk needs depend on the **model, quantization, context and enabled features**. Check
 [which model fits](MODELS.md#pick-by-memory); download size is not the same as RAM use. Unified memory counts once.
 Use an SSD and leave room for helper files and model preparation. The Terminal's `--plan` prints what is missing.
 
 Install a graphics driver that supports the package you choose. CUDA 13 packages require NVIDIA driver 580 or newer;
-older NVIDIA cards use CUDA 12. AMD and Intel requirements are in their guides. Packaged GPU runtimes do not replace
+older NVIDIA cards use CUDA 12. AMD requirements are in the AMD guide. Packaged GPU runtimes do not replace
 hardware drivers. Models and updates need an internet connection to download.
 
 ## The app
@@ -41,18 +41,15 @@ hardware drivers. Models and updates need an internet connection to download.
    - **Windows:** run `Strata-0.2.13-windows-x64-setup.exe`. It installs for your user and needs no administrator rights.
    - **Linux:** make `Strata-0.2.13-linux-x86_64.AppImage` executable, then open it. If FUSE is unavailable, run the
      downloaded file with `--appimage-extract-and-run`. [Linux help](TROUBLESHOOTING.md).
-   - **Mac:** open `Strata-0.2.13-macos-arm64.dmg`, drag Strata into Applications, then open it. [Mac help](MAC.md).
-3. On Windows and Linux the installer has no engine inside. On first start the app shows the engine for your
+3. The installer has no engine inside. On first start the app shows the engine for your
    graphics card with its size and one **Download** button, with progress and resume. If you already downloaded the
-   engine file, choose **I already have the file** and it installs without internet. The Mac file keeps its small
-   Metal engine inside.
+   engine file, choose **I already have the file** and it installs without internet.
 4. Choose a model and its storage folder, let it download, then chat. DeepSeek V4.1-Flash is in the model list on
    the supported cards ([model page](MODELS.md#deepseek-v41-flash)); it has three sizes, an 8K context and a **Speed**
    choice, Faster or Full quality.
 
 The `strata-engine-…` and `strata-control-…` archives on the release page are components, not installers. The
-installer is the same file for a first install and for an update. There is no Intel desktop installer yet; Intel Arc
-runs on Linux only, through the [Terminal](INTEL_ARC.md).
+installer is the same file for a first install and for an update.
 
 The first launch can take time to check and prepare large model files. Watch its progress and logs; there is no fixed
 startup time for every model or computer. Closing the desktop app stops its managed engine.
@@ -64,7 +61,7 @@ Current app recommendations can differ; choose the model explicitly when you wan
 
 Install once, then use `strata launch`. The Terminal includes Python and downloads the engine for your computer.
 
-**Linux / Mac**
+**Linux**
 
 ```sh
 curl -fsSL https://github.com/qwertie/Strataq/releases/latest/download/install.sh -o install.sh && sh install.sh
@@ -76,7 +73,7 @@ curl -fsSL https://github.com/qwertie/Strataq/releases/latest/download/install.s
 irm https://github.com/qwertie/Strataq/releases/latest/download/install.ps1 | iex
 ```
 
-On Windows, open a **new terminal** afterwards. On Linux and Mac, if `strata` is not found, use the full path printed
+On Windows, open a **new terminal** afterwards. On Linux, if `strata` is not found, use the full path printed
 by the installer (normally `~/.local/bin/strata`) or add that folder to your shell's PATH.
 
 ```sh
@@ -136,7 +133,7 @@ Source checkouts have a [separate update workflow](SOURCE_INSTALL.md#updating).
 | --- | --- |
 | Desktop chats and host state | `~/.strata` (or `STRATA_HOME`) |
 | Engine components, Windows | `%LOCALAPPDATA%\Strata\components` |
-| Engine components, Linux / Mac | `$XDG_DATA_HOME/strata/components`, normally `~/.local/share/strata/components` |
+| Engine components, Linux | `$XDG_DATA_HOME/strata/components`, normally `~/.local/share/strata/components` |
 | Terminal files | The `terminal` folder beside `components`; the installer prints the exact path |
 | Models | The folder chosen in the app or launch screens; an existing model library is reused |
 

@@ -24,7 +24,7 @@ Placeholders below are not test results: replace them with what you observed, or
 <!-- command and failure, or "none observed" -->
 
 **Not run:**
-<!-- check, why, and what stays unverified (for example CUDA, HIP, SYCL or Metal builds you could not do) -->
+<!-- check, why, and what stays unverified (for example CUDA or HIP builds you could not do) -->
 
 ## Limits
 <!-- Known limitations or remaining work. -->

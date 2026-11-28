@@ -9,8 +9,9 @@ conversations at the same time instead of waiting for each other.
 
 It is opt-in and changes nothing when the options are absent (#465; the engine part is PR #559).
 
-This page is about the **original engine's** batch slots, where each conversation holds a session allocated for the
-whole context ([ARCHITECTURE.md](ARCHITECTURE.md#two-command-loops-in-the-tree)). The paged engines (`strata-q38`,
+This page was written for the **original Qwen3.8 engine**, which Strataq has removed. Its batch slots, where each
+conversation holds a session allocated for the whole context, remain only in Qwen3.6's engine
+([ARCHITECTURE.md](ARCHITECTURE.md#the-command-loops)). The paged engines (`strata-q38`,
 `strata-ds41`) share one page pool instead and decide each step how many conversations decode in it and how the rows
 left over go to the drafter: [DETAILS.md](DETAILS.md#rows-per-step-lookahead-and-conversations-at-once-strata-q38).
 There, `"parallel"` sets how many requests the server admits, not how many sessions exist.
@@ -261,7 +262,7 @@ so the slots never wait for the read and the read is one run with no drain insid
 
 One log line per read (`strata batch: read N tokens on a thread of its own in X ms (concurrent, to Q of T); the slots
 decoded R rows meanwhile (S rows/s; stage k: W windows, H ms host each)`). Built for CUDA and HIP (HIP keeps the default
-stream priority, and is not run on a GPU here); SYCL does not have it.
+stream priority, and is not run on a GPU here); Strataq has no SYCL build.
 
 Measured on 2x RTX 5090 (Swift 1.5 IQ3_S, split 25, `--batch 6 --batch-groups 2`, resident experts, k8v4, 262K,
 `--kv-resident 32768`, the engine-default decode share): main (`a0116b27`) against this mode, a fresh engine per arm in
@@ -389,7 +390,7 @@ joiners' longest stop 12.2 s on both) and gave the same SHA-256 for six greedy a
 --adapt-swaps 0 --pcie-frac 0`. For reference, one RTX 5090 (the same model and flags without the split, 6 slots) with
 one cold 64K prompt joining four streams: `STRATA_BATCH_DECODE_SHARE=2.0` 2.4 s longest stop and 37.2 s TTFT, `=0` 14.0
 s and 13.8 s. Pieces of one chunk (`PIECE=8192`) cost the long prompt the most. Not measured: other GPU pairs, three or
-more stages, HIP and SYCL (built for CUDA only), sampled decoding, prompts with pictures.
+more stages, HIP (built for CUDA only), sampled decoding, prompts with pictures.
 
 ## The VRAM expert tier keeps adapting in batch windows
 
@@ -538,8 +539,7 @@ build without the feature differ from each other in the same way, so this is not
 do not all fit in VRAM the drafters' memory changes which experts are cached, and then the text of a feature run differs from a
 run without it; inside one run every slot still equals its own solo decode.
 
-Not run: AMD (HIP), the draft layer on the first stage, helper expert caches, more than two stages, SYCL (the SYCL
-tree has its own copy of the batch code and does not have this).
+Not run: AMD (HIP), the draft layer on the first stage, helper expert caches, more than two stages.
 
 ## Windows of 16 rows, and the four-card AMD profile
 
@@ -552,7 +552,6 @@ A verify or batch window held at most 8 rows. On a layer split every group of th
 |---|---|---|
 | HIP (AMD) | 16 | the code objects load when a kernel is first used: the bigger binary (44.9 to 53.7 MB) costs +7 MiB per card after the first request and about 30 to 45 ms once per server start |
 | CUDA | 8 | CUDA loads every kernel when the engine starts: 16 adds 14 MB of kernels and +16 MiB of VRAM (RTX PRO 5000) and nothing is gained below 9 rows. On a 16 GB card those MiB shrink the auto-sized expert cache (2 x A4000: 5292 slots instead of 5301), and a cached expert rounds differently from a CPU one, so the texts differ from the 8-row build by that alone (main run with a 17 MiB larger `--vram-reserve-mib` gives the 16-row build's texts, 10 of 10). `-DSTRATA_WINDOW_MAX_T=16` builds it |
-| SYCL, Metal | 8 | not touched (they build the shared sources with the limit left at 8) |
 
 A window of up to 8 rows runs exactly the kernels of 0.2.7; the code for 9 to 16 rows is only reached by a wider window. Checked
 instruction by instruction: HIP gfx1201, window 8 against the previous main, 3096 of 3097 kernels identical (the other is a

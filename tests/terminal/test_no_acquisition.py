@@ -202,13 +202,13 @@ class StartNeverAcquiresTests(unittest.TestCase):
         self.gguf.write_bytes(b"GGUF")
         eng = self.root / "engine"
         eng.mkdir()
-        (eng / setup.EXE).write_bytes(b"engine")
+        (eng / setup.Q38EXE).write_bytes(b"engine")
         # an engine older than this Strata expects: a start used to download the new one
         (eng / "BUILD.json").write_text(json.dumps({"version": "0.1.1", "source": "prebuilt", "backend": "cuda",
                                                     "archs": [86]}))
         self.cfg = self.root / "strata-q2_0.json"
         self.cfg.write_text(json.dumps({
-            "exe": str(eng / setup.EXE), "args": ["--native", str(self.gguf), "--max-context", "8192"],
+            "exe": str(eng / setup.Q38EXE), "args": ["--native", str(self.gguf), "--max-context", "8192"],
             "tokenizer": str(self.data / "tok.json"), "model_name": "Q2_0", "port": 8080}))
         self.settings_home = Path(self.tmp.name) / "appdata"
         self.settings_home.mkdir()

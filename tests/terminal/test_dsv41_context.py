@@ -122,7 +122,6 @@ class SetupAndApp(unittest.TestCase):
         and shows an installed one at the context it was prepared with when someone chose it (a saved 8K without the app's marker is the old default)."""
         import setup
         self.assertEqual(setup.DSV41_CONTEXT, 131072)
-        self.assertEqual(setup.DSV41_MAC_CONTEXT, 8192)               # nothing was run on a Mac at 128K: a Mac keeps its 8K
         with Home(), mock.patch.object(Catalog, "hardware", lambda self, fresh=False: dict(HW_4X32)):
             self.assertEqual(catalog(HW_4X32).max_context("deepseek41", "UD-Q8_K_XL"), 131072)
         screen = (ROOT / "apps" / "host" / "src" / "components" / "NativeModels.tsx").read_text(encoding="utf-8")

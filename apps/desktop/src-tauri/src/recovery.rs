@@ -1,8 +1,8 @@
 //! A page whose renderer dies is brought back, not left on the browser's error page (#5079).
 //!
-//! WebView2 (Windows) reports a dead renderer through its ProcessFailed event, and WKWebView (macOS) through
-//! `webViewWebContentProcessDidTerminate`; until now the shell listened to neither, so the window kept the browser's own "This page has a
-//! problem" page, nothing reached the log, and the person's Reload brought back the same chat that had just crashed. Linux does not need it:
+//! WebView2 (Windows) reports a dead renderer through its ProcessFailed event; until now the shell did not listen to it, so
+//! the window kept the browser's own "This page has a problem" page, nothing reached the log, and the person's Reload brought
+//! back the same chat that had just crashed. Linux does not need it:
 //! there the window is its own process and the shell moves to browser mode when it dies (supervisor.rs).
 //!
 //! This file is only decisions, so it builds and tests everywhere; the platform hooks are in main.rs.

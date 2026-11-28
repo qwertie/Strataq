@@ -94,7 +94,7 @@ class Packager(unittest.TestCase):
         self.root = Path(self.dir.name)
         self.src = self.root / "src"
         self.src.mkdir()
-        (self.src / "strata.exe").write_bytes(make_pe(["cublas64_13.dll", "KERNEL32.dll"]))
+        (self.src / "strata-q38.exe").write_bytes(make_pe(["cublas64_13.dll", "KERNEL32.dll"]))
         self.toolkit = self.root / "toolkit"
         self.toolkit.mkdir()
         (self.toolkit / "cublas64_13.dll").write_bytes(make_pe(["cublasLt64_13.dll", "KERNEL32.dll"]))

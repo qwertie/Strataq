@@ -61,7 +61,6 @@ int main() {
         const long long used = (long long) free0 - (long long) free1;
         std::printf("conversation_copy_streams_test: the first copy stream + event of the card took %lld KiB of device memory\n",
                     used / 1024);
-        // the restore's guard (program/conv_cache.hpp kRestoreFirstUseMib = 64) is 4x this bound
         check(used <= (16ll << 20), "a card's first copy stream and event take under 16 MiB");
         bool pooled = false;
         std::thread t2([&] { pooled = copy_stream_ready(0); });

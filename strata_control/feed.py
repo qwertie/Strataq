@@ -127,7 +127,7 @@ class EnginePackage:
 @dataclass(frozen=True)
 class DrafterPackage:
     """A DFlash2 drafter file Strata hosts (feed member ``drafters``): one pinned file, not an archive. ``backends`` are the engine families it was measured on
-    (``metal``); ``url`` is relative to the feed (flat release assets) or an https address; ``size`` and ``sha256`` are the file's. The code that fetches it
+    (``cuda``, ``hip``); ``url`` is relative to the feed (flat release assets) or an https address; ``size`` and ``sha256`` are the file's. The code that fetches it
     pins the same size and SHA-256 (strata_control/drafting.py), so the feed can move the file but never swap its bytes."""
     name: str
     version: str

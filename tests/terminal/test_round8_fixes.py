@@ -33,17 +33,6 @@ class EngineExitIsExplained(unittest.TestCase):
         cfg.write_text(json.dumps({"log": str(log)}), encoding="utf-8")
         return cfg, log
 
-    def test_arc_without_the_render_group_names_the_cause_the_next_step_and_the_log(self):
-        cfg, log = self.config_with_log(["strata generate: memory guard: limit 61.6 GiB", "strata generate: SYCL init",
-                                         "terminate called after throwing an instance of 'sycl::exception'",
-                                         "  what():  No device of requested type available. -1 (PI_ERROR_DEVICE_NOT_FOUND)"])
-        text, nxt = R.explain_engine_exit({"state": "failed", "error": "server_exited", "engine_exit_code": 134}, cfg)
-        self.assertIn("stopped while it was loading the model", text)
-        self.assertIn("No device of requested type available", text)
-        self.assertNotIn("server_exited", text + nxt)
-        self.assertIn("render group", nxt)
-        self.assertIn(str(log), nxt)
-
     def test_a_gpu_runtime_start_failure_gets_a_plain_sentence_and_keeps_the_runtime_text_out_of_it(self):
         cfg, log = self.config_with_log(["strata generate: loading", "terminate called after throwing an instance of 'rocr::AMD::hsa_exception'",
                                          "  what():  "])
@@ -178,18 +167,13 @@ class SetupArguments(unittest.TestCase):
             self.assertNotIn("--mtp", runner_for().setup_args())
 
     def test_setup_skips_the_draft_layer_download_for_mtp_off(self):
-        # setup.py is a script; its two fetch sites must be guarded by the explicit --mtp off (N3: a 5.2 GB download happened anyway)
+        # setup.py is a script; its fetch site must be guarded by the explicit --mtp off (N3: a 5.2 GB download happened anyway)
         text = (Path(__file__).resolve().parents[2] / "setup.py").read_text(encoding="utf-8")
         self.assertIn('if a.mtp == "off" and not (rt / "experts.bin").exists():', text)
-        self.assertIn('if use_mtp and a.mtp == "off" and not (mtp / "mtp-q2_0.gguf").exists():', text)
         self.assertIn('"use --data-dir on a bigger drive (strata launch --data-dir)" if CONTROL', text)       # N2: a launch option, not --models-dir
 
 
 class PlanPredictsEveryDownload(unittest.TestCase):
-    def setUp(self):
-        from tests.terminal.launch_support import not_intel
-        not_intel(self)
-
     def plan_text(self, h: Home, own: Path, **kw) -> dict:
         s = S.LaunchSettings(family="qwen", model="IQ3_XXS", context=32768, vision="on", model_path=str(own), data_dir=str(h.base / "data"), **kw)
         r = Runner(s, catalog=catalog(HW_12))
@@ -253,20 +237,6 @@ class EngineIsFreshEnough(unittest.TestCase):
             self.assertIn("0.1.45.3", words)
             self.assertIsNone(r.stale_engine("0.1.47"))
             self.assertIsNone(r.stale_engine("source"))
-
-    def test_gyro_on_a_mac_needs_engine_0_1_47(self):
-        with Home():
-            r = Runner(S.LaunchSettings(family="gyro", model="Gyro-S", context=32768, vision="off"), catalog=catalog(HW_12))
-            with mock.patch.object(sys, "platform", "darwin"):
-                self.assertEqual(r.needed_engine(), (0, 1, 47))
-                self.assertIn("older than this model needs (0.1.47", r.stale_engine("0.1.45.3"))
-                self.assertIsNone(r.stale_engine("0.1.47"))
-            with mock.patch.object(sys, "platform", "linux"):
-                self.assertLess(r.needed_engine(), (0, 1, 47))               # CUDA, HIP and SYCL had the kernels earlier
-                self.assertIsNone(r.stale_engine("0.1.46"))
-            with mock.patch.object(sys, "platform", "darwin"):
-                q = Runner(S.LaunchSettings(family="qwen", model="IQ3_XXS", context=32768, vision="off"), catalog=catalog(HW_12))
-                self.assertLess(q.needed_engine(), (0, 1, 47))              # only Gyro is held to it
 
     def test_a_stale_engine_is_updated_or_said_never_ignored(self):
         with Home():

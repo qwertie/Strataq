@@ -58,10 +58,6 @@ inline RoutingCounts get_routing_counts() {
 
 /// Queues the count of `layer`'s picks on `stream`, `rows` rows of `k` expert ids `stride` ids apart; nothing
 /// before init_routing_counts.
-#if defined(STRATA_GPU_METAL)
-inline void count_routing(const int32_t*, int, int, int, int, void*) {}   // (no Metal kernel yet: the totals stay 0)
-#else
 void count_routing(const int32_t* ids, int rows, int k, int stride, int layer, void* stream);
-#endif
 
 }  // namespace strata::kernels

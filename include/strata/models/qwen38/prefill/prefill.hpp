@@ -49,7 +49,7 @@ namespace strata::prefill {
 
 /// HIP: one tiny BF16 and one tiny FP16 product on a private handle, so the first prompt does not pay hipBLAS's one-time
 /// library loads (about 2.5 s on an R9700); once per device, later calls wait for the first and return.  Safe to call from a
-/// thread before the expert arena loads.  STRATA_PREFILL_WARM=0 makes it a no-op.  Nothing on CUDA / SYCL.
+/// thread before the expert arena loads.  STRATA_PREFILL_WARM=0 makes it a no-op.  Nothing on CUDA.
 void warm_gemm_libraries(int device);
 
 
@@ -81,7 +81,7 @@ public:
               void* stream, std::string& err, void* borrow = nullptr, uint64_t borrow_bytes = 0,
               bool borrow_spill = false);
     /// Reads the next prompts into `ss` instead of `init`'s session; `ss` is carved like it (the same layers and
-    /// context).  strata-q38 reads each conversation's prompt into the conversation's own session.  Not on Metal.
+    /// context).  strata-q38 reads each conversation's prompt into the conversation's own session.
     void set_session(core::SessionState& ss);
 
     /// With borrowed buffers: lay them out again for chunks of `chunk` tokens (at most `init`'s, or

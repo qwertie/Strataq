@@ -74,7 +74,7 @@ test('the model setup of the packaged app runs from the updated Control: strata_
     const data = join(f.root, 'data');
     const control = { ...createControl({ control: found, run: async () => ({}) }),
       async installedModels() { return { install_dir: f.root, models: [] }; },
-      async engine() { return { usable: true, backend: 'sycl', engine: { version: '0.1.59', platform: 'linux-x86_64', backend: 'sycl', exe: '/e/strata', root: '/e' } }; } };
+      async engine() { return { usable: true, backend: 'cuda', engine: { version: '0.1.59', platform: 'linux-x86_64', backend: 'cuda', exe: '/e/strata', root: '/e' } }; } };
     const native = createNativeControl({ control, directory: data, spawnProcess, fetcher: async () => Response.json({}) });
     try { await native.refresh(true); } finally { await native.close(); }
     const installer = spawned.find(s => String(s.args[0]).endsWith('strata_mcp.py'));

@@ -4,12 +4,11 @@ For every prompt of a corpus (default bench/profile_corpus.json: 45 chat, code, 
 use and six-language prompts) it runs the engine once (greedy, --max-new tokens) and keeps the routed experts of the
 generated text:
 
-    python tools/collect_profile_traces.py CONFIG.json OUTDIR [--corpus FILE] [--max-new 250] [--mode usage|routing]
+    python tools/collect_profile_traces.py CONFIG.json OUTDIR [--corpus FILE] [--max-new 250]
 
 CONFIG.json is a run config setup wrote (strata-*.json: "exe", "args", "env", "tokenizer", "cwd").  The engine is run as
-`exe args... --tokens-file F --max-new N --greedy` (--serve and --batch are dropped).  `--mode usage` (default) is the
-SYCL engine's STRATA_USAGE_DUMP=PATH, which counts on the device and works with STRATA_VERIFY_NO_HOST; `--mode routing`
-adds `--dump-routing PATH` (the CUDA/HIP engines and the SYCL host path).  Then, for example:
+`exe args... --tokens-file F --max-new N --greedy --dump-routing PATH` (--serve and --batch are dropped).  Then, for
+example:
 
     python tools/make_profile_mix.py OUTDIR/c*.trace:1 --out data/expert-profile-new.bin
 
@@ -44,7 +43,6 @@ def main():
     ap.add_argument("outdir")
     ap.add_argument("--corpus", default=str(ROOT / "bench" / "profile_corpus.json"))
     ap.add_argument("--max-new", type=int, default=250)
-    ap.add_argument("--mode", choices=("usage", "routing"), default="usage")
     ap.add_argument("--only", help="comma-separated prompt numbers (default all)")
     a = ap.parse_args()
     cfg = cfg_paths.read_config(a.config)
@@ -54,8 +52,8 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     args = drop(drop(cfg["args"], "--serve"), "--batch", True)
     only = {int(x) for x in a.only.split(",")} if a.only else None
-    env0 = dict(os.environ)
-    env0.update({k: str(v) for k, v in cfg.get("env", {}).items()})
+    env = dict(os.environ)
+    env.update({k: str(v) for k, v in cfg.get("env", {}).items()})
     for n, c in enumerate(corpus):
         if only is not None and n not in only:
             continue
@@ -66,12 +64,8 @@ def main():
                          parse_special=True)
         tf = out / f"c{n:02d}.tok"
         tf.write_text(",".join(str(i) for i in ids))
-        cmd = [cfg["exe"]] + args + ["--tokens-file", str(tf), "--max-new", str(a.max_new), "--greedy"]
-        env = dict(env0)
-        if a.mode == "usage":
-            env["STRATA_USAGE_DUMP"] = str(trace)
-        else:
-            cmd += ["--dump-routing", str(trace)]
+        cmd = [cfg["exe"]] + args + ["--tokens-file", str(tf), "--max-new", str(a.max_new), "--greedy",
+                                     "--dump-routing", str(trace)]
         print(f"[{n + 1}/{len(corpus)}] {c['d']}: {len(ids)} prompt tokens", flush=True)
         r = subprocess.run(cmd, cwd=cfg.get("cwd") or None, env=env, capture_output=True, text=True)
         if r.returncode != 0 or not trace.exists():

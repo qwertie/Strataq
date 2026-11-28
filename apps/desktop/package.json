@@ -10,9 +10,7 @@
     "test:ui": "npm --prefix ../host test",
     "tauri": "tauri",
     "dev": "npm run build:ui && tauri dev",
-    "build": "npm run build:ui && tauri build",
-    "build:app": "npm run build:ui && tauri build --bundles app",
-    "dmg": "npm run build:ui && tauri build --bundles dmg"
+    "build": "npm run build:ui && tauri build"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.3"

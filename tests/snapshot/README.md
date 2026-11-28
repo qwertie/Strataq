@@ -20,7 +20,7 @@ The same command works on Windows, Linux and macOS; the golden files hold no pat
 ## What is simulated
 
 * **machine classes** (`matrix.py`): NVIDIA all-resident (RTX PRO 5000 72 GB), NVIDIA 12 GB streaming (RTX 3060), DGX Spark (linux-aarch64, GB10),
-  Strix Halo Windows (gfx1151), Radeon R9700 (gfx1201, Linux), Intel Arc A750 (SYCL), Mac M-series small (16 GB) and large (128 GB).
+  Strix Halo Windows (gfx1151), Radeon R9700 (gfx1201, Linux).
   A class sets the engine family, the card architecture, the card memory, the platform and the hardware report the Terminal's catalog and the app's host read.
 * **model sets**: IQ3_S, UD-Q4_K_XL, UD-IQ4_XS-v31, DeepSeek (IST-DAS-2.00bpw).
 * **entry points**: `setup`, `launch`, `app_plain`, `app_models`.
@@ -48,7 +48,6 @@ look at the machine (nvidia-smi, the disk kind, the compute mode, a saved calibr
 
 The record of `setup` has `inputs` (what was assumed, so a reviewer sees it), `config_file` (what `config_for` returns, before `write_setup_config()` merges an
 earlier config), `engine` (`engine_args` / `child_env` of that config, as for the other entry points) and `setup_says` (the notes setup prints on the way).
-The classes whose setup is another script (Intel Arc: `sycl/setup_intel.py`; Mac: `metal/setup_mac.py`, `mac_dsv41_setup`) are `not_driven` with the reason.
 
 The launch and app entry points still start from `World.base_config`, a hand-built stand-in for setup's output, not from `config_for`.  It differs from what
 `config_for` makes (it has no `--vision`, `--kv-resident`, `--ple-io ram`, `--reserve-mib` ...).  Differences between launch / app_plain / app_models can never come

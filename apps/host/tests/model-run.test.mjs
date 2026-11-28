@@ -9,7 +9,7 @@ async function loadTs(path) {
 const profiles=await loadTs('../src/lib/run-profiles.ts');
 const memory=await loadTs('../src/lib/run-memory.ts');
 const engine={expert:[{id:'ctx.length',recommended:'128K'},{id:'perf.threads',recommended:8},{id:'mem.mmap',recommended:true}]};
-const hardware={host:{name:'Test PC',platform:'darwin',arch:'arm64'},cpu:{model:'Test CPU',cores:10},memory:{totalGb:16},gpus:[{id:'a',name:'Unified GPU',vramGb:16,backend:'metal',unified:true}],accelerator:{backend:'metal',unified:true}};
+const hardware={host:{name:'Test PC',platform:'linux',arch:'x64'},cpu:{model:'Test CPU',cores:10},memory:{totalGb:16},gpus:[{id:'a',name:'Unified GPU',vramGb:16,backend:'vulkan',unified:true}],accelerator:{backend:'vulkan',unified:true}};
 const experience={source:'demo',config:{placement:'Automatic'},reading:{low:100,high:120},answer:{low:20,high:30},memory:{weights:19,cache:2.7,runtime:2.5,total:24.2}};
 
 test('saved settings retain the optional image choice and older profiles restore Off',()=>{

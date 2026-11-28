@@ -38,8 +38,8 @@ LABELS = {"auto": "Auto (recommended)", "mtp": "MTP", "dflash2": "DFlash2", "off
 DRAFTERS = ("mtp", "dflash2", "off")
 
 #: The engine families that have the DFlash2 code (CMakeLists.txt STRATA_HAVE_DFLASH2). Auto picks DFlash2 on these; a computer with any other engine keeps the
-#: MTP. Intel SYCL joined with the DF2-SYCL engine (Arc A750 measured: a tie with the MTP, section 8-9 of phaseA-tests/blackwell/RESULTS-DF2SYCL.md). Metal: the DF2-METAL engine.
-DFLASH2_BACKENDS = ("cuda", "hip", "metal", "sycl")
+#: MTP.
+DFLASH2_BACKENDS = ("cuda", "hip")
 
 #: Graphics memory each drafter takes on Qwen3.8-Flash-Next IQ3_S (GB; phaseA-tests/blackwell/RESULTS-DF2MEM.md section 1, l620, engine free memory at
 #: the first graph capture): DFlash2 alone 890 MiB, the MTP layer 1082 MiB. The fit, the plan and the slot estimates use the one that is chosen.
@@ -86,7 +86,6 @@ LINE_TESTED = "On graphics cards like yours, DFlash2 was faster than MTP on some
 LINE_SLOWER = "On graphics cards like yours, DFlash2 was slower than MTP in our tests."
 LINE_UNTESTED = "DFlash2 has not been tested on your graphics card yet."
 LINE_AUTO_MTP = "DFlash2 is off by default on this graphics card for now; choose it in Drafting to use it."      # a card in AUTO_MTP: Auto starts the MTP
-LINE_METAL = "On your Mac, DFlash2 was faster than MTP on this model in our tests."      # a Mac and a set in SET_DEFAULTS whose default is DFlash2 (replaces "not tested" there)
 
 
 @dataclass(frozen=True)
@@ -96,64 +95,14 @@ class Support:
     line: str            # plain words for the person ("" when there is nothing to say)
 
 
-_TESTED = {("cuda", "sm_120"), ("cuda", "sm_121"), ("hip", "gfx1151"), ("hip", "gfx1201"), ("sycl", "arc_a")}
+_TESTED = {("cuda", "sm_120"), ("cuda", "sm_121"), ("hip", "gfx1151"), ("hip", "gfx1201")}
 _SLOWER = {("cuda", "sm_86")}
 
 
 _HARDWARE: list = []
 
-# --- Intel: the SYCL path gives no architecture, so the card is told by its name (Windows display adapters) or its PCI id (Linux sysfs).
-#   arc_a        Arc A-series, Alchemist: A3xx / A5xx / A7xx (the A750 was measured: RESULTS-DF2SYCL.md), PCI ids 0x56A0..0x56AF and the mobile 0x5690..0x5692
-#   arc_a_pro    Arc Pro A-series (A40, A50, A60): not measured
-#   arc_b        Arc B-series, Battlemage (B580, Pro B60, B65, B70...): not measured
-#   intel_igpu   integrated graphics (UHD, Iris Xe, "Arc Graphics" of Core Ultra): not measured
-_ARC_NAME = re.compile(r"\bArc\b(?:\(TM\))?\s*(Pro\s+)?([AB])\s?(\d{2,3})(?!\d)", re.I)
-
-
-def sycl_arch_of_name(name: str) -> str:
-    """The class of an Intel adapter from its Windows name: ``Intel(R) Arc(TM) A750 Graphics`` is ``arc_a``; ``intel_igpu`` for any other Intel name."""
-    m = _ARC_NAME.search(str(name or ""))
-    if not m:
-        return "intel_igpu"
-    pro, letter, number = bool(m.group(1)), m.group(2).upper(), int(m.group(3))
-    if letter == "B":
-        return "arc_b"
-    return "arc_a" if not pro and number >= 300 else "arc_a_pro"   # A310 / A380 / A580 / A750 / A770 and the mobile A3xx-A7xx; A40 / A50 / A60 and every Pro are not measured
-
-
-def sycl_arch_of_pci(driver: str, devid: str) -> str:
-    """The class of an Intel card from its Linux driver and PCI device id (strata_common/intel_spec.py's cards): i915 ids 0x56A0.. are Alchemist, 0x56B0.. the Pro
-    A-series, xe ids 0xE2xx Battlemage."""
-    try:
-        n = int(str(devid).lower().replace("0x", ""), 16)
-    except ValueError:
-        return "intel_igpu"
-    if driver == "xe" and 0xE200 <= n <= 0xE2FF:
-        return "arc_b"
-    if driver == "i915" and 0x5690 <= n <= 0x56AF:
-        return "arc_a"
-    if driver == "i915" and 0x56B0 <= n <= 0x56BF:
-        return "arc_a_pro"
-    return "intel_igpu"
-
-
-def sycl_archs_present() -> list[str]:
-    """One class (``arc_a`` ...) per Intel card: from the display adapters on Windows, from sysfs on Linux. Empty when neither can say."""
-    from strata_common import engine_component
-    from strata_common import intel_spec
-    found: list[str] = []
-    if os.name == "nt":
-        for adapter in engine_component.windows_display_adapters():
-            if str(adapter.get("vendor", "")).lower() == "8086":
-                found.append(sycl_arch_of_name(adapter.get("name", "")))
-    else:
-        for card in intel_spec.sysfs_cards():
-            found.append(sycl_arch_of_pci(card.get("driver", ""), card.get("devid", "")))
-    return found
-
-
 def detect_hardware() -> tuple[str | None, list[str]]:
-    """(engine family, card architectures) of this computer, looked up once: ``("cuda", ["sm_120"])``, ``("hip", ["gfx1151"])``, ``("metal", [])``;
+    """(engine family, card architectures) of this computer, looked up once: ``("cuda", ["sm_120"])``, ``("hip", ["gfx1151"])``;
     ``(None, [])`` when nothing answers. Read-only probes of tools that are already installed; never raises, never downloads."""
     if not _HARDWARE:
         backend: str | None = None
@@ -162,8 +111,6 @@ def detect_hardware() -> tuple[str | None, list[str]]:
             from strata_common import engine_component
             backend = engine_component.detect_backend()[0]
             archs = list(engine_component.cuda_archs_present()) + list(engine_component.hip_archs_present())
-            if backend == "sycl" and not archs:
-                archs = sycl_archs_present()
         except Exception:                                    # noqa: BLE001 - an unknown computer is "no DFlash2", never an error
             pass
         _HARDWARE.append((backend, archs))
@@ -171,9 +118,8 @@ def detect_hardware() -> tuple[str | None, list[str]]:
 
 
 def hardware_support(backend: str | None, archs: Any = None, model_name: str | None = None) -> Support:
-    """Can the engine for this backend and card run DFlash2, and what was measured on it. ``backend`` is the engine family (cuda | hip | sycl | metal);
-    ``archs`` the cards' architectures (``sm_120``, ``gfx1151``...), the first one counts like card_class does. ``model_name``: on Metal the answer is
-    per set (SET_DEFAULTS): a set whose default is DFlash2 was measured; the others keep "not tested"."""
+    """Can the engine for this backend and card run DFlash2, and what was measured on it. ``backend`` is the engine family (cuda | hip);
+    ``archs`` the cards' architectures (``sm_120``, ``gfx1151``...), the first one counts like card_class does."""
     make = str(backend or "").strip().lower()
     if make not in DFLASH2_BACKENDS:
         return Support(False, "none", "")
@@ -181,10 +127,6 @@ def hardware_support(backend: str | None, archs: Any = None, model_name: str | N
     arch = str(first[0]).strip().lower() if first else ""
     if (make, arch) in AUTO_MTP:
         return Support(True, "tested", LINE_AUTO_MTP)
-    if make == "metal":
-        entry = default_for(make, model_name)
-        if entry is not None and entry.drafter == "dflash2":
-            return Support(True, "tested", LINE_METAL)
     if (make, arch) in _TESTED:
         return Support(True, "tested", LINE_TESTED)
     if (make, arch) in _SLOWER and any(k[0] == make and k[1] == set_of(model_name) and v.drafter == "dflash2" for k, v in CLASS_DEFAULTS.items()):
@@ -225,27 +167,20 @@ CONVERTED_BYTES = 339694592
 CONVERTED_SHA256 = "4a42b98220ea7880664002c8edda1563aecbae754b762a2e2f31b2b91ee93ecd"
 _MARK_SELQ4 = b"selector codebooks: Q4_0 rows"      # text of an engine that reads such a pack (src/core/dflash2.cpp)
 # The tuned drafter (round 0216, DF-SHIP; phaseA-tests/round0215/RESULTS-DF2WS.md sections 15-20): the published weights, fine-tuned by Strata on the 4-bit targets' own
-# outputs and packed as the Q4_0 + Q4_0-selector pack (the same format and size as CONVERTED_NAME, so no engine change). +11.4% accepted drafts on UD-Q4_K_XL and UD-IQ4_XS-v31;
-# on Metal +4.5% / +3.4% output tokens per second against the stock pack at 0.5, greedy identity 120 of 120 per set, WITH --draft-conf 0.7 (at 0.5 it is a wash, and the
-# stock pack is 5% worse at 0.7: the setting belongs to the pack). It is a file Strata hosts (the repository publishes only the bf16 file).
+# outputs and packed as the Q4_0 + Q4_0-selector pack (the same format and size as CONVERTED_NAME, so no engine change). +11.4% accepted drafts on UD-Q4_K_XL and UD-IQ4_XS-v31.
+# It is a file Strata hosts (the repository publishes only the bf16 file).
 # Apache-2.0, modified by Strata: data/dflash2-tuned/ (LICENSE, NOTICE.md) ships with Strata and is copied beside the file when it is fetched.
 TUNED_NAME = "qwen3.8-flash-next-dflash2.strata1.q4_0-selq4.pack"
 TUNED_BYTES = 339694592
 TUNED_SHA256 = "4df2e5ab2b47c064afbe662e16e4f06569877125c2d0e2123a4ac755266c664c"
 TUNED_GB = 0.34
-# The same tuned weights for an engine that reads only the bf16 selector codebooks (the SYCL 0.2.11 engine refuses the Q4_0-selector pack above): the Q4_0 pack of tools/dflash2_pack.py
-# --q4_0 (the tool reproduces the stock Arc pack cda40d62... exactly from the stock weights). Its own name, size and SHA-256; the feed lists it for ["sycl"] only.
-TUNED_BF16_NAME = "qwen3.8-flash-next-dflash2.strata1.q4_0-bf16sel.pack"
-TUNED_BF16_BYTES = 522458112
-TUNED_BF16_SHA256 = "34ca17fee701ff088b6069acc35a26661d237953f5d114be0a3f7dae3ec5cda9"
-TUNED_BF16_GB = 0.52
 #: Where it is hosted (owner 11-06, recommendation of the coordinator): a GitHub release asset of Niko1221/Strata, listed in the signed feed (strata-feed.json, feed key 5d1bc23a) as a
 #: `drafters` entry (packaging/feed_tool.py pack-drafter, build-feed --drafters), so the app gets the feed's signature, offline handling and updates the same way as engine packages.
 #: The entry's url is relative to the feed (flat release assets); the size and SHA-256 above are pinned in the code as well, so the feed can move the file but never swap its bytes.
 #: Written alternative, not implemented: a Hugging Face repository under the owner's account (a resolve address of the pinned commit), fetched with the
 #: same pins; it would need the one address below and loses the feed's signature.
 TUNED_FEED_MEMBER = "drafters"
-TUNED_BACKEND = "metal"                          # the engine family the feed entry must list
+TUNED_BACKEND = "cuda"                           # the engine family the feed entry must list when the caller names none
 TUNED_URL_ENV = "STRATA_DFLASH2_TUNED_URL"       # tests and mirrors: a direct address (https, file:) of the same pinned bytes, instead of the feed
 TUNED_LICENCE_FOLDER = "data/dflash2-tuned"        # LICENSE (Apache-2.0) and NOTICE.md, shipped in data/ with the draft vocabularies
 TUNED_BASE = "incoai/Qwen3.8-Flash-Next-DFlash2 revision a22a1744e85c17364dcc54a6a420af7135d4c7f6"
@@ -270,13 +205,6 @@ DRAFT_CONF = 0.35            # --draft-conf with DFlash2: the window ends where 
 CONF_STEPS = ((12000, 0.35), (7500, 0.5), (3000, 0.7), (0, 0.8))      # (engine slots at least, --draft-conf)
 EXPERT_CACHE_SLOTS_PER_N = 1.3   # an explicit --expert-cache N holds about this many engine slots per N on the IQ3_S pack (1.28 at N = 1,000 .. 1.31 at N = 12,000)
 MAX_SLOTS = 24576            # every (layer, expert) pair of Qwen3.8-Flash-Next
-# A backend whose card class was measured on its own has ONE value that replaces the slot steps (they were calibrated on CUDA cards with 300 to 9,300 slots):
-# Intel Arc (SYCL, A750 with 298 expert slots, IQ3_XXS, serve sweeps with suffix drafting on): 0.6 was the best of 0.35 / 0.6 / 0.8 and the other two lost 4 to 10%
-# (RESULTS-DF2SYCL.md sections 6-8).
-# Metal (M5 Max 128 GB, UD-Q4_K_XL, all experts mapped: the expert-cache slot count the CUDA steps read means nothing there), greedy 300 tokens, serve path, fresh engine per run,
-# DFlash2 --spec 6 against MTP --spec 2, 3 interleaved rounds x 2 reps, six request kinds (phaseA-tests/round0215/RESULTS-MAC-OUT.md): conf 0.35 / 0.5 / 0.6 = +10.0 / +14.3 / +12.4% over all
-# six kinds (0.5 faster than MTP on every kind in 3 of 3 rounds; the slot rule would have written 0.8 for the Mac's --expert-cache 64).
-BACKEND_CONF = {"sycl": 0.6, "metal": 0.5}
 # Large-VRAM Blackwell (cc 12.0 = sm_120, at least 48 GB: l620's RTX PRO 5000 72 GB; NOT the DGX Spark, sm_121, and not a consumer card under 48 GB, which were not measured): a window of 8 for every
 # set (the engine cap is 8 there too, set-independent: window 8 alone at conf 0.35 was +0.5% on IQ3_S) and, for IQ3_S only (SetDefault.big_blackwell_conf in SET_DEFAULTS, owner/coordinator 11-08),
 # conf 0.55. 11-08 sweep (phaseA-tests/df2r2/RESULTS-CONF.md), IQ3_S, 36 requests, 300 greedy tokens, 5 interleaved pairs against conf 0.35 / window 6: +2.4%, 5 of 5 pairs faster, output identical
@@ -286,7 +214,7 @@ BIG_CARD_BYTES = 48_000_000_000     # "48 GB" the way cards are sold (a 48 GB ca
 
 @dataclass(frozen=True)
 class TunedPack:
-    """One tuned file: ``key`` is what SetDefault.pack names (``selq4`` = Q4_0 selector codebooks, the CUDA / HIP / Metal engines; ``bf16sel`` = bf16 selector codebooks, the SYCL engine)."""
+    """One tuned file: ``key`` is what SetDefault.pack names (``selq4`` = Q4_0 selector codebooks, read by the CUDA and HIP engines)."""
     key: str
     name: str
     size: int
@@ -297,49 +225,35 @@ class TunedPack:
 
 def tuned_pack(variant: str | None = None) -> TunedPack:
     """The pin of a tuned file, read from the module's constants at call time."""
-    if variant == "bf16sel":
-        return TunedPack("bf16sel", TUNED_BF16_NAME, TUNED_BF16_BYTES, TUNED_BF16_SHA256, TUNED_BF16_GB, False)
     return TunedPack("selq4", TUNED_NAME, TUNED_BYTES, TUNED_SHA256, TUNED_GB, True)
 
 
 @dataclass(frozen=True)
 class SetDefault:
     """What Auto does for one model set on one engine family. ``drafter``: ``dflash2`` or ``mtp``. ``tuned``: DFlash2 starts with Strata's tuned pack (TUNED_NAME) where the pack is here and
-    ``where`` holds. ``tuned_conf``: the ``--draft-conf`` that goes with the tuned pack, or None = the backend's OWN conf stays (CONF_STEPS / BACKEND_CONF: only the pack changes). ``where``:
-    "" always (Metal); "resident" CUDA with every expert resident = the card the first CONF_STEPS step (conf 0.35) is for, or a shared-memory chip (sm_121, the Spark class); "gfx1151" Strix Halo;
-    "arc_a" Intel Arc A-series (the class the A750 stands for). ``pack``: which tuned file (tuned_pack): ``selq4`` or, for the SYCL engine, ``bf16sel``."""
+    ``where`` holds; the ``--draft-conf`` stays the card's own (CONF_STEPS: only the pack changes). ``where``: "" always; "resident" CUDA with every expert resident = the card
+    the first CONF_STEPS step (conf 0.35) is for, or a shared-memory chip (sm_121, the Spark class); "gfx1151" Strix Halo. ``pack``: which tuned file (tuned_pack)."""
     drafter: str
     tuned: bool = False
-    tuned_conf: float | None = None
     where: str = ""
     pack: str = "selq4"
     big_blackwell_conf: float | None = None     # the ``--draft-conf`` on the large-VRAM Blackwell class (big_blackwell: cc 12.0, >= 48 GB) with the tuned pack, for the sets measured there; None = the backend's own conf
 
 
 #: Per (engine family, set) defaults, measured. THE ONE TABLE to switch a set either way. The set is the model_name without its "qwen3.8-flash-next-" prefix.
-#: METAL (M5 Max, RESULTS-MAC-OUT.md / RESULTS-MAC-INT.md / RESULTS-DF2WS.md): DFlash2 --spec 6 over MTP --spec 2 is +12.7% on UD-Q4_K_XL and +9.2% on UD-IQ4_XS-v31 (5 interleaved pairs);
-#: the tuned pack at conf 0.7 adds +4.5% / +3.4% over the stock pack at 0.5 (6 pairs per set, greedy identity 120/120). IQ3_S stays on the MTP until the owner says otherwise; to switch it:
-#: ("metal", "iq3_s"): SetDefault("dflash2") (the stock pack at conf 0.5; the Mac setup then fetches the drafter for it too).
 #: CUDA / HIP (owner 11-06 ~10:00; RESULTS-DFVAL.md, tuned pack at the box's CURRENT conf against the stock pack, 3 interleaved rounds, 24 requests an arm and round; DFlash2 is already their
 #: Auto drafter, so only the pack changes and the conf stays what CONF_STEPS / the card class give): ONLY the cells that were measured are enabled:
 #:   cuda "resident" (conf 0.35): IQ3_S l620 (RTX PRO 5000) x1.021 (3/3 rounds) and DGX Spark x1.032 / x1.048 (3/3, two runs); UD-IQ4_XS-v31 DGX Spark x1.050 (3/3). CUDA ids identical.
 #:   hip gfx1151 (Strix Halo, conf 0.35): IQ3_S x1.037, UD-Q4_K_XL x1.043, UD-IQ4_XS x1.045 (3/3 each; the text differs by window length on HIP, as with any conf change); UD-IQ4_XS-v31 x1.046 (setup's config, budget 38, 3 rounds, 3/3: agent 1.075, chat 1.013, code 1.073, creative 1.030, json 1.066, tool 1.055).
-#: SYCL / Intel Arc (owner 11-06 ~11:30 "Yes for Arc"; DF-VAL, A750 8 GB on p1006, SYCL 0.2.11, IQ3_XXS, 3 rounds, against the stock pack at Arc's 0.6 = 18.8 tok/s): the bf16-selector tuned pack
-#: at 0.6 x1.054 (3/3 rounds), at 0.5 x1.063; MTP x0.995; the stock pack against itself x1.011. The SYCL engine refuses the selq4 pack, so Arc has its OWN file (``pack`` "bf16sel", TUNED_BF16_*)
-#: and keeps BACKEND_CONF["sycl"] = 0.6. ONLY IQ3_XXS, the measured set; every other Arc set stays on the stock pack until it is measured.
-#: NOT enabled: a 12 GB / streaming card (the CONF_STEPS 0.8 step: P2003 is still being measured), gfx1201 / R9700 (the DFlash2 prompt stall is open), SYCL / Arc (untested), several cards (not measured),
+#: NOT enabled: a 12 GB / streaming card (the CONF_STEPS 0.8 step: P2003 is still being measured), gfx1201 / R9700 (the DFlash2 prompt stall is open), several cards (not measured),
 #: and the sets nobody measured on that platform (CUDA UD-Q4_K_XL, CUDA UD-IQ4_XS): each is one more line here once DF-VAL has the cell.
 SET_DEFAULTS = {
-    ("metal", "unsloth-ud-q4_k_xl"): SetDefault("dflash2", True, 0.7),
-    ("metal", "unsloth-ud-iq4_xs-v31"): SetDefault("dflash2", True, 0.7),
-    ("metal", "iq3_s"): SetDefault("mtp"),
-    ("cuda", "iq3_s"): SetDefault("dflash2", True, None, "resident", big_blackwell_conf=0.55),
-    ("cuda", "unsloth-ud-iq4_xs-v31"): SetDefault("dflash2", True, None, "resident"),
-    ("hip", "iq3_s"): SetDefault("dflash2", True, None, "gfx1151"),
-    ("hip", "unsloth-ud-q4_k_xl"): SetDefault("dflash2", True, None, "gfx1151"),
-    ("hip", "unsloth-ud-iq4_xs"): SetDefault("dflash2", True, None, "gfx1151"),
-    ("hip", "unsloth-ud-iq4_xs-v31"): SetDefault("dflash2", True, None, "gfx1151"),
-    ("sycl", "iq3_xxs"): SetDefault("dflash2", True, None, "arc_a", "bf16sel"),
+    ("cuda", "iq3_s"): SetDefault("dflash2", True, "resident", big_blackwell_conf=0.55),
+    ("cuda", "unsloth-ud-iq4_xs-v31"): SetDefault("dflash2", True, "resident"),
+    ("hip", "iq3_s"): SetDefault("dflash2", True, "gfx1151"),
+    ("hip", "unsloth-ud-q4_k_xl"): SetDefault("dflash2", True, "gfx1151"),
+    ("hip", "unsloth-ud-iq4_xs"): SetDefault("dflash2", True, "gfx1151"),
+    ("hip", "unsloth-ud-iq4_xs-v31"): SetDefault("dflash2", True, "gfx1151"),
 }
 #: Per (engine family, set, card class) defaults for a class of CARD, read from the same slot count the confidence reads (owner 11-06 ~15:30 "1 yes"). Today one class: "streaming" = a CUDA card whose
 #: engine slots are under the last-but-one CONF_STEPS step (3000), i.e. the step that gives conf 0.8: the 12 GB class (P2003, RTX 3060), where the experts stream and IQ3_S runs from the file cache.
@@ -350,7 +264,7 @@ SET_DEFAULTS = {
 #: Other sets on that class: unchanged (the general rule). Anything chosen by name (a saved "drafting", `--drafting`, the app's dropdown) wins over both.
 CLASS_DEFAULTS = {
     ("cuda", "iq3_s", "streaming"): SetDefault("mtp", where="streaming"),
-    ("cuda", "unsloth-ud-iq4_xs-v31", "streaming"): SetDefault("dflash2", True, None, "streaming"),
+    ("cuda", "unsloth-ud-iq4_xs-v31", "streaming"): SetDefault("dflash2", True, "streaming"),
 }
 MODEL_PREFIX = "qwen3.8-flash-next-"
 
@@ -378,15 +292,9 @@ def tuned_entry(backend: str | None, model_name: str | None) -> SetDefault | Non
 
 
 def tuned_variant(backend: str | None, model_name: str | None) -> str | None:
-    """Which tuned file this set on this engine family uses (``selq4`` / ``bf16sel``), or None: no tuned entry."""
+    """Which tuned file this set on this engine family uses (``selq4``), or None: no tuned entry."""
     entry = tuned_entry(backend, model_name)
     return entry.pack if entry is not None else None
-
-
-def tuned_conf_for(backend: str | None, model_name: str | None) -> float | None:
-    """The ``--draft-conf`` the tuned pack runs at for this set (Metal 0.7), or None: no tuned entry, or the entry keeps the backend's own conf."""
-    entry = tuned_entry(backend, model_name)
-    return entry.tuned_conf if entry is not None else None
 
 
 def first_arch(archs: Any) -> str:
@@ -433,8 +341,6 @@ def tuned_applies(backend: str | None, model_name: str | None, archs: Any = None
     arch = first_arch(archs)
     if entry.where == "gfx1151":
         return arch == "gfx1151"
-    if entry.where == "arc_a":
-        return arch == "arc_a"
     if entry.where == "resident":
         if arch == "sm_121":
             return True
@@ -453,7 +359,7 @@ DEFAULT_CONTEXT = 131072     # --max-context when the arguments name none (the 1
 #: (UD-IQ4_XS, UD-Q4_K_XL...; DFlash2 numbers measured on UD-Q4_K_XL on Strix, R9700 and M5 Max). Not Swift (UkisAI's fine-tune), Coder (ISTA-DASLab's coding version) or NVFP4:
 #: no DFlash2 acceptance numbers for them, they start the MTP.
 SUPPORTED_FAMILIES = ("qwen", "gyro", "unsloth")
-#: The model_name setup.py (and metal/setup_mac.py) write: f"{family name}-{model.lower()}": qwen3.8-flash-next-iq3_s, qwen3.8-flash-next-gyro-gyro-s,
+#: The model_name setup.py writes: f"{family name}-{model.lower()}": qwen3.8-flash-next-iq3_s, qwen3.8-flash-next-gyro-gyro-s,
 #: qwen3.8-flash-next-unsloth-ud-q4_k_xl. (Coder is qwen3.8-flash-next-coder-iq1_m, NVFP4 qwen3.8-flash-next-nvfp4-nvfp4: neither matches.) Mirrored in
 #: apps/host/server/native-settings.mjs; tests/drafting.test.mjs keeps the two the same.
 _SUPPORTED_NAME = re.compile(r"^qwen3\.8-flash-next(-gyro-[a-z0-9._-]+|-unsloth-[a-z0-9._-]+|-(q|iq|tq)\d[a-z0-9_.]*)?$", re.IGNORECASE)
@@ -484,7 +390,7 @@ def converted_path(data_dir: str | Path) -> Path:
 
 
 def tuned_path(data_dir: str | Path, variant: str | None = None) -> Path:
-    """Where the tuned drafter lives (next to the stock packs); ``variant``: selq4 (default) or bf16sel."""
+    """Where the tuned drafter lives (next to the stock packs); ``variant``: selq4 (the default and only one)."""
     return Path(data_dir) / FOLDER / tuned_pack(variant).name
 
 
@@ -529,7 +435,7 @@ def converted_ok(data_dir: str | Path | None, *, size: int | None = None, sha256
 
 def tuned_ok(data_dir: str | Path | None, variant: str | None = None) -> bool:
     """Is the tuned drafter here and exactly the pinned bytes (size, then SHA-256 once; the answer is kept in a marker beside it, as for the converted pack)? A short,
-    changed or corrupt file is simply "no": the stock pack (or the MTP) is used. ``variant``: selq4 (default) or bf16sel."""
+    changed or corrupt file is simply "no": the stock pack (or the MTP) is used. ``variant``: selq4 (the default and only one)."""
     pin = tuned_pack(variant)
     return converted_ok(data_dir, size=pin.size, sha256=pin.sha256, name=pin.name)
 
@@ -573,7 +479,7 @@ def uses_selector_q4(data_dir: str | Path | None, engine: str | os.PathLike[str]
 
 
 def engine_has_selector_q4() -> bool:
-    """Does the engine installed on this computer read the Q4_0-selector pack ("selector codebooks: Q4_0 rows": CUDA, HIP and Metal engines; not the SYCL one)? Setup, Load and
+    """Does the engine installed on this computer read the Q4_0-selector pack ("selector codebooks: Q4_0 rows")? Setup, Load and
     `strata drafting fetch` make that pack only then: where the engine cannot read it the 340 MB file would never be used. No engine installed yet: False (made at the next Load)."""
     return engine_reads_selector_q4(installed_engine_exe())
 
@@ -603,10 +509,7 @@ def pack_path(data_dir: str | Path, engine: str | os.PathLike[str] | None = None
     verified, and `engine` reads the Q4_0 selector (it is that format): the stock pack stays the fallback. `tuned`: whether this card qualifies (tuned_applies; None = the entry alone)."""
     if tuned is None:
         tuned = uses_tuned(backend, model_name)
-    variant = tuned_variant(backend, model_name) or "selq4"
-    if tuned and variant == "bf16sel" and tuned_ok(data_dir, variant):
-        return tuned_path(data_dir, variant)                       # the bf16-selector file: any engine that runs DFlash2 reads it
-    if engine is not None and tuned and variant == "selq4" and tuned_ok(data_dir) and engine_reads_selector_q4(engine):
+    if engine is not None and tuned and tuned_ok(data_dir) and engine_reads_selector_q4(engine):
         return tuned_path(data_dir)
     if engine is not None and converted_ok(data_dir) and engine_reads_selector_q4(engine):
         return converted_path(data_dir)
@@ -779,12 +682,6 @@ def window_for(backend: str | None, archs: Any = None, vram_mib: float | None = 
     return WIDE_WINDOW if big_blackwell(backend, archs, vram_mib, slots) else SPEC_WINDOW
 
 
-def conf_for(backend: str | None, slots: int | float | None) -> float:
-    """The ``--draft-conf`` for this engine family and a card that holds ``slots`` experts: the backend's own value (BACKEND_CONF) when it has one, else the slot steps."""
-    own = BACKEND_CONF.get(str(backend or "").strip().lower())
-    return own if own is not None else conf_for_slots(slots)
-
-
 def conf_for_slots(slots: int | float | None) -> float:
     """The ``--draft-conf`` for a card that holds ``slots`` experts (CONF_STEPS); DRAFT_CONF when the number is unknown."""
     if slots is None:
@@ -833,18 +730,16 @@ def blocked_by(args: list[Any], *, split: bool = False, slots: int = 0, named: b
 
     ``named``: the person chose DFlash2 by name (owner, 2026-11-03: "we want users to have a choice to pick whatever they want"). Several requests at once are then their word
     too, and the engine serves them with a drafter per request (``--draft dflash2 --batch N``, the slot drafts); only ``--pipeline-windows`` (the MTP's speculative next window,
-    which DFlash2 has no counterpart for) still blocks. Auto never passes ``named``: it keeps the MTP for several requests.
-    The Metal engine has no per-request drafters (generate.cpp batch_df2_wanted), so DFlash2 beside request slots there would draft nothing and the person would not know: on
-    Metal (``backend``) the old rule stays and a DFlash2 chosen with several requests is the MTP with the usual reason."""
+    which DFlash2 has no counterpart for) still blocks. Auto never passes ``named``: it keeps the MTP for several requests."""
     items = [str(a) for a in args or []]
-    if named and str(backend or "").lower() != "metal":
+    if named:
         return "--pipeline-windows" in items
     return bool(slots > 1 or any(a in items for a in ("--batch", "--slots", "--pipeline-windows", "--parallel")))
 
 
 def mtp_ready(args: list[Any]) -> bool | None:
-    """Is the MTP layer this start would load on this computer? ``--mtp <folder>`` with its ``experts.bin`` (or, on a Mac, ``mtp-q2_0.gguf`` beside the folder).
-    None (not known, taken as there) when the arguments name no layer at all (an Intel route, or a layer switched off) or a draft depth instead of a folder (Qwen3.6's
+    """Is the MTP layer this start would load on this computer? ``--mtp <folder>`` with its ``experts.bin`` (or ``mtp-q2_0.gguf`` beside the folder).
+    None (not known, taken as there) when the arguments name no layer at all (a layer switched off) or a draft depth instead of a folder (Qwen3.6's
     ``--mtp 4``: that layer is its own). A DFlash2-only install keeps ``--mtp <folder>`` in the saved arguments for a later switch to the MTP, so the folder is looked at."""
     items = [str(a) for a in args or []]
     if "--mtp" not in items:
@@ -1152,11 +1047,10 @@ def apply(cfg: dict[str, Any], *, klass: str = "other", data_dir: str | Path | N
         base = strip_mtp_flags(strip_draft_flags(args))
         flags = list(engine_flags(pack, vocab, form))
         kept_conf = _flag_value(mine, "--draft-conf")
-        tuned_conf = tuned_conf_for(backend, cfg.get("model_name")) if Path(pack) == tuned_path(data_dir, tuned_variant(backend, cfg.get("model_name"))) else None     # Metal: the conf the tuned pack was measured with; CUDA / HIP: None, the backend's own conf stays
         held = slots_of(base, vram_mib)
         tuned_here = Path(pack) == tuned_path(data_dir, tuned_variant(backend, cfg.get("model_name")))
         card_conf = big_blackwell_conf_for(backend, cfg.get("model_name"), archs, vram_mib, held) if tuned_here else None      # large-VRAM Blackwell, IQ3_S, tuned pack: the measured 0.55; Strix keeps 0.35 and only widens the window
-        flags[flags.index("--draft-conf") + 1] = kept_conf if kept_conf is not None else f"{tuned_conf if tuned_conf is not None else card_conf if card_conf is not None else conf_for(backend, held):g}"
+        flags[flags.index("--draft-conf") + 1] = kept_conf if kept_conf is not None else f"{card_conf if card_conf is not None else conf_for_slots(held):g}"
         flags[flags.index("--spec") + 1] = str(window_for(backend, archs, vram_mib, held))
         if _flag_value(mine, "--spec") is None:
             base = _without_flag(base, "--spec")              # the DFlash2 window; the person's own --spec stays

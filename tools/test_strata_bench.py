@@ -314,15 +314,15 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(B.gpu_slug({"gpu": [b, a, b]}), "2x-rtx-a4000-plus-rtx-5070-ti")
 
     def test_a_card_the_pc_s_nvidia_smi_does_not_list_is_the_servers_own(self):
-        """#2001: the engine on an Intel Arc beside a GeForce: the report names the Arc (the name the server reads)."""
+        """#2001: the engine on a Radeon beside a GeForce: the report names the Radeon (the name the server reads)."""
         srv = FakeStrata()
         self.addCleanup(srv.stop)
         nv = {"gpus": [{"name": "NVIDIA GeForce RTX 3080 Ti", "vram_mib": 12288, "driver": "560.1"}], "cuda": "12.6"}
         with mock.patch.object(B, "gpu_info_local", return_value=nv), mock.patch.object(
                 B, "try_json", side_effect=lambda base, path, *a, **k: (
-                    {"hardware_static": {"gpu_name": "Intel Arc Pro B70"}} if path == "/metrics" else {})):
-            m = B.collect_machine(srv.base, "", {"backend": "sycl"})
-        self.assertEqual((m["gpu"], m["cuda"]), (["Intel Arc Pro B70"], None))
+                    {"hardware_static": {"gpu_name": "AMD Radeon AI PRO R9700"}} if path == "/metrics" else {})):
+            m = B.collect_machine(srv.base, "", {"backend": "hip"})
+        self.assertEqual((m["gpu"], m["cuda"]), (["AMD Radeon AI PRO R9700"], None))
 
     def test_the_report_labels_the_driver_s_cuda_and_the_engine_s_build(self):
         """#2111: the CUDA line was the driver's ceiling read as the engine's toolkit, and storage said "not measured"."""

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Make a local, unpublished engine package for the component folder (strata_common/engine_component.py).
 
-    python packaging/package_engine.py --src <folder with strata[.exe] and its libraries> --backend cuda \
+    python packaging/package_engine.py --src <folder with strata-q38[.exe] and its libraries> --backend cuda \
         --version 0.1.45 --out <components>/engine --arch sm_86 --arch compute_89 \
         --min-driver nvidia=580.65 [--build-id <id>] [--platform linux-x86_64] [--tree] [--include GLOB ...]
 
@@ -13,10 +13,11 @@ list, the oldest driver, the engine build id, and an empty `signature` for S6). 
 checks and starts; it is not signed, not published, and nothing here uploads it. Signing is stream S6
 (`engine_component.register_signature_verifier`); `--sign-with` is deliberately absent until then.
 
-Files taken from --src, by default: the entrypoint, every `*.dll` / `*.so` / `*.so.*` / `*.dylib` / `*.metallib`
-beside it, `BUILD.json`, `LICENSE*`, the picture reader `strata-vision[.exe]` when the build has one (without it the
-engine answers text only: setup.py Control mode keeps the person's picture choice only when it is there) and the DeepSeek-V4.1
-engine `strata-dsv41[.exe]` (setup.py dsv41_exe() looks for it beside the engine; `--require-dsv41` refuses a package without it). `--include GLOB` (repeatable, relative to --src, `**` allowed) adds more, for
+Files taken from --src, by default: the entrypoint (strata-q38[.exe], the Qwen3.8 engine), every `*.dll` / `*.so` /
+`*.so.*` beside it, `BUILD.json`, `LICENSE*`, the other engine programs (ENGINE_EXES: the Qwen3.6 engine strata-q36 and
+the DeepSeek-V4.1 engine strata-ds41, which setup.py dsv41_exe() looks for beside the engine; `--require-dsv41` refuses a
+package without strata-ds41), the picture reader `strata-vision[.exe]` when the build has one (without it the
+engine answers text only: setup.py Control mode keeps the person's picture choice only when it is there). `--include GLOB` (repeatable, relative to --src, `**` allowed) adds more, for
 example `strata-vision.exe`, `strata-device.exe` or `rocm/**`. `--tree` takes every regular file under --src (the HIP
 package ships a `rocm/` tree of kernels). Symlinks are never followed or copied.
 """
@@ -45,16 +46,15 @@ from strata_control import shape_engine  # noqa: E402
 from strata_control.components import BACKEND_MATRIX, host_platform  # noqa: E402
 
 
-DSV41_EXE = "strata-dsv41"
-PAGED_EXES = ("strata-q38", "strata-ds41")
+DS41_EXE = "strata-ds41"        # the DeepSeek-V4.1 engine (--require-dsv41)
+ENGINE_EXES = ("strata-q38", "strata-q36", DS41_EXE)     # the engine programs a package carries beside its libraries
 
 
 def wanted(path: Path) -> bool:
     name = path.name.lower()
-    return (name.endswith((".dll", ".so", ".dylib", ".metallib")) or ".so." in name or name == "build.json"
-            or name.startswith("license") or name.removesuffix(".exe") in PAGED_EXES
-            or name in ("strata-vision", "strata-vision.exe", "strata-vision-hip", "strata-vision-hip.exe",
-                        DSV41_EXE, DSV41_EXE + ".exe"))
+    return (name.endswith((".dll", ".so")) or ".so." in name or name == "build.json"
+            or name.startswith("license") or name.removesuffix(".exe") in ENGINE_EXES
+            or name in ("strata-vision", "strata-vision.exe", "strata-vision-hip", "strata-vision-hip.exe"))
 
 
 READER_NAMES = ("strata-vision", "strata-vision.exe")
@@ -72,26 +72,17 @@ def _arch_numbers(value) -> set[int]:
     return found
 
 
-def check_picture_reader(src: Path, backend: str, target: str, archs: tuple[str, ...], *, variant: str = "",
-                         allow_stale: bool = False, allow_none: bool = False) -> list[str]:
-    """The picture reader of a package must run on every card and Mac the package does (tools tests: I1, I2, #3669, #3697).
+def check_picture_reader(src: Path, backend: str, archs: tuple[str, ...], *, variant: str = "",
+                         allow_stale: bool = False) -> list[str]:
+    """The picture reader of a package must run on every card the package does (tools tests: I1, I2, #3669).
 
     * CUDA package with a reader: BUILD.json (beside the engine) must list `vision_archs`, and every `sm_NN` the package carries
       code for must be there. A reader reused from an older build (the Windows zips' strata-vision.exe, unchanged since 0.1.44, had no
       sm_60) stops with "device kernel image is invalid" on a Pascal card while the engine runs. Refused, unless allow_stale.
-    * macOS package without a reader: refused (a Mac with this package cannot read a picture), unless allow_none.
     * CUDA package without a reader: allowed (text-only), reported in the returned notes so the build log says it.
     Returns notes to print."""
     reader = next((n for n in READER_NAMES if (src / n).is_file()), None)
     notes: list[str] = []
-    if target.startswith("macos"):
-        if reader is None and not allow_none:
-            raise SystemExit("refusing to package the macOS engine without its picture reader: a Mac with this package could not read "
-                             "a picture (#3697). Build it with packaging/build_vision_mac.sh and copy strata-vision beside strata "
-                             "(or give --no-picture-reader to ship a text-only package on purpose).")
-        if reader is None:
-            notes.append("no picture reader in this macOS package: pictures are off for it")
-        return notes
     if backend != "cuda":
         return notes
     if reader is None:
@@ -164,7 +155,7 @@ def build(src: Path, backend: str, version: str, target: str, out: Path, *, entr
           archs: tuple[str, ...] = (), min_driver: dict | None = None, build_id: str | None = None,
           min_runtime: str | None = None, notes: str = "", tree: bool = False, include: list[str] | None = None,
           variant: str = "", search: list[Path] | None = None, allow_libs: list[str] | None = None,
-          check_reader: bool = False, allow_stale_vision: bool = False, allow_no_reader: bool = False,
+          check_reader: bool = False, allow_stale_vision: bool = False,
           require_dsv41: bool = False, shape: str = "") -> Path:
     if shape:
         if not shape_engine.valid(shape):
@@ -185,16 +176,15 @@ def build(src: Path, backend: str, version: str, target: str, out: Path, *, entr
         problems = hipblaslt_tuning.check_stage(src, archs)
         if problems:
             raise SystemExit("refusing to package the AMD engine:\n  " + "\n  ".join(problems))
-    entrypoint = entry or ("strata.exe" if target.startswith("windows") else "strata")
+    entrypoint = entry or ("strata-q38.exe" if target.startswith("windows") else "strata-q38")
     if not (src / entrypoint).is_file():
         raise SystemExit(f"{src / entrypoint} does not exist")
     if check_reader:                       # the release recipes and the CLI ask for it; the library call keeps its old behaviour
-        for note in check_picture_reader(src, backend, target, archs, variant=variant, allow_stale=allow_stale_vision,
-                                         allow_none=allow_no_reader):
+        for note in check_picture_reader(src, backend, archs, variant=variant, allow_stale=allow_stale_vision):
             print("note: " + note)
-    if require_dsv41 and not any((src / n).is_file() for n in (DSV41_EXE, DSV41_EXE + ".exe")):
-        raise SystemExit(f"refusing to package: {src} has no {DSV41_EXE}[.exe] (--require-dsv41); build it with -DSTRATA_BUILD_DSV41=ON "
-                         "(--target strata-dsv41) and copy it beside the engine")
+    if require_dsv41 and not any((src / n).is_file() for n in (DS41_EXE, DS41_EXE + ".exe")):
+        raise SystemExit(f"refusing to package: {src} has no {DS41_EXE}[.exe] (--require-dsv41); build it with -DSTRATA_BUILD_DSV41=ON "
+                         "(--target strata-ds41) and copy it beside the engine")
     folder = out / (f"{version}-{target}-{backend}" + (f"-{variant}" if variant else ""))
     if folder.exists():
         raise SystemExit(f"{folder} already exists; remove it first (packages are immutable)")
@@ -225,8 +215,7 @@ def build(src: Path, backend: str, version: str, target: str, out: Path, *, entr
             manifest["notes"] = notes
         (staging / ec.MANIFEST).write_text(json.dumps(manifest, indent=1) + "\n", encoding="utf-8")
         if os.name != "nt":
-            for exe_name in (entrypoint, DSV41_EXE, *PAGED_EXES,
-                             "strata-vision", "strata-vision-hip"):
+            for exe_name in (entrypoint, *ENGINE_EXES, "strata-vision", "strata-vision-hip"):
                 if (staging / exe_name).is_file():
                     (staging / exe_name).chmod(0o755)
         ec.verify(ec.read_manifest(staging, component_id), full=True)
@@ -311,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--allow-lib", action="append", default=[], metavar="NAME",
                     help="an imported library that really is provided by the target system (rare; named so the check passes)")
     ap.add_argument("--require-dsv41", action="store_true",
-                    help="refuse the package when --src has no strata-dsv41[.exe] (the DeepSeek-V4.1 engine that setup.py looks for beside the engine)")
+                    help="refuse the package when --src has no strata-ds41[.exe] (the DeepSeek-V4.1 engine that setup.py looks for beside the engine)")
     ap.add_argument("--shape", default="", metavar="GEOMETRY",
                     help="package the engine of a model shape (the name the engine was compiled for, -DSTRATA_GEOMETRY=q4_lite): its own component strata-q4-lite, installed "
                          "next to the Strata engine and never in place of it (strata_control/shape_engine.py)")
@@ -320,7 +309,6 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--vision-archs", default="", help="with --stamp-vision: the architectures the reader was built for, e.g. '60;61;70;75;80;86;89'")
     ap.add_argument("--allow-stale-vision", action="store_true",
                     help="package a CUDA picture reader whose BUILD.json vision_archs do not cover the package's archs (it will fail on those cards)")
-    ap.add_argument("--no-picture-reader", action="store_true", help="ship a macOS package without strata-vision on purpose (pictures stay off)")
     a = ap.parse_args(argv)
     if a.verify:
         try:
@@ -329,8 +317,8 @@ def main(argv: list[str] | None = None) -> int:
         except ec.ComponentProblem as exc:
             print(f"{a.verify}: REFUSED: {exc}")
             return 1
-        if a.require_dsv41 and not any(f[0] in (DSV41_EXE, DSV41_EXE + ".exe") for f in component.files):
-            print(f"{a.verify}: REFUSED: no {DSV41_EXE}[.exe] in the manifest (--require-dsv41)")
+        if a.require_dsv41 and not any(f[0] in (DS41_EXE, DS41_EXE + ".exe") for f in component.files):
+            print(f"{a.verify}: REFUSED: no {DS41_EXE}[.exe] in the manifest (--require-dsv41)")
             return 1
         bad = binary_deps.uncovered(a.verify)
         if bad:
@@ -359,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
                    archs=tuple(a.arch), min_driver=drivers, build_id=a.build_id, min_runtime=a.min_runtime,
                    notes=a.notes, tree=a.tree, include=a.include, variant=a.variant,
                    search=a.search, allow_libs=a.allow_lib, check_reader=True, allow_stale_vision=a.allow_stale_vision,
-                   allow_no_reader=a.no_picture_reader, require_dsv41=a.require_dsv41, shape=a.shape)
+                   require_dsv41=a.require_dsv41, shape=a.shape)
     entries = [p for p in folder.rglob("*") if p.is_file()]
     total = sum(p.stat().st_size for p in entries)
     print(f"{folder}  ({total / (1 << 20):.1f} MiB, {len(entries)} files, manifest sha256 {package_sha256(folder)})")

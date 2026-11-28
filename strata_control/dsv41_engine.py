@@ -3,7 +3,7 @@
 It goes in ``<data>/engine-dsv41/<version>-<platform>-<backend>[-<variant>]/``, beside the Strata engine and never inside it, so the Qwen
 engine's files are not touched.  The package is picked, downloaded (resumable), unpacked and checked with the same code as an engine update
 (strata_control/updater.py: the signed feed, the archive's SHA-256, the manifest hash the feed names, the package signature, every file's hash);
-there is no test start here (setup's own 16-token question follows the pack).
+there is no test start here (`upgrade` has one: dsv41_paths.test_start).
 """
 from __future__ import annotations
 
@@ -12,41 +12,10 @@ import shutil
 from pathlib import Path
 from typing import Callable
 
-NAME = "strata-dsv41"
+from strata_common import dsv41_paths
+
+NAME = dsv41_paths.NAME
 DIR = "engine-dsv41"
-
-#: A Mac engine that carries DeepSeek's picture tower on Metal has this text in its program (the same way drafting.engine_reads_selector_q4 reads its mark).  Pictures for
-#: DeepSeek on a Mac are on exactly when the installed strata-dsv41 has it: capability, not a switch.
-MARK_MAC_VISION = b"STRATA_DS4_METAL_VISION_V1"
-MAC_TEXT_LINE = "DeepSeek on a Mac reads text only with this engine (its picture reader needs an engine update)."
-_macvis: dict = {}
-
-
-def reads_mac_vision(exe) -> bool:
-    """Does the strata-dsv41 program at `exe` contain MARK_MAC_VISION?  Read from the file (never started), once per path, size and time; False when it cannot be read."""
-    import mmap
-    try:
-        path = Path(exe)
-        st = path.stat()
-        key = (str(path), st.st_size, st.st_mtime_ns)
-    except (OSError, ValueError, TypeError):
-        return False
-    if key not in _macvis:
-        try:
-            with open(path, "rb") as handle, mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as data:
-                _macvis[key] = data.find(MARK_MAC_VISION) >= 0
-        except (OSError, ValueError):
-            _macvis[key] = False
-    return _macvis[key]
-
-
-def mac_vision_state(exe) -> str:
-    """"yes" (the engine has the marker), "no" (an engine is there without it: text only) or "unknown" (no engine installed yet: the first start fetches the newest, and
-    setup looks again once it is there)."""
-    if not exe or not Path(str(exe)).is_file():
-        return "unknown"
-    return "yes" if reads_mac_vision(exe) else "no"
-
 
 def exe_name() -> str:
     return NAME + (".exe" if os.name == "nt" else "")
@@ -59,7 +28,7 @@ def version_key(folder_name: str) -> tuple:
 
 
 def find(dest: Path) -> Path | None:
-    """The strata-dsv41 a start uses from `dest` (engine-dsv41/): the package the person chose in Settings > Engine (the `.chosen` file), else the newest
+    """The strata-ds41 a start uses from `dest` (engine-dsv41/): the package the person chose in Settings > Engine (the `.chosen` file), else the newest
     installed one.  None when there is none."""
     try:
         pin = (Path(dest) / ".chosen").read_text(encoding="utf-8-sig").strip()
@@ -175,7 +144,7 @@ def _remove_older(dest: Path, keep: str) -> None:
 def install_package(dest: Path, package: str | os.PathLike, *, emit: Callable[[str], None] = print) -> Path | None:
     """Install a DeepSeek engine package the person downloaded from the release page (a .tar.gz / .zip, or the unpacked folder) into `dest`.
     Checked before anything is installed: it is a DeepSeek engine package for this system, its manifest is signed by a key Strata trusts, and every
-    file matches the hash in the manifest.  Returns the new strata-dsv41, or None with a plain line through `emit`."""
+    file matches the hash in the manifest.  Returns the new strata-ds41, or None with a plain line through `emit`."""
     from strata_control import updater
     from strata_common import engine_component as ec, signing
     from strata_common.targets import host_platform
@@ -250,7 +219,7 @@ def install_package(dest: Path, package: str | os.PathLike, *, emit: Callable[[s
 
 def install(dest: Path, source: str, *, hardware: dict | None = None, emit: Callable[[str], None] = print, cancel=None) -> Path | None:
     """Fetch the DeepSeek engine package for this PC from the signed feed at `source` (a URL or a folder) into `dest`.
-    Returns the new strata-dsv41, or None with a plain line through `emit` when there is none (not in the feed, nothing for this PC)."""
+    Returns the new strata-ds41, or None with a plain line through `emit` when there is none (not in the feed, nothing for this PC)."""
     from strata_control import feed as feedmod, updater
     from strata_common import signing
 
@@ -318,27 +287,14 @@ def source_reachable(source: str, timeout: float = 10.0) -> bool:
         return False
 
 
-def _test_start(exe: Path, timeout: float = 120.0) -> tuple[bool, str]:
-    """The new engine starts: `strata-dsv41 --version` runs, loads its libraries and names itself (it needs no graphics card and no model).
-    The package's own folders go on the library path first: a Windows HIP package carries the ROCm runtime it loads in rocm/bin."""
-    import subprocess
-    try:
-        done = subprocess.run([str(exe), "--version"], capture_output=True, text=True, errors="replace", timeout=timeout, cwd=str(Path(exe).parent),
-                              env=start_env(exe))
-    except (OSError, subprocess.SubprocessError) as exc:
-        return False, f"it could not be started ({exc})"
-    first = ((done.stdout or "").strip().splitlines() or [""])[0]
-    if done.returncode != 0 or not first.startswith(NAME):
-        tail = ((done.stderr or "").strip().splitlines() or [first or f"exit {done.returncode}"])[-1]
-        return False, f"it did not start correctly ({tail[:160]})"
-    return True, first
+_test_start = dsv41_paths.test_start       # (a module attribute of its own: tests replace it)
 
 
 def upgrade(dest: Path, source: str, *, installed: Path | None = None, hardware: dict | None = None,
             emit: Callable[[str], None] = print, cancel=None) -> Path | None:
     """The installed DeepSeek engine package in `dest` (engine-dsv41/) is older than the signed feed's `dsv41` member for this PC: fetch the newer one,
-    check it as `install` does (signature, hashes, every file), put it NEXT TO the old one, start it once (`--version`), and only then use it (the older
-    packages are kept).  Returns the new strata-dsv41, or None: nothing newer, the feed cannot be read (silent: a launch never waits on the
+    check it as `install` does (signature, hashes, every file), put it NEXT TO the old one, start it once without model
+    arguments, and only then use it (the older packages are kept).  Returns the new strata-ds41, or None: nothing newer, the feed cannot be read (silent: a launch never waits on the
     network), or the newer one could not be installed (one plain line, the installed engine keeps running).  Versions compare numerically
     (0.1.49 < 0.1.49.1).  Older packages stay installed until the person deletes them (Settings > Engine)."""
     from strata_control import feed as feedmod, updater

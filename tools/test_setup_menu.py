@@ -1,4 +1,4 @@
-"""Tests for setup.py's model menu (0.1.44): the family order, NVFP4 hidden on AMD and Intel, the NVFP4 line's card note
+"""Tests for setup.py's model menu (0.1.44): the family order, NVFP4 hidden on AMD, the NVFP4 line's card note
 (RTX 50 native FP4, older RTX slower than UD-IQ4_XS), the Unsloth sizes in order with images on, and the prebuilt
 install removing a stale strata_kq library.
 
@@ -28,13 +28,13 @@ class FamilyOrder(unittest.TestCase):
         self.assertEqual(setup.menu_families(False)[0], "qwen")
         self.assertIn("GSQ-RCO", setup.FAMILIES["qwen"]["by"])
 
-    def test_nvfp4_is_not_listed_on_amd_and_intel(self):
+    def test_nvfp4_is_not_listed_on_amd(self):
         fams = setup.menu_families(True)
         self.assertNotIn("nvfp4", fams)
         self.assertEqual(fams, ["qwen", "swift", "coder", "unsloth", "gyro"])
         self.assertIn("nvfp4", setup.FAMILIES)             # --family nvfp4 still exists, and says why not
 
-    def test_the_unsloth_line_names_the_alternative_on_amd_and_intel(self):
+    def test_the_unsloth_line_names_the_alternative_on_amd(self):
         self.assertIn("UD-IQ4_XS", setup.family_menu_note("unsloth", True, None))
         self.assertEqual(setup.family_menu_note("unsloth", False, {"arch": 86}), "")
         self.assertEqual(setup.family_menu_note("coder", True, None), "")
@@ -206,11 +206,11 @@ class KqLibrary(unittest.TestCase):
             eng, tmp = Path(d) / "engine", Path(d) / "new"
             eng.mkdir()
             tmp.mkdir()
-            (eng / setup.EXE).write_bytes(b"old")
+            (eng / setup.Q38EXE).write_bytes(b"old")
             (eng / setup.KQ_LIB).write_bytes(b"old kq")
-            (tmp / setup.EXE).write_bytes(b"new")
+            (tmp / setup.Q38EXE).write_bytes(b"new")
             setup.install_unpacked(tmp, eng)
-            self.assertEqual((eng / setup.EXE).read_bytes(), b"new")
+            self.assertEqual((eng / setup.Q38EXE).read_bytes(), b"new")
             self.assertFalse((eng / setup.KQ_LIB).exists())
             self.assertEqual((eng / setup.PREVIOUS_ENGINE / setup.KQ_LIB).read_bytes(), b"old kq")   # a rollback gets it back
 
@@ -220,7 +220,7 @@ class KqLibrary(unittest.TestCase):
             eng.mkdir()
             tmp.mkdir()
             (eng / setup.KQ_LIB).write_bytes(b"old kq")
-            (tmp / setup.EXE).write_bytes(b"new")
+            (tmp / setup.Q38EXE).write_bytes(b"new")
             (tmp / setup.KQ_LIB).write_bytes(b"new kq")
             setup.install_unpacked(tmp, eng)
             self.assertEqual((eng / setup.KQ_LIB).read_bytes(), b"new kq")

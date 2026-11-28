@@ -5,8 +5,8 @@ is not counted), against the graphics memory plus the RAM.  They fit: "fits".  T
             (DeepSeek: the download minus its Engram file, from the plan)
     room  = RAM + the card's memory (the largest card that counts; a chip that shares the RAM only its own carve-out; DeepSeek: every card)
 
-No reserve is taken off either side.  Nothing here refuses anything; a model that "may run slower" can still be started, and a computer with no card or a Mac with
-little memory gets the same two words.
+No reserve is taken off either side.  Nothing here refuses anything; a model that "may run slower" can still be started, and a computer with no card
+gets the same two words.
 """
 
 from __future__ import annotations

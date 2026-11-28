@@ -1,6 +1,6 @@
 // include/strata/common/experts/expert_swaps.hpp - the adaptive tier's choice of which experts a GPU's cache takes in
 // and which it gives up, from how often decoding routed to each (plan v0.3 P6).  Header-only, so that every engine
-// that compiles src/program/generate.cpp (the Metal build too) needs no other source for it.
+// that compiles src/program/generate.cpp needs no other source for it.
 #pragma once
 
 #include <algorithm>

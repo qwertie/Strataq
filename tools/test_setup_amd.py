@@ -221,7 +221,8 @@ class GpuLists(unittest.TestCase):
             def fake_build(src, bdir, target, defs, vcvars, bat):
                 calls["defs"] = defs
                 (bdir).mkdir(parents=True, exist_ok=True)
-                (bdir / setup.EXE).write_text("engine")
+                for name in setup.QWEN_PROGRAMS:
+                    (bdir / name).write_text("engine")
 
             class Sh:
                 which = staticmethod(lambda name: "/usr/bin/" + name)
@@ -315,7 +316,7 @@ class WindowsDetection(unittest.TestCase):
 
     def test_build_compiles_with_rocm_clang_and_strata_device(self):
         """--build on Windows: ROCm's clang compiles the host code too, under MSVC's vcvars; strata-device.exe (which
-        hip_card asks) and the new engine are built beside strata.exe, and the HIP runtime goes beside them (#468)."""
+        hip_card asks) is built beside the Qwen engines, and the HIP runtime goes beside them (#468)."""
         calls = []
 
         def fake_build(src, bdir, target, defs, vcvars, bat):
@@ -324,8 +325,8 @@ class WindowsDetection(unittest.TestCase):
             for name in target.split():
                 (bdir / (name + ".exe")).write_text("x")
         with tempfile.TemporaryDirectory() as d, mock.patch.object(setup, "WIN", True), \
-                mock.patch.object(setup, "EXE", "strata.exe"), \
                 mock.patch.object(setup, "Q38EXE", "strata-q38.exe"), \
+                mock.patch.object(setup, "QWEN_PROGRAMS", ("strata-q38.exe", "strata-q36.exe")), \
                 mock.patch.object(setup, "ROOT", Path(d)), mock.patch.object(setup, "cmake_build", fake_build), \
                 mock.patch.object(setup, "rocm_root", return_value=(Path(d) / "rocm", [str(Path(d) / "rocm/bin")])), \
                 mock.patch.object(setup, "find_vcvars", return_value=Path("C:/vs/vcvars64.bat")), \
@@ -337,11 +338,11 @@ class WindowsDetection(unittest.TestCase):
                 mock.patch.object(setup, "say"), mock.patch.object(setup, "ok"), mock.patch.dict(setup.os.environ):
             eng = setup.build_engine_hip({"arch": "gfx1151"}, Path("llama"), programs=(setup.Q38EXE,))
             target, defs, vcvars, bat = calls[0]
-            self.assertEqual(target.split(), ["strata", "strata-q38", "strata-device"])
+            self.assertEqual(target.split(), ["strata-q36", "strata-q38", "strata-device"])
             self.assertIn(f"-DCMAKE_CXX_COMPILER={(Path(d) / 'rocm/llvm/bin/clang').as_posix()}++.exe", defs)
             self.assertEqual((vcvars, bat), (Path("C:/vs/vcvars64.bat"), "build-strata-hip.bat"))
             self.assertTrue((eng / "strata-device.exe").exists() and (eng / setup.Q38EXE).exists())
-            self.assertEqual(json.loads((eng / "BUILD.json").read_text())["programs"], [setup.Q38EXE])
+            self.assertEqual(json.loads((eng / "BUILD.json").read_text())["programs"], ["strata-q36.exe", "strata-q38.exe"])
             beside.assert_called_once_with(eng)
             setup.build_engine_hip({"arch": "gfx1151"}, Path("llama"), programs=(setup.Q38EXE,))
             self.assertEqual(len(calls), 1)
@@ -470,7 +471,7 @@ class WindowsDetection(unittest.TestCase):
 
             def publish(meta):
                 with zipfile.ZipFile(pub / setup.WIN_HIP_ASSET, "w") as z:
-                    z.writestr(setup.EXE, "engine")       # #975: "strata" on Linux
+                    z.writestr(setup.Q38EXE, "engine")    # #975: "strata-q38" on Linux
                     z.writestr("strata-device.exe", "probe")
                     z.writestr("rocm/bin/amdhip64_7.dll", "dll")
                     z.writestr("BUILD.json", json.dumps(meta))
@@ -504,7 +505,7 @@ class WindowsDetection(unittest.TestCase):
                 ver = ".".join(map(str, setup.WIN_HIP_MIN_ENGINE))
                 meta = {"source": "prebuilt", "backend": "hip", "version": ver, "archs": archs, "lib_dirs": ["rocm/bin"]}
                 with zipfile.ZipFile(pub / setup.WIN_HIP_ASSET, "w") as z:
-                    z.writestr(setup.EXE, "engine")
+                    z.writestr(setup.Q38EXE, "engine")
                     z.writestr("strata-device.exe", "probe")
                     z.writestr("rocm/bin/amdhip64_7.dll", "dll")
                     z.writestr("BUILD.json", json.dumps(meta))
@@ -727,8 +728,7 @@ class DeviceAccess(unittest.TestCase):
 
 class EngineLaunchEnv(unittest.TestCase):
     """#2372: every engine program setup runs gets the ready-made HIP engine's rocm/bin on PATH, or Windows shows a
-    "hipblas.dll not found" dialog per DLL and `strata --families` prints nothing (setup then said the engine does
-    not run Qwen3.6)."""
+    "hipblas.dll not found" dialog per DLL (`strata-device --list-devices`)."""
 
     def engine(self, tmp: Path) -> Path:
         eng = tmp / "engine"
@@ -760,20 +760,13 @@ class EngineLaunchEnv(unittest.TestCase):
             with mock.patch.dict("os.environ", {"PATH": "/usr/bin"}):
                 self.assertEqual(setup.engine_env(Path(t))["PATH"], "/usr/bin")
 
-    def test_families_probe_runs_with_that_env(self):
-        seen = {}
-
-        def fake_run(cmd, **kw):
-            seen["cmd"], seen["env"] = cmd, kw.get("env")
-            return mock.Mock(stdout="qwen4exp qwen35moe\n")
+    def test_families_follow_the_programs_in_the_engine_folder(self):
         with tempfile.TemporaryDirectory() as t:
             eng = self.engine(Path(t))
-            with mock.patch.object(setup.subprocess, "run", fake_run), \
-                 mock.patch.object(setup.os, "name", "nt"):
-                names = setup.engine_families(eng)
-            self.assertEqual(names, {"qwen4exp", "qwen35moe"})
-            self.assertEqual(seen["cmd"][1], "--families")
-            self.assertEqual(seen["env"]["PATH"].split(setup.os.pathsep)[0], str(eng / "rocm" / "bin"))
+            with mock.patch.object(setup.subprocess, "run", side_effect=AssertionError("no engine program is run")):
+                self.assertEqual(setup.engine_families(eng), {"qwen4exp"})        # a gfx906 build has no strata-q36
+                (eng / setup.Q36EXE).write_text("x")
+                self.assertEqual(setup.engine_families(eng), {"qwen4exp", "qwen35moe"})
 
     def test_device_probe_runs_with_that_env(self):
         seen = {}

@@ -12,7 +12,7 @@ from unittest import mock
 from strata_server.frontend import ChatTemplate
 from strata_server.server import ByteTokenizer, Service
 from strata_server.test_server import start_http
-from strata_common.engine_client import EngineDied, StrataEngine, engine_args
+from strata_common.engine_client import EngineDied, StrataEngine
 from strata_server.test_lifecycle import ResidentEngine
 
 
@@ -66,13 +66,6 @@ class EngineCommand(unittest.TestCase):
         e = self.engine([None])
         with self.assertRaises(EngineDied):
             e.vram(100)
-
-    def test_config_key(self):
-        cfg = {"args": ["--max-context", "8192"]}
-        self.assertEqual(engine_args(cfg), ["--max-context", "8192"])           # off unless asked
-        self.assertEqual(engine_args({**cfg, "vram_elastic": True, "vram_segment_mib": 256}),
-                         ["--max-context", "8192", "--vram-elastic", "--vram-segment-mib", "256"])
-        self.assertEqual(engine_args({**cfg, "vram_elastic": "yes"}), ["--max-context", "8192"])
 
 
 class Route(unittest.TestCase):

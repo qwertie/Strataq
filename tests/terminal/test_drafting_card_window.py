@@ -86,7 +86,7 @@ class CardWindow(unittest.TestCase):
 
     def test_blackwell_cc_12_0_under_48_gb_keeps_today(self):
         for mib in (32768, 24576, 16384, 12288, 45776, None):           # RTX 5090 32 GB .. 5070 12 GB, just under the line, memory unknown (several cards)
-            self.assertEqual(self.flags(IQ3S, "cuda", ["sm_120"], mib, tuned=True), ("6", f"{drafting.conf_for('cuda', drafting.slots_of([], mib)):g}"), mib)     # the slot rule, as before
+            self.assertEqual(self.flags(IQ3S, "cuda", ["sm_120"], mib, tuned=True), ("6", f"{drafting.conf_for_slots(drafting.slots_of([], mib)):g}"), mib)     # the slot rule, as before
         self.assertEqual(self.flags(IQ3S, "cuda", ["sm_120"], 32768)[1], "0.35")
 
     def test_the_spark_is_unchanged(self):
@@ -100,10 +100,10 @@ class CardWindow(unittest.TestCase):
 
     def test_other_cards_are_unchanged(self):
         for backend, archs, mib in (("cuda", ["sm_86"], 12288), ("cuda", ["sm_89"], 24576), ("cuda", ["sm_90"], 81920), ("cuda", ["sm_86"], 49152), ("hip", ["gfx1201"], 32768),
-                                    ("hip", ["gfx1100"], 24576), ("hip", ["gfx1103"], None), ("sycl", ["arc_a"], None), ("metal", [], None)):
+                                    ("hip", ["gfx1100"], 24576), ("hip", ["gfx1103"], None)):
             spec, conf = self.flags(Q4 if backend == "hip" else V31, backend, archs, mib)
             self.assertEqual(spec, "6", (backend, archs))
-            self.assertEqual(conf, f"{drafting.conf_for(backend, drafting.slots_of([], mib)):g}", (backend, archs))      # the stock pack here: the backend's own rule
+            self.assertEqual(conf, f"{drafting.conf_for_slots(drafting.slots_of([], mib)):g}", (backend, archs))      # the stock pack here: the slot rule
 
     def test_the_persons_own_flags_win(self):
         self.assertEqual(self.flags(IQ3S, "cuda", ["sm_120"], 73728, user_args=["--draft-conf", "0.4", "--spec", "5"], extra=["--draft-conf", "0.4", "--spec", "5"], tuned=True)[1], "0.4")
@@ -119,7 +119,7 @@ class CardWindow(unittest.TestCase):
         for mib, major, minor in ((73728, 12, 0), (98304, 12, 0), (49152, 12, 0), (32768, 12, 0), (16384, 12, 0), (12288, 12, 0), (None, 12, 0), (131072, 12, 1), (None, 12, 1),
                                   (12288, 8, 6), (24576, 8, 9), (81920, 9, 0), (49152, 8, 6), (73728, 10, 0)):
             cards.append(("cuda", [f"sm_{major}{minor}"], mib, False, major, minor, (mib or 0) * (1 << 20)))
-        for backend, archs, mib, uma, major, minor, vram in (*cards, ("hip", ["gfx1201"], 32768, False, 0, 0, 0), ("hip", ["gfx1100"], 24576, False, 0, 0, 0), ("sycl", ["arc_a"], None, False, 0, 0, 0), ("metal", [], None, False, 0, 0, 0)):
+        for backend, archs, mib, uma, major, minor, vram in (*cards, ("hip", ["gfx1201"], 32768, False, 0, 0, 0), ("hip", ["gfx1100"], 24576, False, 0, 0, 0)):
             spec = int(self.flags(IQ3S if backend != "hip" else Q4, backend, archs, mib)[0])
             old = effective(6, old_cap(uma, major))
             new = effective(spec, new_cap(uma, major, minor, vram))

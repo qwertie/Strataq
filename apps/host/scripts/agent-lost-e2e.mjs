@@ -61,7 +61,7 @@ if (!EXISTING) {
   const g2 = env('E2E_GGUF2', join(HOME, 'models/IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00002-of-00002.gguf'));
   const mtp = env('E2E_MTP', join(HOME, 'pr1426/mtp-rt'));
   const profile = env('E2E_PROFILE', join(HOME, 'bwm/cnt3/data/expert-profile.bin'));
-  const exe = env('E2E_ENGINE', join(HOME, 'agentlost/eng/strata'));
+  const exe = env('E2E_ENGINE', join(HOME, 'agentlost/eng/strata-q38'));
   const lib = env('E2E_LIB', join(HOME, 'agentlost/eng'));
   for (const f of [pack, g1, g2, mtp, exe]) if (!existsSync(f)) { console.error(`missing: ${f}`); process.exit(2); }
   const config = join(OUT, 'server.json');

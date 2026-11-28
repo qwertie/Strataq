@@ -27,7 +27,7 @@ def test_model_file_is_read_under_either_name_and_reaches_qwen_under_its_old_one
 
 def test_prompt_chunk_reaches_qwen_under_its_old_name_and_deepseek_unchanged():
     assert translate_args({"exe": "strata-q38.exe"}, ["--prefill-chunk", "4096"]) == ["--prefill", "4096"]
-    assert translate_args({"exe": "strata-ds41.exe"}, ["--prefill-chunk", "4096"]) == ["--prefill-chunk", "4096"]
+    assert translate_args({"exe": "strata-ds41.exe", "arch": "deepseek41"}, ["--prefill-chunk", "4096"]) == ["--prefill-chunk", "4096"]
 
 
 def test_prompt_order_reaches_both_paged_engines():

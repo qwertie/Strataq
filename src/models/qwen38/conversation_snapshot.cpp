@@ -236,7 +236,7 @@ struct ParkAsync {
 ParkAsync& park_async() { static ParkAsync a; return a; }
 constexpr size_t kParkPiece = (size_t) 4 << 20;
 bool park_async_on() {
-#if defined(STRATA_USE_HIP) || defined(STRATA_HIP_GFX906) || defined(STRATA_GPU_METAL)
+#if defined(STRATA_USE_HIP) || defined(STRATA_HIP_GFX906)
     return false;
 #else
     static const bool on = [] { const char* v = std::getenv("STRATA_PARK_ASYNC"); return v != nullptr && v[0] == '1'; }();
@@ -244,7 +244,7 @@ bool park_async_on() {
 #endif
 }
 bool on_device(const void* p) {
-#if defined(STRATA_USE_HIP) || defined(STRATA_HIP_GFX906) || defined(STRATA_GPU_METAL)
+#if defined(STRATA_USE_HIP) || defined(STRATA_HIP_GFX906)
     (void) p;   // (no pointer-attribute query in the shims: the slot takes no part, as when the query fails)
     return false;
 #else

@@ -281,12 +281,8 @@ class OwnFiles(unittest.TestCase):
                 "UD-IQ2_XS": "2-bit i-quant (Unsloth Dynamic v3.1)", "UD-Q2_K_XL": "2-bit (Unsloth Dynamic v3.1) with some 3-bit experts",
                 "UD-IQ3_XXS": "3-bit i-quant (Unsloth Dynamic v3.1)", "UD-Q3_K_XL": "3-bit (Unsloth Dynamic v3.1) with some 4-bit experts",
                 "UD-IQ4_XS-v31": "~4-bit i-quant (Unsloth Dynamic v3.1), a newer file than UD-IQ4_XS with other tensor types"}
-        from strata_control import mac_fit
-        sys.path.insert(0, str(ROOT / "tools"))
-        import strata_mcp
         for m, a in want.items():
             self.assertEqual(setup.MODELS[m]["about"], a)
-            self.assertEqual(mac_fit.MAC_ABOUT[m], a)
         for m in ("UD-IQ1_M", "UD-Q2_0", "UD-IQ2_XS", "UD-Q2_K_XL", "UD-IQ3_XXS", "UD-Q3_K_XL", "UD-IQ4_XS", "UD-Q4_K_XL", "UD-Q5_K_XL", "UD-Q6_K_XL", "Q8_0"):
             self.assertIn(m, setup.SUPPORTED_GGUFS)
         self.assertIn("(Unsloth's UD-IQ1_S, other K-quant files) cannot be used", setup.SUPPORTED_GGUFS)
@@ -489,7 +485,7 @@ class HeaderRegression(unittest.TestCase):
                     self.assertGreaterEqual(h["data_start"] + end, s["bytes"] - 64)     # (the file ends where its last tensor does)
 
     def test_the_catalog_sets_have_the_tensor_mix_of_the_plan(self):
-        """PLAN-QUANTS section 2: routed gate/up types by layer, down types, the Q5_0 downs that decide the Mac and the split engine."""
+        """PLAN-QUANTS section 2: routed gate/up types by layer, down types, the Q5_0 downs that decide the split engine."""
         want = {
             "UD-IQ1_M": ({"IQ2_XXS": 23, "IQ2_S": 18, "IQ2_XS": 7}, {"Q2_0": 46, "IQ4_NL": 2}),
             "UD-Q2_0": ({"IQ2_XXS": 18, "IQ2_S": 30}, {"Q2_0": 39, "IQ4_NL": 9}),

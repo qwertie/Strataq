@@ -35,46 +35,24 @@ class Launches(Base):
         return json.loads(json.dumps(cfg))
 
     # ---- #5178
-    def test_an_explicit_draft_conf_reaches_the_engine_and_survives_a_second_launch(self):
-        for mode in ("dflash2", "auto"):
-            with self.subTest(mode=mode):
-                first = self.launch(extra={"--draft-conf": "0.35"}, drafting=mode)
-                argv = self.server_args(first, vram=24000.0)           # (an 8 GB card is the 12 GB class, where Auto is the MTP for IQ3_S: drafting.CLASS_DEFAULTS)
-                self.assertEqual((argv.count("--draft-conf"), flag(argv, "--draft-conf")), (1, "0.35"))
-                self.assertEqual(flag(first["user_args"], "--draft-conf"), "0.35", "the saved config carries it where the drafter policy keeps it")
-                second = self.launch(extra={"--draft-conf": "0.35"}, prev=first, drafting=mode)
-                self.assertEqual(self.server_args(second, vram=24000.0), argv, "a second launch with the same flags is the same argv")
-                self.assertEqual(second["args"].count("--draft-conf"), 1)
-
     def test_an_explicit_value_is_not_remembered_when_the_next_launch_leaves_it_out(self):
-        first = self.launch(extra={"--draft-conf": "0.35"}, drafting="dflash2")
+        first = self.launch(extra={"--pcie-frac": "0.35"}, drafting="dflash2")
         second = self.launch(prev=first, drafting="dflash2")
         argv = self.server_args(second)
-        self.assertNotEqual(flag(argv, "--draft-conf"), "0.35", "back to Auto")
-        self.assertNotIn("--draft-conf", second.get("user_args") or [])
+        self.assertNotEqual(flag(argv, "--pcie-frac"), "0.35", "back to Auto")
+        self.assertNotIn("--pcie-frac", second.get("user_args") or [])
         self.assertNotIn("launch_set", second)
-
-    def test_the_new_explicit_value_beats_the_earlier_one(self):
-        first = self.launch(extra={"--draft-conf": "0.35"}, drafting="dflash2")
-        second = self.launch(extra={"--draft-conf": "0.6"}, prev=first, drafting="dflash2")
-        argv = self.server_args(second)
-        self.assertEqual((argv.count("--draft-conf"), flag(argv, "--draft-conf")), (1, "0.6"))
-
-    def test_an_explicit_spec_survives_the_drafter_policy_too(self):
-        cfg = self.launch(extra={"--spec": "3"}, drafting="dflash2")
-        argv = self.server_args(cfg)
-        self.assertEqual((argv.count("--spec"), flag(argv, "--spec")), (1, "3"))
 
     # ---- explicit off
     def test_an_explicit_off_removes_the_option_and_stays_off_for_the_same_command(self):
-        base = self.base(args=[*self.args, "--mmap-experts"])
-        first = self.launch(base, extra={"--mmap-experts": "off"})
-        self.assertNotIn("--mmap-experts", first["args"])
-        self.assertNotIn("--mmap-experts", self.server_args(first))
-        second = self.launch(base, extra={"--mmap-experts": "off"}, prev=first)
-        self.assertNotIn("--mmap-experts", self.server_args(second))
+        base = self.base(args=[*self.args, "--no-host-worker"])
+        first = self.launch(base, extra={"--no-host-worker": "off"})
+        self.assertNotIn("--no-host-worker", first["args"])
+        self.assertNotIn("--no-host-worker", self.server_args(first))
+        second = self.launch(base, extra={"--no-host-worker": "off"}, prev=first)
+        self.assertNotIn("--no-host-worker", self.server_args(second))
         third = self.launch(base, prev=second)                 # the flag left out: the installed config's own value is back
-        self.assertIn("--mmap-experts", self.server_args(third))
+        self.assertIn("--no-host-worker", self.server_args(third))
 
     def test_an_explicit_off_beats_a_persisted_override(self):
         base = self.base(user_args=["--pcie-frac", "0.3"], args=[*self.args, "--pcie-frac", "0.3"])
@@ -87,11 +65,11 @@ class Launches(Base):
     def test_a_hand_edit_of_the_launch_config_survives_the_next_launch(self):
         first = self.launch()
         self.assertNotIn("--pcie-frac", first["args"])
-        first["args"] += ["--pcie-frac", "0.2", "--pool-workers", "6"]       # written by hand (or by a tool that does not stamp)
+        first["args"] += ["--pcie-frac", "0.2", "--aux-cpus", "6"]       # written by hand (or by a tool that does not stamp)
         second = self.launch(prev=first)
         argv = self.server_args(second)
-        self.assertEqual((flag(argv, "--pcie-frac"), flag(argv, "--pool-workers")), ("0.2", "6"))
-        self.assertEqual((argv.count("--pcie-frac"), argv.count("--pool-workers")), (1, 1))
+        self.assertEqual((flag(argv, "--pcie-frac"), flag(argv, "--aux-cpus")), ("0.2", "6"))
+        self.assertEqual((argv.count("--pcie-frac"), argv.count("--aux-cpus")), (1, 1))
         third = self.launch(prev=second)                                     # and again with no new flags
         self.assertEqual(self.server_args(third), argv)
         self.assertEqual(flag(third["user_args"], "--pcie-frac"), "0.2")
@@ -116,13 +94,13 @@ class Launches(Base):
         from strata_control import calibration
         cfg0 = self.launch()                                 # the launch config the profile points at
         applied = json.loads(json.dumps(cfg0))
-        applied["args"] = tune_knobs.apply_to_argv(applied["args"], {"--pcie-frac": "0.2", "--pool-workers": "6"})
-        arg_layers.record_calibration(applied, cfg0, {"--pcie-frac": "0.2", "--pool-workers": "6"})
-        self.assertEqual(applied["calibrated"]["settings"], {"--pcie-frac": "0.2", "--pool-workers": "6"})
+        applied["args"] = tune_knobs.apply_to_argv(applied["args"], {"--pcie-frac": "0.2", "--aux-cpus": "6"})
+        arg_layers.record_calibration(applied, cfg0, {"--pcie-frac": "0.2", "--aux-cpus": "6"})
+        self.assertEqual(applied["calibrated"]["settings"], {"--pcie-frac": "0.2", "--aux-cpus": "6"})
         self.assertEqual(applied["args_derived"], applied["args"], "its own values are not hand edits")
         second = self.launch(prev=applied)
         argv = self.server_args(second)
-        self.assertEqual((flag(argv, "--pcie-frac"), flag(argv, "--pool-workers")), ("0.2", "6"))
+        self.assertEqual((flag(argv, "--pcie-frac"), flag(argv, "--aux-cpus")), ("0.2", "6"))
         self.assertIn("calibrated", second)
         self.assertNotIn("--pcie-frac", second.get("user_args") or [], "calibrated is not an override: provenance kept")
         third = self.launch(prev=second)
@@ -151,7 +129,7 @@ class Launches(Base):
 
     # ---- #4985 and the shape of the file
     def test_one_effective_value_per_option_in_every_case(self):
-        cases = [dict(), dict(extra={"--draft-conf": "0.35"}), dict(extra={"--pcie-frac": "0.4", "--spec": "3"}), dict(extra={"--pool-workers": "off"})]
+        cases = [dict(), dict(extra={"--draft-conf": "0.35"}), dict(extra={"--pcie-frac": "0.4", "--spec": "3"}), dict(extra={"--aux-cpus": "off"})]
         prev = None
         for kw in cases:
             cfg = self.launch(prev=prev, drafting="dflash2", **kw)

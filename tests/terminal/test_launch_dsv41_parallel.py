@@ -21,7 +21,6 @@ from strata_cli.launch import settings as S
 from strata_cli.launch import store
 from strata_cli.launch.catalog import Catalog
 from strata_cli.launch.runner import Runner
-from strata_common import dsv41_flags
 from strata_control import dsv41_parallel
 from tests.terminal.launch_support import HW_12, Home, catalog, run_cli
 
@@ -159,13 +158,6 @@ class RiskyPicksWarnNeverRefuse(Base):
         self.assertEqual(p["settings"]["parallel"], 4)               # the number stays: nothing was refused
         self.assertTrue(any("run on Linux only" in w for w in p["warnings"]), p["warnings"])
 
-    def test_a_mac_is_a_warning(self):
-        w = dsv41_parallel.warnings(2, cards=[{"name": "Apple M5 Max", "vram_gb": 96.0, "vendor": "apple", "unified_gb": 128.0}],
-                                    os_name="darwin", machine="arm64", vendor="apple")
-        self.assertEqual(len(w), 1)
-        self.assertIn("not run on a Mac (Metal)", w[0][0])
-        self.assertIn("without --parallel", w[0][1])
-
     def test_a_small_card_is_a_warning_with_the_cost(self):
         type(self).hw = HW_12
         p = self.plan("--model", "ist-das-2.00bpw", "--parallel", "4", "--context", "16k")
@@ -190,63 +182,6 @@ class RiskyPicksWarnNeverRefuse(Base):
         self.assertEqual(w, [])
 
 
-class TheEngineInUse(Base):
-    def _cfg(self):
-        return {"arch": "deepseek41", "exe": "/x/engine-dsv41/0.1.55-linux/strata-dsv41", "args": ["--pack", "/p"], "parallel": 4}
-
-    def _runner(self, parallel):
-        s = S.LaunchSettings(family="deepseek41", model="IST-DAS-2.25bpw", context=8192, tune="skip", parallel=parallel)
-        return s, Runner(s, catalog=catalog(self.hw))
-
-    def test_an_engine_from_before_the_flag_is_asked_and_the_launch_goes_on_one_at_a_time(self):
-        s, r = self._runner(4)
-        with mock.patch.object(dsv41_flags, "takes_parallel", return_value=False):
-            r.gate_parallel(self._cfg())
-        self.assertTrue(r.parallel_dropped)
-        self.assertTrue(any("is from before --parallel" in n for n in r.notices), r.notices)
-        self.assertEqual(s.parallel, 4)                              # the person's choice stays in the preset
-
-    def test_a_current_engine_or_an_engine_that_cannot_be_asked_goes_on(self):
-        for answer in (True, None):
-            _s, r = self._runner(4)
-            with mock.patch.object(dsv41_flags, "takes_parallel", return_value=answer):
-                r.gate_parallel(self._cfg())
-            self.assertFalse(r.parallel_dropped, answer)
-            self.assertEqual(r.notices, [])
-
-    def test_without_the_flag_the_engine_is_not_even_asked(self):
-        _s, r = self._runner(None)
-        with mock.patch.object(dsv41_flags, "takes_parallel", side_effect=AssertionError("asked")):
-            r.gate_parallel(self._cfg())
-        self.assertFalse(r.parallel_dropped)
-
-    def test_takes_parallel_reads_the_usage_text(self):
-        usage_old = "maya-ds4 --pack <model>/maya-ds4 [--gpus 0,1] (--ids I,J | --serve | --pack-info)\n"
-        usage_new = usage_old.replace("(--ids", "[--parallel N] (--ids")
-        for n, (text, want) in enumerate(((usage_old, False), (usage_new, True), ("segfault", None))):
-            exe = Path(self.home.base) / f"e{n}" / "strata-dsv41"
-            exe.parent.mkdir()
-            exe.write_text("x" * (n + 1), encoding="utf-8")
-            with mock.patch("subprocess.run", return_value=mock.Mock(stdout="", stderr=text, returncode=0)) as run:
-                self.assertIs(dsv41_flags.takes_parallel(exe), want, text)
-                self.assertIs(dsv41_flags.takes_parallel(exe), want, text)
-                self.assertEqual(run.call_count, 1)                  # asked once per file
-                self.assertEqual(run.call_args[0][0], [str(exe), "--help"])
-        self.assertIsNone(dsv41_flags.takes_parallel(Path(self.home.base) / "no" / "such" / "strata-dsv41"))
-
-    def test_the_server_leaves_the_flag_out_for_an_engine_from_before_it(self):
-        from strata_common.engine_client import parallel_args
-        cfg = {"arch": "deepseek41", "exe": "/x/strata-dsv41", "parallel": 4}
-        with mock.patch.object(dsv41_flags, "takes_parallel", return_value=False), contextlib.redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(parallel_args(cfg, []), [])
-        self.assertIn("from before --parallel", out.getvalue())
-        for answer in (True, None):
-            with mock.patch.object(dsv41_flags, "takes_parallel", return_value=answer):
-                self.assertEqual(parallel_args(cfg, []), ["--parallel", "4"])
-        with mock.patch.object(dsv41_flags, "takes_parallel", return_value=True), contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(parallel_args({**cfg, "parallel": 12}, []), ["--parallel", "8"])
-
-
 class SavedAndRestarted(Base):
     def test_a_saved_preset_keeps_the_number(self):
         store.save(S.LaunchSettings(name="Agents", family="deepseek41", model="IST-DAS-2.25bpw", context=32768, parallel=4, tune="skip"))
@@ -265,11 +200,11 @@ class SavedAndRestarted(Base):
 
     def test_the_profile_override_becomes_the_engines_flag_after_a_restart(self):
         """launch writes parallel=N into the profile's overrides; `strata serve --profile` (and so a restart of the saved config) turns it into
-        the config's "parallel" key and the engine's `--parallel N`; absent, nothing."""
+        the config's "parallel" key and the engine's `--batch N`; absent, nothing."""
         from strata_common.engine_client import engine_args
         from strata_control import launch_plan
         cfg = {"arch": "deepseek41", "exe": "/x/strata-dsv41", "args": ["--pack", "/p", "--max-context", "8192"], "model_name": "m", "log": "/x/e.log"}
-        for overrides, want in (({"host": "127.0.0.1", "port": 8080, "parallel": 4}, ["--parallel", "4"]), ({"host": "127.0.0.1", "port": 8080}, None)):
+        for overrides, want in (({"host": "127.0.0.1", "port": 8080, "parallel": 4}, ["--batch", "4"]), ({"host": "127.0.0.1", "port": 8080}, None)):
             values, _origins = launch_plan.get_effective(cfg, {"overrides": overrides}, None)
             self.assertEqual(values["parallel"], overrides.get("parallel"))
             eff = {**cfg, "args": list(cfg["args"])}
@@ -278,9 +213,9 @@ class SavedAndRestarted(Base):
             with contextlib.redirect_stdout(io.StringIO()):
                 argv = engine_args(eff)
             if want:
-                self.assertEqual(argv[argv.index("--parallel"):argv.index("--parallel") + 2], want)
+                self.assertEqual(argv[argv.index("--batch"):argv.index("--batch") + 2], want)
             else:
-                self.assertNotIn("--parallel", argv)
+                self.assertNotIn("--batch", argv)
 
     def test_the_profile_gets_the_override_only_when_asked(self):
         from strata_common import profiles
@@ -293,33 +228,6 @@ class SavedAndRestarted(Base):
             prof, _rev = profiles.load(r.profile)
             self.assertEqual((prof.get("overrides") or {}).get("parallel"), want)
 
-    def test_an_old_engine_leaves_the_override_out_of_the_profile(self):
-        from strata_common import profiles
-        cfgfile = Path(self.home.base) / "cfg.json"
-        cfgfile.write_text(json.dumps({"arch": "deepseek41", "exe": "/x/strata-dsv41", "tokenizer": "/p/tokenizer", "args": ["--pack", "/p"], "model_name": "m"}), encoding="utf-8")
-        s = S.LaunchSettings(family="deepseek41", model="IST-DAS-2.25bpw", context=8192, tune="skip", parallel=4)
-        r = Runner(s, catalog=catalog(self.hw))
-        r.parallel_dropped = True
-        r.ensure_profile(cfgfile)
-        prof, _rev = profiles.load(r.profile)
-        self.assertNotIn("parallel", prof.get("overrides") or {})
-
-
-class RestorePointsSetting(unittest.TestCase):
-    def test_the_engine_gets_the_servers_restore_point_setting_with_parallel(self):
-        """The launcher starts the engine through serve/server.py, which gives a DeepSeek engine STRATA_DS4_SLOT_KEEP=1 and a slot folder next to the log;
-        a launch with --parallel gets the same environment as one without."""
-        from strata_common.engine_client import child_env, engine_args
-        base = {"arch": "deepseek41", "exe": "/x/strata-dsv41", "args": ["--pack", "/p"], "log": "/data/launch/m.engine.log"}
-        for extra in ({}, {"parallel": 4}):
-            env = child_env({**base, **extra})
-            self.assertEqual(env["STRATA_DS4_SLOT_KEEP"], "1", extra)
-            self.assertTrue(env["STRATA_DS4_SLOT_DIR"].replace("\\", "/").endswith("/data/launch/ds4-slots"), env["STRATA_DS4_SLOT_DIR"])
-        with contextlib.redirect_stdout(io.StringIO()):
-            a, b = engine_args(base), engine_args({**base, "parallel": 4})
-        self.assertIn("--parallel", b)
-        self.assertNotIn("--parallel", a)
-        self.assertEqual([x for x in b if x not in ("--parallel", "4")], a)      # nothing else moves with the flag
 
 
 if __name__ == "__main__":

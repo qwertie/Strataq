@@ -533,7 +533,7 @@ def config_view(cfg: dict) -> dict:
             out[k] = json.loads(json.dumps(v))
     env = cfg.get("env")
     if isinstance(env, dict):
-        out["env"] = {k: base_if_path(str(v)) for k, v in env.items() if k.startswith(("STRATA_", "HIP_", "CUDA_", "ROCR_", "ONEAPI_", "SYCL_")) and not SECRET_KEY.search(k)}
+        out["env"] = {k: base_if_path(str(v)) for k, v in env.items() if k.startswith(("STRATA_", "HIP_", "CUDA_", "ROCR_")) and not SECRET_KEY.search(k)}
     return out
 
 
@@ -612,7 +612,7 @@ def collect_machine(base: str, key: str, cfg: dict | None, gpu_arg: str | None =
     m = status.get("machine") or {}
     vram_mib = (m.get("gpu") or {}).get("total_mib") or None
     # #2001: the server names the cards it reads (" + " between them).  A name nvidia-smi does not list means the
-    # engine runs on another vendor's card (an Intel Arc beside a GeForce): the server's names are the right ones, and
+    # engine runs on another vendor's card (a Radeon beside a GeForce): the server's names are the right ones, and
     # so is its VRAM total - the PC's NVIDIA cards were not used.
     served = [n for n in (static.get("gpu_name") or "").split(" + ") if n and n != "?"]
     # the engine's own stub when the driver names no card is the vendor alone ("AMD Radeon"), not a card name:

@@ -12,7 +12,6 @@ import { join, sep } from 'node:path';
 
 export const OTHER_OS = {
   win32: /(^|[\\/._-])(darwin|linux|android|freebsd|musl)([\\/._-]|$)/i,
-  darwin: /(^|[\\/._-])(win32|linux|android|freebsd|musl)([\\/._-]|$)/i,
   // Linux: the AppImage bundler (linuxdeploy) resolves the libraries of every ELF file under resources and stops on one it
   // cannot satisfy (koffi's musl build wants libc.musl). The app is glibc x86_64, so musl and other-CPU builds are dropped.
   linux: /(^|[\\/._-])(win32|darwin|android|freebsd|musl|arm64|aarch64|armv7|arm|ia32|riscv64|ppc64|s390x|loong64)([\\/._-]|$)/i,

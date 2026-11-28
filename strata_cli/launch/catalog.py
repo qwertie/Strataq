@@ -43,7 +43,7 @@ FITS, SLOWER, TIGHT, NO = "fits", "slower", "tight", "no"
 def verdict(on_this_pc: str | None) -> tuple[str, str]:
     """(category, plain words) from the catalog's own `on_this_pc` text (strata_control/fit_label.py through strata_mcp: "fits" or "may run slower").
 
-    The one other word is not about memory: DeepSeek's "tight: needs more disk space".  No card and a Mac with little memory get "may run slower" too (owner 11-08);
+    The one other word is not about memory: DeepSeek's "tight: needs more disk space".  No card gets "may run slower" too (owner 11-08);
     an older Control's "does not fit..." is read the same way.  Never a block: the person can always try, and the screen says so."""
     text = (on_this_pc or "").strip()
     low = text.lower()
@@ -96,7 +96,7 @@ class Computer:
     os: str = ""
     avx2: bool | None = None
     raw: dict = field(default_factory=dict)
-    engine_vendor: str | None = None           # the make of card the engine drives (nvidia, amd, intel, apple); None: the cards name none
+    engine_vendor: str | None = None           # the make of card the engine drives (nvidia, amd); None: the cards name none
 
     @property
     def usable_gpus(self) -> list[dict]:
@@ -115,16 +115,6 @@ class Computer:
         return gpu_fit.other_vendor_note(self.gpus, self.engine_vendor)
 
     @property
-    def new_card_note(self) -> tuple[str, str] | None:
-        """(what, what to do) when a usable card is an Intel Arc B-series (Battlemage): allowed, but new to Strata and untested by the maintainers."""
-        import re
-        for c in gpu_fit.usable_cards(gpu_fit.for_vendor(self.gpus, self.engine_vendor)[0])[0]:
-            if c.get("vendor") == "intel" and re.search(r"Arc (?:Pro )?B\d", str(c.get("name", ""))):
-                return (f"The {str(c['name']).replace('Intel ', '')} is a B-series Arc card. It is new to Strata and we have not tested it ourselves, so pictures or long answers may fail on it.",
-                        "If something fails, start again with --vision off to turn pictures off, and tell us at https://github.com/Niko1221/Strata/issues (say it is a B-series card and attach the engine log).")
-        return None
-
-    @property
     def rx7000_card(self) -> bool:
         """Is a usable AMD card an RX 7000 (gfx1100, gfx1101, gfx1102)?  DeepSeek has a package for those cards since the 0.2.9 update, built and not run on a real one."""
         from strata_common import engine_component as ec
@@ -139,9 +129,6 @@ class Computer:
 
     def line(self, data_dir: str | None = None) -> str:
         g = self.usable_gpus
-        if g and g[0].get("unified_gb"):                       # a Mac: one pool of memory, the chip is the graphics
-            disk = f"{self.disk_free_gb:,.0f} GB free" if self.disk_free_gb is not None else ""
-            return " · ".join(x for x in (g[0].get("name", "Apple silicon"), f"{self.ram_gb:.0f} GB unified memory" if self.ram_gb else "memory unknown", disk) if x)
         card = (f"{g[0].get('name', 'GPU').replace('NVIDIA GeForce ', '').replace('AMD Radeon ', '')} {g[0].get('vram_gb', 0):.0f} GB"
                 + (f" x{len(g)}" if len(g) > 1 else "")) if g else "no usable graphics card found"
         ram = f"{self.ram_gb:.0f} GB RAM" if self.ram_gb else "RAM unknown"
@@ -173,60 +160,6 @@ def install_root(explicit: str | os.PathLike | None = None, src: str | os.PathLi
     if env:
         return Path(env)
     return discovery.find_install(here=installer_folder(src))[0]
-
-
-# Intel Arc cards by PCI id: (name, memory in GB).  The kernel does not tell an ordinary user how much memory the card has, so the discrete
-# cards are listed (the same ids as sycl/setup_intel.py; tests/terminal/test_intel_cards_029.py keeps the two in step).  An id that is not
-# here is NOT counted: it is skipped, because an Intel chip built into the processor shares this vendor id and must never be named as a card.
-# (A770: the 8 GB model shares the id of the 16 GB one, so the smaller figure is used.)
-INTEL_ARC = {"0x56a1": ("Arc A750", 8.0), "0x56a2": ("Arc A580", 8.0), "0x56a0": ("Arc A770", 8.0), "0x56a5": ("Arc A380", 6.0),
-             "0x56a6": ("Arc A310", 4.0), "0x5690": ("Arc A770M", 16.0), "0xe20b": ("Arc B580", 12.0), "0xe20c": ("Arc B570", 10.0),
-             "0xe223": ("Arc Pro B70", 32.0), "0xe222": ("Arc Pro B65", 32.0), "0xe221": ("Arc Pro B60", 24.0), "0xe211": ("Arc Pro B60", 24.0),
-             "0xe212": ("Arc B50", 16.0)}
-
-
-#: PCI id ranges of Intel's discrete cards, for a model that is not in the table above (a new Battlemage or Alchemist part): such a card is counted as an
-#: Arc of the family's smallest memory, never named by model. The processors' own graphics (0x46xx, 0x7dxx, 0xa7xx, ...) are outside these ranges.
-INTEL_ARC_FAMILIES = ((0x5690, 0x56c1, 8.0), (0xe200, 0xe2ff, 10.0))
-
-
-def _arc_entry(did: str) -> tuple[str, float] | None:
-    if did in INTEL_ARC:
-        return INTEL_ARC[did]
-    try:
-        value = int(did, 16)
-    except ValueError:
-        return None
-    for low, high, gb in INTEL_ARC_FAMILIES:
-        if low <= value <= high:
-            return "Arc", gb
-    return None
-
-
-def intel_arc_cards(root: str = "/sys/class/drm") -> list[dict]:
-    """The Intel Arc cards on this Linux computer, read from the kernel's device list (empty elsewhere). One unreadable entry or a card number
-    above 9 never hides the others, and the cards of other makes beside them (an AMD APU's graphics) do not matter here (#4971, #5111)."""
-    cards: list[dict] = []
-    try:
-        entries = sorted(Path(root).glob("card[0-9]*"), key=lambda p: (len(p.name), p.name))
-    except OSError:
-        return cards
-    for card in entries:
-        if "-" in card.name:                                 # a connector (card0-DP-1), not a card
-            continue
-        dev = card / "device"
-        try:
-            if (dev / "vendor").read_text().strip().lower() != "0x8086":
-                continue
-            did = (dev / "device").read_text().strip().lower()
-        except OSError:
-            continue
-        entry = _arc_entry(did)
-        if entry is None:
-            continue
-        name, gb = entry
-        cards.append({"vendor": "intel", "name": "Intel " + name, "vram_gb": gb, "usable": True, "index": len(cards)})
-    return cards
 
 
 class Catalog:
@@ -271,13 +204,6 @@ class Catalog:
             return hw
         hw = dict(self.strata.hardware(fresh=fresh))
         hw["gpus"] = self._admit_old_nvidia(list(hw.get("gpus") or []))
-        if not str(hw.get("os", "")).startswith("Windows"):
-            arc = intel_arc_cards()
-            if arc:
-                # the shared hardware reader knows NVIDIA and AMD only; an Arc is added here, also beside other makes (the plan then says the
-                # Intel cards exist and how to use them: --backend intel); their numbers are the Intel engine's own (0, 1, ...)
-                have = list(hw.get("gpus") or [])
-                hw["gpus"] = have + arc
         return hw
 
     @staticmethod
@@ -306,7 +232,7 @@ class Catalog:
                         engine_vendor=self.engine_vendor(hw))
 
     def installed_backend(self) -> str | None:
-        """The installed engine's backend (cuda, hip, sycl, cpu, metal), None when there is no usable engine yet."""
+        """The installed engine's backend (cuda, hip, cpu), None when there is no usable engine yet."""
         try:
             from strata_common import engine_component as ec
             rep = ec.status()
@@ -422,7 +348,7 @@ class Catalog:
             raise ValueError(f"There is no model family called '{family}'." + (f" Did you mean '{near}'?" if near else "")
                              + " Families: " + ", ".join(families) + ".")
         from strata_control import dsv41_fit
-        line = dsv41_fit.not_here(match) or (dsv41_fit.MAC_NOT_YET_LINE if match in dsv41_fit.MAC_NOT_YET and self._mac_hardware() else None)
+        line = dsv41_fit.not_here(match)
         if line:
             raise ValueError(line + " Use ist-das-2.00bpw or ist-das-2.25bpw.")
         offered = [f for f in families if match in self.strata.sizes_of(models, f)]
@@ -473,30 +399,13 @@ class Catalog:
         table = getattr(mod, "UD_FIT_KV_BYTES", None) or {"fp16": 2112, "int8": 1056, "q4_0": 576, "k8v4": 816}
         return tokens * 13 * table.get(kv, 1056) / 1e9
 
-    def max_context(self, family: str, model: str, hw: dict | None = None) -> int | None:
+    def max_context(self, family: str, model: str) -> int | None:
         """The context a model starts with: 128K on every card, or the largest size the model offers under it (strata_control/default_context.py,
-        the one rule of the app, the Terminal and setup). A Mac keeps its unified-memory rule."""
+        the one rule of the app, the Terminal and setup)."""
         from strata_control import default_context
-        hw = hw or self.hardware()
-        if hw.get("mac") and hw.get("ram_gb") and not self.strata.multi_family(family):
-            mac = self.strata.mac()                           # a Mac: the context by unified memory (strata_control/mac_fit.py)
-            if mac is not None:
-                return int(mac.recommend_context(float(hw["ram_gb"])))
         return default_context.pick(self.contexts_for(family, model))
 
     # ---- pictures
-    def engine_backend(self) -> str | None:
-        """The installed engine's backend (cuda, hip, sycl, cpu, metal), else the one this computer's graphics card needs, else None."""
-        installed = self.installed_backend()
-        if installed:
-            return installed
-        for g in self.computer().usable_gpus:
-            v = str(g.get("vendor") or "").lower()
-            if g.get("unified_gb") or v == "apple":
-                return "metal"
-            return {"nvidia": "cuda", "amd": "hip", "intel": "sycl"}.get(v)
-        return None
-
     def reader_state(self) -> str:
         """"present" when the installed engine carries the picture reader (strata-vision), "missing" when an engine is installed without it,
         "unknown" before any engine is installed (the first launch fetches one that has it)."""
@@ -515,25 +424,12 @@ class Catalog:
     def picture_default(self, images: bool) -> str:
         """The picture setting nobody chose: off for a model that cannot read pictures or an engine without the reader; else on, with the
         reader the one rule of strata_common/vision_reader.py gives: the CPU reader under 24 GB of graphics memory, the GPU reader from 24 GB,
-        on every make of card (owner decision 2026-10-18); on a Mac the Metal reader (unified memory). Without a usable graphics card there is nothing to read on: the CPU reader."""
+        on every make of card (owner decision 2026-10-18). Without a usable graphics card there is nothing to read on: the CPU reader."""
         from strata_common import vision_reader as VR
         if not images or self.reader_state() == "missing":
             return "off"
-        if self.is_mac():
-            return VR.default_mode(None, unified=True)           # a Mac (unified memory): the Metal reader, nothing to keep free for a card
-        comp = self.computer()
-        vram = comp.main_vram_gb
-        return VR.default_mode(vram, "intel" if comp.engine_vendor == "intel" else "") if vram > 0 else "cpu"      # no usable card: nothing to read on, the CPU reader
-
-    def _mac_hardware(self) -> bool:
-        try:
-            return bool(self.hardware().get("mac"))
-        except Exception:                                    # noqa: BLE001 - no hardware report: not a Mac as far as this check knows
-            return False
-
-    def is_mac(self) -> bool:
-        """An Apple Silicon Mac: the chip's memory is the system's (the Metal engine; strata_common/vision_reader.py)."""
-        return self.engine_backend() == "metal"
+        vram = self.computer().main_vram_gb
+        return VR.default_mode(vram) if vram > 0 else "cpu"      # no usable card: nothing to read on, the CPU reader
 
     # ---- installed models
     def installed_configs(self) -> list[dict]:

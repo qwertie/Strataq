@@ -185,17 +185,6 @@ void down(const Layer&, void*) {}
 }  // namespace strata::prefill::ws
 #endif
 
-#if defined(STRATA_GPU_METAL)
-// The Metal backend reads a prompt through its decode window (metal/src/engine/window.cpp): init keeps the chunk, run
-// hands over, draft_kv declines (the MTP hook reads the window's rows itself).
-namespace strata::metal_engine {
-bool window_ensure(const strata::core::ModelGeometry& g, strata::core::SessionState& ss, int64_t max_cells, std::string& err);
-bool prompt_taps(const std::vector<int>& layers, int64_t first_pos, const std::function<bool(const float*, int64_t, int64_t, std::string&)>& cb, std::string& err);   // dflash2.inc
-bool prompt_run(const int64_t* tokens, int64_t n, int64_t pos0, const float* const* embd_rows,
-                const std::function<bool(const float*, int64_t, int64_t, std::string&)>& on_chunk, std::string& err);
-}  // namespace strata::metal_engine
-#endif
-
 namespace {
 // STRATA_PLE_COMPACT=1 (opt-in): the prompt chunk's PLE rows go up raw and are dequantized on the device (IQ4_NL tables
 // held in memory); the same floats as the host dequant, 7x fewer bytes over PCIe
@@ -1943,12 +1932,6 @@ bool Prefill::init(const core::WeightTable& wt, const core::ModelGeometry& g, co
     Impl& m = *impl_;
     int64_t tr_last = pf_alloc_trace() ? pf_free_mib() : 0;
     pf_mark("init: start (chunk, then the sign tables)", tr_last);
-#if defined(STRATA_GPU_METAL)
-    (void) wt; (void) src; (void) cache; (void) host_res; (void) stream; (void) borrow;
-    (void) borrow_bytes;
-    m.T = chunk > 0 ? chunk : 1;
-    return strata::metal_engine::window_ensure(g, ss, ss.qsa_states[ss.qsa_primary()].max_cells, err);
-#endif
     m.wt = &wt; m.g = &g; m.ss = &ss; m.src = src; m.cache = cache; m.host_res = host_res;
     m.T = chunk; m.cs = (cudaStream_t) stream; m.stats = &stats_;
     if (g.n_embd != N || g.hc != HC || g.hc_lr != LR || g.n_expert < 1 || ss.k != K) {
@@ -2468,11 +2451,6 @@ bool Prefill::idle(std::string& err) {
 bool Prefill::draft_kv(core::MtpDrafter& mtp, const float* R_rows, const int32_t* next_tokens, int64_t n, int64_t cell0,
                        std::string& err, const char** why) {
     Impl& m = *impl_;
-#if defined(STRATA_GPU_METAL)
-    (void) m; (void) mtp; (void) R_rows; (void) next_tokens; (void) n; (void) cell0; (void) err;
-    if (why) *why = "the Metal window feeds the draft layer itself";
-    return false;
-#endif
     const core::OnDevice on_device(m.device);   // the stage's own GPU current (a layer split's drafter: the last stage)
     auto decline = [&](const char* reason) { if (why != nullptr) *why = reason; return false; };
     static const bool off = [] { const char* v = std::getenv("STRATA_MTP_BATCH"); return v != nullptr && v[0] == '0'; }();
@@ -4578,7 +4556,6 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                         break;
                     }
                     pt.mark(kPfQsaSel, cs);
-#if !defined(STRATA_GPU_METAL)
                     // STRATA_SELECT_TWO_PASS=1 (qsa_two_pass.hpp): the tensor-core scorer's calls whose last query has
                     // STRATA_SELECT_TWO_PASS_MIN blocks or more score every block in single-pass TF32 and again in 3xTF32
                     // only where the error bound reaches the cut-off; qsa_block_topk below returns the same cells.  Its
@@ -4593,7 +4570,6 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                     const bool tp_ok = tp_on && tp_nbid + 1 >= tp_min &&
                                        strata::kernels::qsa_two_pass_keys(st.idx_pooled, tp_nbid, m.sel_batch, m.max_blocks,
                                                                           m.attn, tp_bytes, m.cs, st.units);
-#endif
                     for (int64_t t0 = 0; t0 < T; t0 += m.sel_batch) {
                         const int64_t nb = std::min(m.sel_batch, T - t0);
                         const int32_t* steps0 = m.steps_dev + t0 * strata::kernels::kStepCount;
@@ -4604,13 +4580,11 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                         // STRATA_SELECT_OLD=1: the warp kernel
                         static const bool old_sel = std::getenv("STRATA_SELECT_OLD") != nullptr;
                         bool tp_call = false;
-#if !defined(STRATA_GPU_METAL)
                         tp_call = tp_ok && !old_sel && active >= tp_min &&
                                   strata::kernels::qsa_block_scores_two_pass(st.idx_pooled, st.idx_dead, m.q_idx + t0 * kIdxQW,
                                                                              steps0, nb, m.sel_batch, m.max_blocks, s,
                                                                              m.sel_scores, m.attn, tp_bytes, m.cs, active,
                                                                              st.units);
-#endif
                         if (!tp_call && (old_sel || !strata::kernels::qsa_block_scores_tc(st.idx_pooled, st.idx_dead, m.q_idx + t0 * kIdxQW,
                                                                              steps0, nb, m.max_blocks, s, m.sel_scores,
                                                                              m.cs, active, st.units)))
@@ -4618,7 +4592,6 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                                                               m.max_blocks, s, m.sel_scores, m.cs, active, st.units);
                         strata::kernels::qsa_block_topk(m.sel_scores, steps0, nb, m.max_blocks, m.cap, s,
                                                         m.sel_ids + t0 * m.cap, m.cs, active);
-#if !defined(STRATA_GPU_METAL)
                         // STRATA_SELECT_TWO_PASS_CHECK=1 (diagnostic, one GPU): today's scores and ids for the same
                         // queries, compared with the two-pass ones (counts at the prompt's end).  Their buffers are the
                         // rest of m.attn past the two-pass scratch when it is large enough (the attention below writes
@@ -4665,7 +4638,6 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                             strata::kernels::qsa_two_pass_check(m.sel_scores, m.sel_ids + t0 * m.cap, ref_sc, ref_ids, steps0, nb,
                                                                 m.sel_batch, m.max_blocks, m.cap, m.attn, m.cs);
                         }
-#endif
                     }
                     // STRATA_SEL_OVERLAP (debug, D-1's question): how much do neighbouring queries' selections share?
                     // Per tile of 16 queries: the union of their selected cells against the sum of their widths.
@@ -4788,13 +4760,11 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                     // queries a batch in the same scratch; any refusal or launch failure runs the loop below
                     if (!gated && (old_attn || !strata::kernels::qsa_prompt_attn_batch(m.q, pools, m.sel_ids, m.steps_dev, m.cap, s,
                                                                                         m.attn, T, m.cs)))
-#if !defined(STRATA_GPU_METAL)   // qsa_pattn.cu is in the CUDA / HIP kernel library only
                         if (!(strata::kernels::pattn_mode() != 0 &&
                               strata::kernels::qsa_pattn_batch(m.q, pools, m.sel_ids, m.steps_dev, m.cap, s, m.attn_scratch,
                                                                (uint64_t) m.attn_batch *
                                                                    strata::kernels::qsa_decode_attn_scratch_floats(m.cap, s),
                                                                m.attn, T, m.cs)))
-#endif
                         for (int64_t t0 = 0; t0 < T; t0 += m.attn_batch) {
                             const int64_t nb = std::min(m.attn_batch, T - t0);
                             strata::kernels::qsa_decode_attn_batch(m.q + t0 * kQW, pools, m.sel_ids + t0 * m.cap,
@@ -6604,7 +6574,6 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                      (long long) kv_prefetches);
     }
     stats_.ms_total += ms_since(t_start);
-#if !defined(STRATA_GPU_METAL)
     if (strata::kernels::qsa_two_pass_on()) {   // STRATA_SELECT_TWO_PASS: what the two-pass scorer did in this prompt
         namespace tp = strata::kernels::two_pass;
         unsigned long long c[tp::kStatCount] = {};
@@ -6628,7 +6597,6 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
             }
         }
     }
-#endif
     {
         static const bool f16_range = std::getenv("STRATA_F16_RANGE") != nullptr;
         float xm = 0.0f, wy[2] = {0.0f, 0.0f}; unsigned long long xo = 0, wyo[2] = {0, 0};
@@ -8106,25 +8074,6 @@ bool Prefill::reserve_uploads(int64_t T) {
 bool Prefill::run(const int64_t* tokens, int64_t n, int64_t pos0, std::string& err) {
 #if defined(STRATA_USE_HIP) || defined(STRATA_HIP_GFX906)
     (void) strata::kernels::qsa_two_pass_on();   // HIP: a set STRATA_SELECT_TWO_PASS says once it is not used
-#endif
-#if defined(STRATA_GPU_METAL)
-    static strata::kernels::two_pass::RequestStatus tp_status(std::getenv("STRATA_SELECT_TWO_PASS"));
-    (void) tp_status.on("Metal");
-    {
-        const auto t0 = std::chrono::steady_clock::now();
-        // DFlash2: the window writes the taps of the prompt rows at positions >= tap_first_ and hands them to on_taps after each chunk
-        const bool taps = !tap_layers_.empty() && on_taps;
-        if (taps && !strata::metal_engine::prompt_taps(tap_layers_, tap_first_, on_taps, err)) return false;
-        const bool ok = strata::metal_engine::prompt_run(tokens, n, pos0, embd_rows, on_chunk, err);
-        if (taps) {
-            std::string off_err;
-            strata::metal_engine::prompt_taps(tap_layers_, 0, {}, off_err);   // no callback after the prompt
-        }
-        stats_.tokens += n;
-        stats_.chunks += 1;
-        stats_.ms_total += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-        return ok;
-    }
 #endif
     if (hand_in_ == nullptr && is_layer_major_on()) {
         const bool by_default = !lm_env_explicit();

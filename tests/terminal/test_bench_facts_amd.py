@@ -136,22 +136,5 @@ class ServedName(unittest.TestCase):
         self.assertIn({"name": "rocm", "version": "10.1.0"}, software["runtime"])
 
 
-class MacStillReadsItsChip(unittest.TestCase):
-    """The amd-smi branch is for Linux; a Mac (os.name is posix there too) still takes its card from the chip name."""
-
-    def test_a_mac_is_not_sent_down_the_amd_smi_branch(self):
-        calls = []
-
-        def run(cmd, timeout=15):
-            calls.append(cmd[0])
-            return ""
-
-        with mock.patch.object(bf.os, "name", "posix"), mock.patch.object(bf.sys, "platform", "darwin"),                 mock.patch.object(bf, "run_cmd", run), mock.patch.object(bf, "cpu_name", lambda: "Apple M5 Max"),                 mock.patch.object(bf, "ram_bytes", lambda: 137438953472):
-            cards, driver = bf.other_gpus()
-        self.assertEqual([c["name"] for c in cards], ["Apple M5 Max"])
-        self.assertEqual(cards[0]["memory_kind"], "shared")
-        self.assertNotIn("amd-smi", calls)
-
-
 if __name__ == "__main__":
     unittest.main()

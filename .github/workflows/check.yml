@@ -29,8 +29,6 @@ on:
       - docker/**
       - apps/host/**
       - apps/desktop/**
-      - metal/**
-      - sycl/**
   pull_request:
     paths:
       - .github/workflows/check.yml
@@ -54,8 +52,6 @@ on:
       - docker/**
       - apps/host/**
       - apps/desktop/**
-      - metal/**
-      - sycl/**
   workflow_dispatch:
 
 permissions:
@@ -150,36 +146,3 @@ jobs:
             ${{ runner.temp }}\check\*.log
             ${{ runner.temp }}\check\result.json
           retention-days: 7
-
-  macos:
-    # Cheap and useful (the audit found the host and Python fixtures reading the Mac's own paths), but this job has not run on a
-    # Mac runner yet: it reports and does not block until its first green run.
-    name: macOS / ${{ matrix.name }}
-    runs-on: macos-15
-    timeout-minutes: 60
-    continue-on-error: true
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { name: Python tools/, only: py-tools }
-          - { name: host typecheck + test + build, only: "host-typecheck,host-test,host-build" }
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: pip
-          cache-dependency-path: requirements*.txt
-      - uses: actions/setup-node@v4
-        if: ${{ startsWith(matrix.only, 'host') }}
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: apps/host/package-lock.json
-      - name: Python packages
-        run: python -m pip install -r requirements.txt -r requirements-dev.txt
-      - name: tools/check
-        run: python tools/check --only "${{ matrix.only }}"

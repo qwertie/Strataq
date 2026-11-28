@@ -24,11 +24,6 @@ class AppVersionTests(unittest.TestCase):
     def test_the_npm_package_follows_it(self):
         self.assertEqual(json.loads((DESKTOP / "package.json").read_text(encoding="utf-8"))["version"], cargo_version())
 
-    def test_no_script_hard_codes_a_file_name_with_a_version(self):
-        text = (DESKTOP / "scripts" / "make-dmg.sh").read_text(encoding="utf-8")
-        self.assertNotRegex(text, r"Strata_\d+\.\d+\.\d+")
-        self.assertIn("Cargo.toml", text)
-
 
 if __name__ == "__main__":
     unittest.main()

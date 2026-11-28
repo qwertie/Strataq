@@ -1,5 +1,5 @@
 """Pictures on for DeepSeek on a card with memory of its own: setup raises the engine's per-card reserve (--reserve-mib, default 600) so the first picture's
-hipBLASLt start and the tower's buffers have room.  Not on a Mac, not on a unified-memory APU, not with pictures off.  (The amount is provisional.)"""
+hipBLASLt start and the tower's buffers have room.  Not on a unified-memory APU, not with pictures off.  (The amount is provisional.)"""
 
 import importlib.util
 import unittest
@@ -23,20 +23,19 @@ class VisionReserve(unittest.TestCase):
 
     def test_a_discrete_card_with_pictures_on_gets_the_larger_reserve(self):
         for card in (R9700, RTX):
-            args = setup.dsv41_vision_reserve_args("on", False, self.plan(card))
+            args = setup.dsv41_vision_reserve_args("on", self.plan(card))
             self.assertEqual(args, ["--reserve-mib", str(setup.DSV41_VISION_RESERVE_MIB)], card["name"])
         self.assertGreater(setup.DSV41_VISION_RESERVE_MIB, 600)             # the engine's default
 
-    def test_pictures_off_a_mac_and_a_unified_memory_apu_are_unchanged(self):
-        self.assertEqual(setup.dsv41_vision_reserve_args("off", False, self.plan(R9700)), [])
-        self.assertEqual(setup.dsv41_vision_reserve_args("on", True, self.plan(R9700)), [])
+    def test_pictures_off_and_a_unified_memory_apu_are_unchanged(self):
+        self.assertEqual(setup.dsv41_vision_reserve_args("off", self.plan(R9700)), [])
         strix = self.plan(STRIX)
         self.assertTrue(strix.get("uma"))
-        self.assertEqual(setup.dsv41_vision_reserve_args("on", False, strix), [])
+        self.assertEqual(setup.dsv41_vision_reserve_args("on", strix), [])
 
     def test_setup_puts_the_flag_after_the_plans_own_arguments(self):
         src = (ROOT / "setup.py").read_text(encoding="utf-8") + (ROOT / "strata_control" / "setup_config.py").read_text(encoding="utf-8")   # (the run config's construction is in the setup seam)
-        self.assertIn('*plan["args"], *dsv41_vision_reserve_args(ds_vision, mac, plan)]', src)
+        self.assertIn('*plan["args"], *dsv41_vision_reserve_args(ds_vision, plan)]', src)
 
 
 if __name__ == "__main__":

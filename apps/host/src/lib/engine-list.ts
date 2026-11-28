@@ -30,7 +30,7 @@ export interface EngineGroup { family: 'qwen' | 'deepseek'; title: string; engin
 export interface EngineList { available: boolean; families: EngineGroup[]; total_bytes: number }
 
 /** The make of graphics card an engine is built for, in the words a person knows. */
-export const engineMake = (backend: string): string => ({ cuda: 'NVIDIA', hip: 'AMD', sycl: 'Intel', metal: 'Apple', cpu: 'CPU' } as Record<string, string>)[backend] ?? backend;
+export const engineMake = (backend: string): string => ({ cuda: 'NVIDIA', hip: 'AMD', cpu: 'CPU' } as Record<string, string>)[backend] ?? backend;
 
 /** "1.0 GB", or "640 MB" below a gigabyte: decimal units, like the Terminal and the release page. */
 export function engineSize(bytes: number, locale?: string): string {

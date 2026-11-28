@@ -230,14 +230,6 @@ class Plan(unittest.TestCase):
         for m in ("IST-DAS-2.00bpw", "IST-DAS-2.25bpw", "IST-DAS-1.75bpw", "UD-IQ1_S", "UD-IQ1_M"):
             self.assertEqual(dsv41_fit.plan([R9700], 125.0, None, 131072, model=m)["experts_total"], 15360, m)
 
-    def test_a_mac_gets_the_plain_not_run_line(self):
-        mac = {"index": 0, "name": "Apple M5 Max", "vendor": "apple", "unified_gb": 128.0, "vram_gb": 128.0}
-        p = dsv41_fit.plan([mac], 128.0, None, 131072, model=NAME)
-        self.assertTrue(p["mac"])
-        self.assertIn("M5 Max", p["words"])
-        self.assertNotIn("Not run on a Mac yet", p["words"])
-        self.assertEqual(p["experts_total"], 7680)
-
     def test_the_menu_row_is_there(self):
         import strata_mcp as M
         s = M.Strata(ROOT)

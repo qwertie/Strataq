@@ -1,7 +1,7 @@
 # Strata container image, built from the engine COMPONENT PACKAGE: nothing is compiled on the user's side.
 #
 #   one image = the Terminal (bundled Python 3.12 + strata_base / strata_common / strata_cli / strata_control / strata_server, built exactly as the release archive)
-#             + one engine package (CUDA 13, CUDA 12, HIP gfx120X, HIP gfx110X or SYCL) + the entrypoint
+#             + one engine package (CUDA 13, CUDA 12, HIP gfx120X or HIP gfx110X) + the entrypoint
 #
 # Build it with docker/build.sh (it assembles the build context: the Terminal sources and the package folder):
 #
@@ -13,11 +13,9 @@
 #     docker/         entrypoint.sh, strata-wrapper.sh, healthcheck.sh
 #   docker build --build-arg FLAVOR=cuda -t strata:0.2.7-cuda13 -f Dockerfile <context>
 #
-# FLAVOR picks the small set of system libraries the runtime image adds and its base:
+# FLAVOR picks the small set of system libraries the runtime image adds:
 #   cuda  NVIDIA: the engine package carries cudart/cublas; the driver's libcuda comes from nvidia-container-toolkit
 #   hip   AMD:    the engine package carries the ROCm runtime and kernels; the host's amdgpu driver and /dev/kfd are used
-#   sycl  Intel:  the engine package carries oneAPI's SYCL runtime; this image adds the Level Zero loader and Intel's compute runtime
-#         (Ubuntu 26.04 base: its compute runtime knows Arc A- and B-series; the 24.04 one does not know Battlemage)
 #
 # Only the legacy-builder-safe Dockerfile features are used (no heredocs, no --mount), so it builds with `docker build` as shipped
 # in docker.io as well as with BuildKit.
@@ -75,8 +73,7 @@ RUN set -e; \
     case "$FLAVOR" in \
       cuda) ;; \
       hip)  pkgs="$pkgs libdrm2 libdrm-amdgpu1 libelf1t64 libtinfo6 libpci3" ;; \
-      sycl) pkgs="$pkgs libze1 libze-intel-gpu1 intel-opencl-icd" ;; \
-      *) echo "FLAVOR must be cuda, hip or sycl"; exit 1 ;; \
+      *) echo "FLAVOR must be cuda or hip"; exit 1 ;; \
     esac; \
     apt-get update; apt-get install -y --no-install-recommends $pkgs; \
     rm -rf /var/lib/apt/lists/* /var/cache/apt/*
@@ -93,7 +90,7 @@ RUN set -e; \
     for d in /opt/strata/components/engine/*/; do \
       miss=$(find "$d" -type f \( -name 'strata*' -o -name '*.so' -o -name '*.so.*' \) ! -name '*.json' ! -name '*.txt' | while read -r f; do \
                head -c4 "$f" | grep -q ELF || continue; \
-               LD_LIBRARY_PATH="$d" ldd "$f" 2>/dev/null | grep 'not found' | grep -v -E 'libcuda\.so|libnvidia|libnvcuvid|libze_intel_gpu|libhsa-runtime64|libdrm_amdgpu' | sed "s|^|$(basename "$f"): |"; \
+               LD_LIBRARY_PATH="$d" ldd "$f" 2>/dev/null | grep 'not found' | grep -v -E 'libcuda\.so|libnvidia|libnvcuvid|libhsa-runtime64|libdrm_amdgpu' | sed "s|^|$(basename "$f"): |"; \
              done | sort -u); \
       if [ -n "$miss" ]; then echo "MISSING LIBRARIES in $d"; echo "$miss"; exit 1; fi; \
       echo "libraries of $d resolve inside this image"; \

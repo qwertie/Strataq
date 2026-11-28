@@ -138,7 +138,8 @@ void copy_indexed(float* dst, const float* src, int64_t stride, const int32_t* i
 /// into VRAM before the grouped expert kernel reads them.  Launched for a capacity of `cap` blobs.
 void fetch_blobs(const unsigned long long* src, const int32_t* n, uint8_t* dst, int64_t blob_bytes, int cap, void* stream);
 /// The same with `dst2` (device memory, may be null): blob k goes to dst2[k] instead where that is not 0
-/// (STRATA_ADAPT_FETCH: a VRAM cache slot).  A separate overload, so the SYCL copy keeps the one above.
+/// (STRATA_ADAPT_FETCH: a VRAM cache slot).
+
 void fetch_blobs(const unsigned long long* src, const int32_t* n, uint8_t* dst, int64_t blob_bytes, int cap, void* stream,
                  const unsigned long long* dst2);
 /// table[pairs[2k]] = pairs[2k + 1] for k < n, `pairs` in mapped host memory: a residency table's changed entries,

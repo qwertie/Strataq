@@ -255,13 +255,13 @@ def inspect(config_path: Path | None, *, profile_id: str | None = None, live: bo
 
 
 def _device_access_issue(backend: str | None, dev_root: str = "/dev") -> dict | None:
-    """Linux Intel (SYCL) and AMD (HIP) open the card through /dev/dri/renderD* (and /dev/kfd): a user outside the `render`
+    """Linux AMD (HIP) opens the card through /dev/dri/renderD* and /dev/kfd: a user outside the `render`
     group gets "No device of requested type available" from the engine, which names nothing to fix. None when it is fine,
     cannot apply (other OS, other backend) or there is no such device node at all."""
-    if backend not in ("sycl", "hip") or not sys.platform.startswith("linux"):
+    if backend != "hip" or not sys.platform.startswith("linux"):
         return None
     nodes = sorted(Path(dev_root, "dri").glob("renderD*"))
-    if backend == "hip" and Path(dev_root, "kfd").exists():
+    if Path(dev_root, "kfd").exists():
         nodes.append(Path(dev_root, "kfd"))
     if not nodes or any(os.access(node, os.R_OK | os.W_OK) for node in nodes):
         return None

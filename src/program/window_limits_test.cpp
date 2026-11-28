@@ -1,10 +1,7 @@
-// The window limits (include/strata/common/kernels/window_limits.hpp) and the pipelined-window probe
-// (include/strata/program/pipe_probe.hpp): CPU only, header-only.
-#include "strata/base/platform/env.hpp"
+// The window limits (include/strata/common/kernels/window_limits.hpp): CPU only, header-only.
 #include "strata/common/kernels/cpu/expert.hpp"
 #include "strata/models/qwen38/kernels/fused_gr.hpp"
 #include "strata/models/qwen38/kernels/verify_kernels.hpp"
-#include "strata/program/pipe_probe.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -28,38 +25,6 @@ int main() {
     check(kFusedGrWideT == kWindowMaxT, "the caller's token arrays follow the window");
     check(kVerifyMaxT * 10 <= 256, "the resident plan's block holds a full window of 10 routed experts a row");
 
-    // the probe: off without the environment (no clock read), and a full cycle of events does not fail when it is on
-    strata::platform::unset_env("STRATA_P4_TIMING");
-    strata::platform::unset_env("STRATA_P4_TRACE");
-    {
-        strata::program::PipeProbe off(4, 4);
-        check(!off.on() && !off.timing(), "the probe is off by default");
-        check(off.now() == strata::program::PipeProbe::Time{}, "an off probe reads no clock");
-        { strata::program::PipeProbe::PumpScope s(off); }
-        off.launched(0, 1, off.now());
-        off.done(0, 1);
-        off.flush();
-    }
-    strata::platform::set_env("STRATA_P4_TIMING", "1");
-    {
-        strata::program::PipeProbe on(4, 4);
-        check(on.timing(), "STRATA_P4_TIMING turns the timing on");
-        on.span_start(on.now());
-        for (int w = 0; w < 3; ++w)
-            for (int k = 0; k < 4; ++k) {
-                strata::program::PipeProbe::PumpScope s(on);
-                on.busy(2, 3);
-                on.free_stage(1, k % 2 == 0);
-                const auto before = on.now();
-                on.launched(k, w, before);
-                on.polled(before);
-                on.done(k, w);
-                strata::program::PipeProbe::VerdictScope v(on);
-            }
-        on.span_end(10.0);
-        on.flush();
-    }
-    strata::platform::unset_env("STRATA_P4_TIMING");
     std::printf("window_limits_test: %d checks passed (window %d rows)\n", checks, (int) kVerifyMaxT);
     return 0;
 }

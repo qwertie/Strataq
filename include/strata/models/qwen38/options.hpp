@@ -38,7 +38,6 @@ struct Options {
     std::string ple_gguf;              // the ORIGINAL second GGUF shard: the PLE table is not in the pack
     bool no_ple = false;              // explicit diagnostic ablation; never a normal inference default
     bool stream_token = false;        // R2.6 experiment: ordered work on the session stream
-    bool check_logits = false;        // optional full-vocabulary finite scan
     bool gr_fp32_activations = false;  // pinned CUDA single-token BF16 activation contract
     bool gr_native_mmvf = false;       // pinned projection reduction tree as well as FP32 inputs
     bool native_bf16 = false;          // SSM gates, router and indexer projections only
@@ -88,10 +87,6 @@ struct Options {
     std::string kv = "fp16";           ///< plan v0.3 P7: KV storage, fp16 (default) or int8 (half the VRAM)
     int64_t kv_resident = 0;           ///< KV streaming: resident cells per QSA layer (0: all in VRAM)
     bool kv_grow = false;              ///< the elastic K/V (--kv-grow, STRATA_KV_GROW=1; kvg_ensure)
-    std::string dump_residual;
-    /// The head input, `bb.mixed`.  It exists so the head can be SPLIT: steps 1-4 (the per-stream norm, the two
-    /// bf16 projections and the stream mean) recompute cheaply in Python, and only the 794 MB GEMV does not.
-    std::string dump_mixed;
     /// One residual snapshot per layer per position: `n_layers * hc * n_embd` floats per position, appended in
     /// position order.  This is the C1 BISECTION LADDER - it is what `llama-debug --tensor-filter l_last` prints
     /// for the reference, so the first layer whose `sum` diverges is the layer that holds the bug.  It needs the
@@ -108,7 +103,6 @@ struct Options {
     std::string dump_routing;
     bool no_capture = false;          // run the layers directly instead of replaying graphs
     bool no_pool = false;             // skip the CPU expert pool: the GPU-only floor
-    bool sync_every_layer = false;
     /// Per-stage CUDA-event timings inside the layer halves.  `--no-capture` only: an event recorded inside a
     /// stream capture is silently dropped, so the captured path cannot carry this.
     bool stage_timing = false;
@@ -148,7 +142,6 @@ struct Options {
     /// max(this, their own headroom) free.  STRATA_RESIDENT_HEADROOM_GIB, when set, still decides the headroom.  arena_ram.hpp.
     uint64_t ram_keep = 0;
     bool resident_soft = false;
-    bool resident_cpu_explicit = false;   ///< #384: --resident-cpu-experts given by itself (not only implied)
     /// CS-T `--resident-budget-gib N`: the resident mode with a RAM budget - the N GiB of experts the GPU cache does
     /// not hold that the expert profile ranks hottest are copied into RAM, the rest are read from the files in place
     /// (the GGUF shards when the pack has no experts.bin).  0 = the whole complement (--resident-experts).
@@ -180,9 +173,6 @@ struct Options {
     int peer_reserve_mib = 600;
     int64_t peer_slots = 0;
     int peer_adapt_swaps = -1;
-    /// the prompt path's rows per layer the peer computes: -1 = half of chunk x top-k, 0 = the prompt path stays on
-    /// the primary
-    int64_t peer_prefill_rows = -1;
     /// The PLE gather's prefetch, as an A/B arm.  The gather measured 2.10-2.61 ms/token because its sixteen
     /// row reads are sixteen SEPARATE page faults into a 26.8 GB mapping; see `ple_prefetch_enable`.
     bool no_ple_prefetch = false;
@@ -192,10 +182,9 @@ struct Options {
     /// with whatever the prompt touched FIRST.  Empty means no profile.
     std::string expert_profile;
     /// #477 (--serve, opt-in): where to save what the adaptive tier learned, as a profile `--expert-profile` reads
-    /// (the resident experts first, then the routing counted since the start); on QUIT and every
-    /// `expert_profile_save_min` minutes between requests.  Empty (the default): nothing is counted or written.
+    /// (the resident experts first, then the routing counted since the start).  Empty (the default): nothing is
+    /// counted or written.
     std::string expert_profile_save;
-    double expert_profile_save_min = 10.0;
     /// R4.2d: **ON by default**, because the measurement is unambiguous and the alternative is known-broken.
     /// Without it, 17 of 10,562 layers had the hit work done when the pool returned; with it, 9,190.  The
     /// A/B arm is `--no-hit-poke`.
@@ -237,16 +226,10 @@ struct Options {
     int64_t prefill_auto_cap = 0;
     /// a bare `--prefill auto` (no ":N", no STRATA_PREFILL_AUTO_MAX): the gfx12 Linux rule below may raise its ceiling
     bool prefill_auto_bare = false;
-    /// 0.2.8 (Strix Halo on Windows): the prompt path keeps its own buffers by default (no lending), so `--prefill auto`
-    /// must not fall back to 2048 ("reserved buffers, keep them small") - apply_device_defaults' gfx1151 rule chose a
-    /// chunk that fits this box's carve-out.
-    bool prefill_own_keep_chunk = false;
     /// #1630's warning for a chunk the user named (8192 or more on a Windows HIP build), held until the device is known: it was printed at argument
     /// parsing, so it also appeared on the Strix Halo (gfx1151), where 8192 and 16384 are the measured default and a bare auto no longer stops at 6144.
     std::string prefill_cap_warn;
     bool prefill_cap_warn_skip = false;   ///< set by the gfx1151 rule below: that card is not the 7900 XTX of #1630
-    bool prefill_gfx12_16k = false;   ///< a default (gfx12 Linux: 32768, 0.2.10.1; NVIDIA cc 8.0+: 32768, round 0212) raised the auto chunk ceiling (a layer split takes 8192 back, 0.1.44)
-    const char* prefill_raise_who = "gfx12";   ///< who raised it, for the log lines ("gfx12" or "NVIDIA")
     /// --prefill-pipe (opt-in): a layer split's prompt chunks sized for its pipeline (Prefill::pipeline_chunk): 0 off,
     /// 1 today's chunk count evened out, a number > 1 the rig's b/a in tokens (setup's --calibrate measures it).
     /// < 0: not given - STRATA_PREFILL_PIPE, else off.
@@ -255,21 +238,9 @@ struct Options {
     /// Plan v0.3 P5: the prompt path borrows the top expert-cache slots for its buffers and refills them after
     /// the prompt (default); `--no-prefill-borrow` reserves the buffers' VRAM for the whole session instead.
     bool no_prefill_borrow = false;
-    /// Plan v0.3 P5 validation: batch only positions [0, P) and run the rest of the prompt through the token path
-    /// (teacher-forced), so the logits of positions >= P - which depend on the batched state - can be scored
-    /// against the oracle at many positions.  0 = the whole prompt but the last position.
-    int64_t prefill_until = 0;
-    /// Plan v0.3 P6: after every processed position, append the residual after the last layer (hc x n_embd
-    /// floats, the MTP draft head's input) to this file.  Token path only.
-    std::string dump_final_r;
     /// Plan v0.3 P6: speculative decoding with a verify window of this many tokens (the last accepted token and
-    /// spec-1 drafts); 0 = plain decode.  `spec_oracle` drafts from a token file (the expected continuation, for
-    /// the exactness test); `spec_corrupt` N > 0 replaces every Nth draft with a wrong token.
-#if defined(STRATA_GPU_METAL)
-    int spec = 2;   // Metal: a window of 2 by default (measured best on the M5 Max; an explicit --spec wins)
-#else
+    /// spec-1 drafts); 0 = plain decode.
     int spec = 0;
-#endif
     /// --serve runs up to this many sequences at once, one token each per batch window (0 = off).  A request
     /// sent as `BGEN <slot> <max_new> ...` reads its prompt and its first token through the usual path, then
     /// continues in slot <slot> of the batch windows (`BT <slot> <id>` lines, then `BDONE <slot> ...`).
@@ -280,14 +251,6 @@ struct Options {
     bool batch_groups_set = false;    ///< --batch-groups was given (a number or auto): no default then
     bool batch_groups_auto = false;   ///< --batch-groups auto (#417 stage 1): one group per stage of a layer split, if it divides --batch
     bool batch_mtp = false;      ///< --batch-mtp / STRATA_BATCH_MTP=1 (opt-in): one MTP proposal per batch slot
-    std::string spec_oracle;
-    int spec_corrupt = 0;
-    /// Benchmarks and A/B checks (eddoursul's fork, F19): the run emits this continuation (token ids) instead of
-    /// the window's argmax, and a draft is accepted when it matches it, so runs with different speculation
-    /// settings process the same text.
-    std::string spec_follow;
-    /// Per verify window: a line with its size, a hash of its final residual rows and its argmaxes.
-    std::string window_hashes;
     /// Plan v0.3 P6: the MTP draft layer's runtime directory (tools/mtp_rt.py); drafts come from it.
     std::string mtp;
     int64_t mtp_window = 32768;   ///< the draft layer attends to the last N cells (0 = every cell)
@@ -314,8 +277,6 @@ struct Options {
     /// windows on a helper thread instead of one window waiting for a whole round (see the tier in the --serve block).
     /// Not bit-exact run to run.  0 = the blocking tier.
     int adapt_async = 0;
-    int adapt_async_given = -1;      ///< --adapt-async on the command line (-1: not given; then the engine may decide, adapt_async_default.hpp)
-    bool adapt_async_self = false;   ///< the engine measures and chooses the asynchronous tier during the session (adapt_async_default.hpp)
     /// Plan v0.3 P6: a draft enters the verify window only while every draft before it (and itself) has at least
     /// this probability under the draft layer; 0 = always --spec-1 drafts.
     double spec_min_p = 0.0;
@@ -345,24 +306,11 @@ struct Options {
     int64_t conversation_cache_mib = -1; // host RAM for independent conversations; -1: not given, --serve sizes it from the free RAM (#3493), 0: off
     int conversation_cache_slots = 4;
     int64_t conversation_cache_min_free_mib = 2560;
-    /// --serve: park only conversations of at least this many tokens.  Every parked conversation costs one of
-    /// conversation_cache_slots whatever its length, so without it a client that interleaves short side requests
-    /// with one long conversation evicts the long one (oldest first).  0 = park every conversation.
-    int64_t conversation_cache_min_tokens = 0;
-    /// --serve: park only after the conversation has advanced this many tokens past the copy it would supersede.
-    /// A conversation that moved a few hundred tokens writes a full snapshot again, and the turn after that drops it
-    /// (drop_superseded) after writing the same bytes once more, so on a long single conversation every turn pays a
-    /// whole-snapshot copy for nothing.  0 = park every turn, as before.
-    int64_t conversation_cache_park_gain = 0;
     /// --memory-limit-mib N / STRATA_MEMORY_LIMIT_MIB: the total RAM this engine's container or cgroup may use, for a
     /// container that cannot see its real limit (0 or unset = none; the flag wins over the variable)
     int64_t memory_limit_mib = -1;
-    /// --serve SAVE: disk space a session file must leave free where it is written (MiB; 0 = no check)
-    int64_t session_min_free_mib = 4096;
-    bool session_save_reclaim = false;
     /// --serve: also keep a checkpoint every N freshly read prompt tokens (0 = only at the last turn boundary)
     int64_t prompt_cache_every = 16384;
-    bool prompt_cache_tail = false;   // optional extra checkpoint at an existing near-tail chunk boundary
     bool prompt_cache_spread = false;   ///< --prompt-cache-spread: keep checkpoints spread back from the end, not the latest
     /// --serve: a prompt read from token 0 is also checkpointed at its first turn boundary - the end of the system
     /// prompt, which every chat of the same client shares - when that is at least N tokens (0 = never)
@@ -404,8 +352,6 @@ struct Options {
     /// draft, so its decode is bound by the window length.  Each window size is a graph of its own (~20-35 MiB of
     /// VRAM), so only --lookup-sizes get one past the MTP's sizes; a size whose graph finds no VRAM is dropped.
     int lookup_max_t = -1;
-    /// --lookup-sizes A,B,.. : the lookup window sizes above the MTP's (default with --lookup-max-t N: MTP+1, MTP+2, N)
-    std::string lookup_sizes;
     /// --mtp-hnorm stream (opt-in): the draft layer's pre_fc_norm_hidden normalizes each hyper-connection stream on
     /// its own (llama.cpp's qwen4exp MTP graph) instead of one RMS over all four (the default, tools/mtp_probe.py).
     bool mtp_hnorm_stream = false;
@@ -426,7 +372,6 @@ struct Options {
     std::string draft_rule = "df2";   ///< --draft-rule df2|mtp|learn: what a request without a draft= key gets
     int draft_mtp_spec = 4;   ///< --draft-mtp-spec N: the widest window of a request that drafts with the MTP layer under --draft auto
     bool draft_mtp_spec_set = false;   ///< --draft-mtp-spec was given: it is also the window the MTP runs when --draft dflash2 falls back to it (the wider --spec was for DFlash2)
-    double draft_mtp_min_p = -1.0;   ///< --draft-mtp-min-p P: the MTP requests' --spec-min-p under --draft auto (-1 = --spec-min-p)
     int draft_cap = 0;   ///< --draft-cap N: the widest verify window with --draft dflash2 (0 = by card class, see where the drafter loads)
     /// A control vector on the residual stream (strata/models/qwen38/kernels/cvec.hpp), with llama.cpp's flags: the
     /// `experimental-speed-projection` profile passes `--control-vector-scaled FILE:1.0 --control-vector-layer-range
@@ -469,12 +414,6 @@ bool is_launch_blocking();
 void prime_gpu_queues();
 /// Prints the command line's help (every option of `strata` for a Qwen3.8 model) to stderr.
 void print_usage();
-/// Gets the window sizes the draft policy may give a lookup or chained window, as a bit mask (bit t = size t): every
-/// size up to --spec, unless --lookup-max-t is on - then the MTP's own sizes and --lookup-sizes (default MTP+1, MTP+2
-/// and --spec).
-unsigned lookup_size_mask(const Options& o);
-/// Gets the sizes of the mask `m` (lookup_size_mask) up to `max_t` as text, "2,3,8".
-std::string size_list(unsigned m, int max_t);
 using strata::serve::parse_i64_list;
 /// Reads the command line into `o`; `have_tokens` tells whether it gave the prompt (--tokens, --tokens-file).  Returns
 /// -1 to go on, otherwise the exit status for main() (--help, or a bad option, whose reason has been printed).

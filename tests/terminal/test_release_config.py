@@ -34,9 +34,6 @@ class ReleaseConfig(unittest.TestCase):
         self.assertIs(load("tauri.release.conf.json")["bundle"]["createUpdaterArtifacts"], True)
         self.assertIs(load("tauri.conf.json")["bundle"]["createUpdaterArtifacts"], False)       # a development build needs no private key
 
-    def test_the_mac_app_needs_the_macos_the_metal_engine_needs(self):
-        self.assertEqual(load("tauri.conf.json")["bundle"]["macOS"]["minimumSystemVersion"], "15.0")
-
     def test_the_updater_points_at_github_releases(self):
         up = load("tauri.conf.json")["plugins"]["updater"]
         self.assertEqual(up["endpoints"], ["https://github.com/Niko1221/Strata/releases/latest/download/latest.json"])

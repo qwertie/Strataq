@@ -147,11 +147,9 @@ class Resolution(unittest.TestCase):
         self.assertIn("is a hip engine, this PC needs cuda", str(caught.exception))
 
     def test_an_unqualified_combination_is_not_attempted(self):
-        if HERE == "macos-arm64":
-            self.skipTest("metal is supported here")
-        make_package(self.root, backend="metal")                 # metal is macOS arm64 only
+        make_package(self.root, platform="linux-aarch64", backend="hip")     # hip is x86_64 only
         with self.assertRaises(ec.EngineMissing) as caught:
-            ec.resolve(self.root, backend="metal", target=HERE)
+            ec.resolve(self.root, backend="hip", target="linux-aarch64")
         self.assertIn("not a supported combination", str(caught.exception))
 
     def test_runtime_too_old_is_refused(self):

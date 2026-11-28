@@ -57,7 +57,7 @@ the model. The section above is about the engine's HTTP server. This is what the
   API key is set. It opens a different listener that answers only `/v1/models`, `/v1/chat/completions` and `/v1/messages`, never the
   app's page or its host endpoints.
 - **App and Terminal talk through an owner channel.** One owner process per installation starts and ends the engine, and a second
-  client (the Terminal) attaches to it. On macOS and Linux that is a private Unix socket in a folder only you can open. On Windows it
+  client (the Terminal) attaches to it. On Linux that is a private Unix socket in a folder only you can open. On Windows it
   is a TCP listener on `127.0.0.1` that answers only requests carrying a 256-bit token kept in an owner-only folder. That is a weaker
   guarantee than a socket other users cannot open: on Windows the token is what protects it, as with any loopback service that has a
   token (`strata_control/owner_transport.py`). The bridge between the app shell and the host (used for the app update) is also loopback and protected by a token.

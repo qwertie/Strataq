@@ -98,15 +98,17 @@ export function windowsDisplayVendors({ platform = process.platform, run = execF
   return found;
 }
 
-const BACKEND_OF_VENDOR = [['10de', 'cuda'], ['1002', 'hip'], ['8086', 'sycl']];
+/** The PCI vendor ID of each make of graphics card Strata has an engine for, and that engine's family. */
+const BACKEND_OF_VENDOR = [['10de', 'cuda'], ['1002', 'hip']];
+const GPU_BACKENDS = BACKEND_OF_VENDOR.map(([, backend]) => backend);
 
 /**
- * Every engine family this PC's graphics cards can run, in the order NVIDIA, AMD, Intel; STRATA_ENGINE_BACKEND wins. A PC with two
+ * Every engine family this PC's graphics cards can run, in the order NVIDIA, AMD; STRATA_ENGINE_BACKEND wins. A PC with two
  * makes lists both, so a build for either make is accepted (recommend, never force).
  */
 export function gpuBackendsHere(env = process.env, { vendors = windowsDisplayVendors() } = {}) {
   const forced = String(env.STRATA_ENGINE_BACKEND ?? '').trim().toLowerCase();
-  if (forced) return ['cuda', 'hip', 'sycl'].includes(forced) ? [forced] : [];
+  if (forced) return GPU_BACKENDS.includes(forced) ? [forced] : [];
   if (vendors.size) {
     const list = BACKEND_OF_VENDOR.filter(([vendor]) => vendors.has(vendor)).map(([, backend]) => backend);
     if (list.length) return list;
@@ -119,22 +121,22 @@ export function gpuBackendsHere(env = process.env, { vendors = windowsDisplayVen
       if (!/^card\d+$/.test(card)) continue;
       try { seen.add(readFileSync(`${base}/${card}/device/vendor`, 'utf8').trim().toLowerCase()); } catch { /* no vendor file */ }
     }
-    const list = [['0x10de', 'cuda'], ['0x1002', 'hip'], ['0x8086', 'sycl']].filter(([vendor]) => seen.has(vendor)).map(([, backend]) => backend);
+    const list = BACKEND_OF_VENDOR.filter(([vendor]) => seen.has(`0x${vendor}`)).map(([, backend]) => backend);
     if (list.length) return list;
   } catch { /* not Linux */ }
   return [];
 }
 
 /**
- * The engine family this PC's graphics card needs ('cuda', 'hip', 'sycl'), or null when it cannot be told. The same order as Control
- * (NVIDIA first, then AMD, then Intel); STRATA_ENGINE_BACKEND wins. Reads only the driver and (Linux) the PCI vendor of the display adapters.
+ * The engine family this PC's graphics card needs ('cuda', 'hip'), or null when it cannot be told. The same order as Control
+ * (NVIDIA first, then AMD); STRATA_ENGINE_BACKEND wins. Reads only the driver and (Linux) the PCI vendor of the display adapters.
  */
 export function gpuBackendHere(env = process.env, options = {}) {
   return gpuBackendsHere(env, options)[0] ?? null;
 }
 
 const HIP_FAMILIES = [['RX 9000', ['gfx1200', 'gfx1201']], ['RX 7000', ['gfx1100', 'gfx1101', 'gfx1102']], ['RX 6000', ['gfx1030', 'gfx1031']], ['Ryzen AI Max', ['gfx1151']]];
-const MAKE_NAME = { cuda: 'NVIDIA', hip: 'AMD', sycl: 'Intel' };
+const MAKE_NAME = { cuda: 'NVIDIA', hip: 'AMD' };
 
 /** The plain sentence for a build made for another make of graphics card than this PC has. */
 export function wrongMakeNotice(manifest, here) {
@@ -180,8 +182,8 @@ export async function installBundledEngine({ bundleDir, components, platform = n
     // A PC with two makes (an AMD card for the model, an NVIDIA card for the desktop) accepts a build for either (#3892).
     const wantedList = backend === undefined ? gpuBackendsHere() : (Array.isArray(backend) ? backend : backend ? [backend] : []);
     const wanted = wantedList[0] ?? null;
-    if (wanted && ['cuda', 'hip', 'sycl'].includes(wanted)) {
-      const gpu = packages.filter(p => ['cuda', 'hip', 'sycl'].includes(p.manifest.backend));
+    if (wanted && GPU_BACKENDS.includes(wanted)) {
+      const gpu = packages.filter(p => GPU_BACKENDS.includes(p.manifest.backend));
       const fits = packages.filter(p => !gpu.includes(p) || wantedList.includes(p.manifest.backend));
       if (gpu.length && !fits.length) {
         const first = gpu.sort((a, b) => compareVersions(b.manifest.version, a.manifest.version))[0].manifest;
@@ -276,8 +278,6 @@ export async function installBundledEngine({ bundleDir, components, platform = n
 export async function removeVerifiedBundle({ bundleDir, components, log = () => {} } = {}) {
   try {
     if (!bundleDir || !components || !existsSync(bundleDir)) return { removed: false, reason: 'no bundle' };
-    // Files inside a signed macOS app must stay intact after installation.
-    if (process.platform === 'darwin' && resolve(bundleDir).split(sep).some(part => part.toLowerCase().endsWith('.app'))) return keepBundle(log, 'macOS app bundles must remain unchanged after signing');
     const packages = [];
     for (const entry of await readdir(bundleDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;

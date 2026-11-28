@@ -32,7 +32,6 @@ def apu(i, vram=96.0):
 
 
 FOUR = [amd(i) for i in range(4)]
-INTEL2 = [{"index": i, "name": "Intel Arc B580", "vram_gb": 12.0, "arch": "xe", "driver": "xe", "devid": "e20b"} for i in range(2)]
 
 
 def ids(cards):
@@ -155,18 +154,6 @@ class Pick(unittest.TestCase):
     def test_the_apu_is_not_a_card_for_the_pick(self):
         usable = [c for c in FOUR[:1]]                          # an APU beside one discrete card: one card counts
         self.assertTrue(gpu_pick.chosen_by_person(self.cfg(), usable))
-
-
-class Intel(unittest.TestCase):
-    """sycl/setup_intel.py runs setup's AMD branch with its Intel cards in the AMD list (arch "xe")."""
-
-    def test_two_intel_cards_keep_the_one_card_setup_picked_for_deepseek(self):
-        with mock.patch.object(setup, "amd_problem", lambda g: None), mock.patch.object(setup, "WIN", False):
-            self.assertEqual(setup.dsv41_auto_cards(INTEL2, Path("nowhere")), [])      # [] -> dsv41_cards falls back to the one card
-
-    def test_a_qwen_config_of_the_intel_path_is_not_widened(self):
-        cfg = {"arch": "qwen4exp", "backend": "sycl", "gpu": 0, "gpus_asked": True}
-        self.assertTrue(gpu_pick.chosen_by_person(cfg, INTEL2))
 
 
 class Install(unittest.TestCase):

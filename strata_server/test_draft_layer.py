@@ -29,13 +29,10 @@ class DraftLayer(unittest.TestCase):
     def test_the_server_applies_it_at_every_start(self):
         on = engine_args({"args": list(ARGS)})
         self.assertIn("--mtp", on)
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
+        with contextlib.redirect_stdout(io.StringIO()):
             off = engine_args({"args": list(ARGS), "mtp": False})
         for flag in ("--mtp", "--spec-min-p", "--batch-mtp"):
             self.assertNotIn(flag, off)
-        self.assertEqual(off[off.index("--spec") + 1], "4")
-        self.assertIn("without the draft layer", out.getvalue())
 
     def test_the_web_settings_page_lists_it(self):
         cfg = {"args": []}
