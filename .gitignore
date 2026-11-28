@@ -89,8 +89,6 @@ node_modules/
 # screenshots and checkpoints from the Mac rebuild live outside git (StrataSplit\evidence-archive)
 /apps/host/docs/evidence/
 /apps/host/docs/checkpoints/
-# the NVIDIA test session's output (tools/nvidia_session/run.ps1)
-/tools/nvidia_session/results/
 
 # DGX Spark build outputs and local venv (docs/DGX_SPARK_LINUX.md)
 /out-spark/
