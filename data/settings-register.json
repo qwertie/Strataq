@@ -133,7 +133,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3054,
+     "line": 3052,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -232,7 +232,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 5401,
+     "line": 5399,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -351,19 +351,19 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 5276,
+     "line": 5274,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 846,
+     "line": 842,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 846,
+     "line": 842,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -468,7 +468,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 5349,
+     "line": 5347,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -501,13 +501,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4399,
+     "line": 4396,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4399,
+     "line": 4396,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -689,7 +689,7 @@
    "engine_defaults": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 31,
+     "line": 27,
      "value": "1",
      "arch": "sm_86"
     }
@@ -889,7 +889,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3452,
+     "line": 3450,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -1000,13 +1000,13 @@
    "engine_defaults": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 35,
+     "line": 31,
      "value": "1",
      "arch": "sm_86"
     },
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 45,
+     "line": 41,
      "value": "1",
      "arch": "sm_60"
     }
@@ -1509,7 +1509,7 @@
     },
     {
      "file": "src/core/expert_source.cpp",
-     "line": 4266,
+     "line": 4264,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
@@ -1661,7 +1661,7 @@
    "launch_sets": [],
    "launch_reads": [],
    "doc_mentions": [
-    "docs/ENGINE_NOTES.md:465",
+    "docs/ENGINE_NOTES.md:459",
     "docs/MEMORY_MANAGER_PLAN.md:536"
    ],
    "first_commit": "a1e4fb4c80",
@@ -1761,7 +1761,7 @@
    "engine_defaults": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 29,
+     "line": 25,
      "value": "1",
      "arch": "sm_86"
     }
@@ -2189,7 +2189,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 4516,
+     "line": 4514,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
@@ -2246,14 +2246,6 @@
     {
      "file": "src/core/arch_defaults_test.cpp",
      "line": 140
-    },
-    {
-     "file": "src/core/nv_defaults_test.cpp",
-     "line": 86
-    },
-    {
-     "file": "src/core/nv_defaults_test.cpp",
-     "line": 88
     }
    ],
    "engine_defaults": [],
@@ -2299,7 +2291,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 5532,
+     "line": 5530,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -2852,7 +2844,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 4581,
+     "line": 4580,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -3978,7 +3970,7 @@
    "engine_sets": [
     {
      "file": "src/core/nv_defaults_test.cpp",
-     "line": 28
+     "line": 27
     }
    ],
    "engine_defaults": [],
@@ -4009,13 +4001,13 @@
    "reads": [
     {
      "file": "src/common/kernels/cpu/pool.cpp",
-     "line": 633,
+     "line": 629,
      "backend": "cpu",
      "fn": "getenv"
     },
     {
      "file": "src/core/expert_source.cpp",
-     "line": 3608,
+     "line": 3606,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -4065,7 +4057,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 4072,
+     "line": 4071,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -4105,7 +4097,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 4076,
+     "line": 4075,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -4138,7 +4130,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 4081,
+     "line": 4080,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -4171,7 +4163,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 4074,
+     "line": 4073,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -4204,7 +4196,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 4083,
+     "line": 4082,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -4237,7 +4229,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 4075,
+     "line": 4074,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -4270,7 +4262,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 4084,
+     "line": 4083,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -4303,7 +4295,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 4073,
+     "line": 4072,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -4336,7 +4328,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 4082,
+     "line": 4081,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -4503,7 +4495,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 6283,
+     "line": 6278,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -4551,7 +4543,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 6301,
+     "line": 6296,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -4592,13 +4584,13 @@
     },
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 6159,
+     "line": 6158,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 6205,
+     "line": 6200,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -4844,7 +4836,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4116,
+     "line": 4113,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -4910,7 +4902,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3664,
+     "line": 3661,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -4943,13 +4935,13 @@
    "reads": [
     {
      "file": "src/common/kernels/cpu/expert_layout.cpp",
-     "line": 76,
+     "line": 72,
      "backend": "cpu",
      "fn": "getenv"
     },
     {
      "file": "src/common/kernels/cpu/expert_layout.cpp",
-     "line": 114,
+     "line": 110,
      "backend": "cpu",
      "fn": "getenv"
     },
@@ -5054,7 +5046,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 6090,
+     "line": 6088,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -5087,7 +5079,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4139,
+     "line": 4136,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -5120,7 +5112,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 6089,
+     "line": 6087,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -5153,7 +5145,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 6091,
+     "line": 6089,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -5186,13 +5178,13 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 6079,
+     "line": 6077,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4138,
+     "line": 4135,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -5225,7 +5217,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 6092,
+     "line": 6090,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -5336,7 +5328,7 @@
    "engine_defaults": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 46,
+     "line": 42,
      "value": "1",
      "arch": "sm_60"
     }
@@ -5461,7 +5453,7 @@
    "engine_defaults": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 44,
+     "line": 40,
      "value": "2",
      "arch": "sm_60"
     }
@@ -6474,13 +6466,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 684,
+     "line": 680,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 689,
+     "line": 685,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -6514,13 +6506,13 @@
    "reads": [
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 1884,
+     "line": 1882,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 1950,
+     "line": 1948,
      "backend": "hip",
      "fn": "getenv"
     },
@@ -6544,19 +6536,19 @@
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 685,
+     "line": 681,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 690,
+     "line": 686,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 710,
+     "line": 706,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -6630,7 +6622,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 6145,
+     "line": 6144,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -6663,7 +6655,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 793,
+     "line": 789,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -6721,7 +6713,7 @@
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 794,
+     "line": 790,
      "backend": "hip",
      "fn": "getenv"
     },
@@ -7067,7 +7059,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 6226,
+     "line": 6221,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -7602,13 +7594,13 @@
    "engine_defaults": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 32,
+     "line": 28,
      "value": "1",
      "arch": "sm_86"
     },
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 47,
+     "line": 43,
      "value": "1",
      "arch": "sm_60"
     }
@@ -7754,7 +7746,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 4244,
+     "line": 4243,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -7766,7 +7758,7 @@
    "engine_defaults": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 33,
+     "line": 29,
      "value": "1",
      "arch": "sm_86"
     }
@@ -8201,12 +8193,6 @@
      "line": 178,
      "value": "1",
      "arch": "gfx1151 (Windows)"
-    },
-    {
-     "file": "src/core/nv_defaults.cpp",
-     "line": 68,
-     "value": "1",
-     "arch": "sm_121"
     }
    ],
    "launch_files": [],
@@ -8298,13 +8284,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3321,
+     "line": 3319,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3786,
+     "line": 3783,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
@@ -8586,7 +8572,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 891,
+     "line": 887,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -8685,7 +8671,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 6457,
+     "line": 6452,
      "backend": "hip",
      "fn": "is_env_on"
     }
@@ -9626,7 +9612,7 @@
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4132,
+     "line": 4129,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -9659,7 +9645,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4158,
+     "line": 4155,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -9698,7 +9684,7 @@
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4123,
+     "line": 4120,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -9764,7 +9750,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cpu/expert_layout.cpp",
-     "line": 304,
+     "line": 300,
      "backend": "cpu",
      "fn": "getenv"
     },
@@ -10102,7 +10088,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 3423,
+     "line": 3422,
      "backend": "cuda-hip",
      "fn": "is_env_off"
     }
@@ -10135,7 +10121,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 3428,
+     "line": 3427,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -10168,7 +10154,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 3438,
+     "line": 3437,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -10234,7 +10220,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4580,
+     "line": 4577,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -10306,7 +10292,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 914,
+     "line": 913,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -11407,7 +11393,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3958,
+     "line": 3955,
      "backend": "cuda-hip",
      "fn": "is_env_off"
     }
@@ -11686,7 +11672,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4130,
+     "line": 4127,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -11719,7 +11705,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4154,
+     "line": 4151,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -11752,7 +11738,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4141,
+     "line": 4138,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -12147,7 +12133,7 @@
    "engine_defaults": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 116,
+     "line": 77,
      "value": "1",
      "arch": "NVIDIA cc>=8"
     }
@@ -13330,7 +13316,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 4930,
+     "line": 4929,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -13444,7 +13430,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cpu/expert_layout.cpp",
-     "line": 355,
+     "line": 351,
      "backend": "cpu",
      "fn": "getenv"
     },
@@ -13782,7 +13768,7 @@
     },
     {
      "file": "src/core/expert_source.cpp",
-     "line": 5417,
+     "line": 5415,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -14115,7 +14101,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 3421,
+     "line": 3420,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -14181,7 +14167,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cpu/expert_layout.cpp",
-     "line": 174,
+     "line": 170,
      "backend": "cpu",
      "fn": "getenv"
     }
@@ -14214,7 +14200,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cpu/pool.cpp",
-     "line": 755,
+     "line": 751,
      "backend": "cpu",
      "fn": "getenv"
     }
@@ -14268,7 +14254,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cpu/pool.cpp",
-     "line": 753,
+     "line": 749,
      "backend": "cpu",
      "fn": "getenv"
     }
@@ -14405,7 +14391,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 766,
+     "line": 762,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -14445,7 +14431,7 @@
    "reads": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 113,
+     "line": 74,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -14456,19 +14442,19 @@
    "engine_sets": [
     {
      "file": "src/core/nv_defaults_test.cpp",
-     "line": 60
+     "line": 37
     },
     {
      "file": "src/core/nv_defaults_test.cpp",
-     "line": 63
+     "line": 40
     },
     {
      "file": "src/core/nv_defaults_test.cpp",
-     "line": 71
+     "line": 48
     },
     {
      "file": "src/core/nv_defaults_test.cpp",
-     "line": 73
+     "line": 50
     }
    ],
    "engine_defaults": [],
@@ -14528,7 +14514,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 3420,
+     "line": 3419,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -14667,7 +14653,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3120,
+     "line": 3118,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -15169,7 +15155,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4851,
+     "line": 4848,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -15209,7 +15195,7 @@
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 5162,
+     "line": 5159,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -15250,7 +15236,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 4347,
+     "line": 4345,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -15676,13 +15662,13 @@
     },
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 2033,
+     "line": 2018,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 2052,
+     "line": 2037,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
@@ -15703,12 +15689,6 @@
      "line": 179,
      "value": "1",
      "arch": "gfx1151 (Windows)"
-    },
-    {
-     "file": "src/core/nv_defaults.cpp",
-     "line": 58,
-     "value": "1",
-     "arch": "sm_121"
     }
    ],
    "launch_files": [],
@@ -15734,7 +15714,7 @@
    "reads": [
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 1739,
+     "line": 1738,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -15767,7 +15747,7 @@
    "reads": [
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 2032,
+     "line": 2017,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -15800,7 +15780,7 @@
    "reads": [
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 1878,
+     "line": 1876,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -15833,7 +15813,7 @@
    "reads": [
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 2043,
+     "line": 2028,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -15866,7 +15846,7 @@
    "reads": [
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 1743,
+     "line": 1742,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -15899,7 +15879,7 @@
    "reads": [
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 1850,
+     "line": 1848,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -15932,7 +15912,7 @@
    "reads": [
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 1946,
+     "line": 1944,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -15971,7 +15951,7 @@
     },
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 1834,
+     "line": 1832,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -16004,7 +15984,7 @@
    "reads": [
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 2006,
+     "line": 2004,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -16037,7 +16017,7 @@
    "reads": [
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 1747,
+     "line": 1746,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -16267,7 +16247,7 @@
     },
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 1770,
+     "line": 1769,
      "backend": "hip",
      "fn": "env_int"
     }
@@ -16300,7 +16280,7 @@
    "reads": [
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 1780,
+     "line": 1779,
      "backend": "hip",
      "fn": "env_int"
     }
@@ -16333,7 +16313,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4809,
+     "line": 4806,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -16454,7 +16434,7 @@
    "reads": [
     {
      "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 1929,
+     "line": 1927,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -16565,39 +16545,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_PF_TILE_DEBUG",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/common/kernels/prefill/moe_fused_iq.cu",
-     "line": 2019,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "9a398bd5bf",
-   "first_date": "2026-10-27",
-   "since": "v0.2.7.1",
-   "last_commit": "9a398bd5bf",
-   "last_date": "2026-10-27",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] diagnostic / trace / measurement switch by name or by code, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_PF_W16_CACHE_MIB",
    "backends": [
     "cuda"
@@ -16676,7 +16623,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 7029,
+     "line": 7024,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -17339,7 +17286,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cpu/pool.cpp",
-     "line": 748,
+     "line": 744,
      "backend": "cpu",
      "fn": "getenv"
     }
@@ -17383,7 +17330,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 4257,
+     "line": 4255,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -17515,7 +17462,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 456,
+     "line": 452,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -17582,13 +17529,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3453,
+     "line": 3451,
      "backend": "cuda",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 709,
+     "line": 705,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -17687,7 +17634,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4555,
+     "line": 4552,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
@@ -18008,7 +17955,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4760,
+     "line": 4757,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18263,14 +18210,7 @@
    "default_state": null,
    "code_default": null,
    "engine_sets": [],
-   "engine_defaults": [
-    {
-     "file": "src/core/nv_defaults.cpp",
-     "line": 63,
-     "value": "w4a4",
-     "arch": "sm_121"
-    }
-   ],
+   "engine_defaults": [],
    "launch_files": [],
    "launch_sets": [],
    "launch_reads": [],
@@ -18583,7 +18523,7 @@
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 893,
+     "line": 889,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -20174,7 +20114,7 @@
    "engine_defaults": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 34,
+     "line": 30,
      "value": "1",
      "arch": "sm_86"
     }
@@ -20424,7 +20364,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 3819,
+     "line": 3817,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -20457,7 +20397,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 635,
+     "line": 631,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -20635,13 +20575,13 @@
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 610,
+     "line": 606,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 637,
+     "line": 633,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
@@ -20688,7 +20628,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 608,
+     "line": 604,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
@@ -20922,7 +20862,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 4329,
+     "line": 4327,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -21161,13 +21101,13 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 4218,
+     "line": 4216,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4881,
+     "line": 4878,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -21213,7 +21153,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4767,
+     "line": 4764,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -22186,7 +22126,7 @@
    ],
    "launch_reads": [],
    "doc_mentions": [
-    "docs/ENGINE_NOTES.md:454",
+    "docs/ENGINE_NOTES.md:448",
     "docs/MEMORY_MANAGER_PLAN.md:526"
    ],
    "first_commit": "200c35a8e9",
@@ -22220,21 +22160,15 @@
    "engine_defaults": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 30,
+     "line": 26,
      "value": "2",
      "arch": "sm_86"
     },
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 43,
+     "line": 39,
      "value": "2",
      "arch": "sm_60"
-    },
-    {
-     "file": "src/core/nv_defaults.cpp",
-     "line": 72,
-     "value": "2",
-     "arch": "sm_121"
     }
    ],
    "launch_files": [],
@@ -22319,62 +22253,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_SM121_PERF",
-   "backends": [
-    "cuda"
-   ],
-   "reads": [
-    {
-     "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 6186,
-     "backend": "cuda",
-     "fn": "getenv"
-    },
-    {
-     "file": "src/core/nv_defaults.cpp",
-     "line": 52,
-     "backend": "cuda",
-     "fn": "is_env_off"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [
-    {
-     "file": "src/core/nv_defaults_test.cpp",
-     "line": 25
-    },
-    {
-     "file": "src/core/nv_defaults_test.cpp",
-     "line": 42
-    },
-    {
-     "file": "src/core/nv_defaults_test.cpp",
-     "line": 44
-    },
-    {
-     "file": "src/core/nv_defaults_test.cpp",
-     "line": 46
-    }
-   ],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "9a398bd5bf",
-   "first_date": "2026-10-27",
-   "since": "v0.2.7.1",
-   "last_commit": "f94a27da60",
-   "last_date": "2026-11-01",
-   "status": "opt-in",
-   "owner": "kernels/cuda",
-   "note": "[auto] documented for users (docs/DGX_SPARK_LINUX.md:92), 2 more",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_SM60_PERF",
    "backends": [
     "cuda"
@@ -22382,7 +22260,7 @@
    "reads": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 38,
+     "line": 34,
      "backend": "cuda",
      "fn": "is_env_off"
     }
@@ -22393,7 +22271,7 @@
    "engine_sets": [
     {
      "file": "src/core/nv_defaults_test.cpp",
-     "line": 27
+     "line": 26
     }
    ],
    "engine_defaults": [],
@@ -22415,7 +22293,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 6179,
+     "line": 6177,
      "backend": "cuda",
      "fn": "getenv"
     },
@@ -22454,7 +22332,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 6184,
+     "line": 6182,
      "backend": "cuda",
      "fn": "getenv"
     },
@@ -22493,7 +22371,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 6176,
+     "line": 6174,
      "backend": "cuda",
      "fn": "getenv"
     },
@@ -22571,13 +22449,13 @@
    "reads": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 23,
+     "line": 19,
      "backend": "cuda",
      "fn": "is_env_off"
     },
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 147,
+     "line": 108,
      "backend": "cuda",
      "fn": "is_env_off"
     }
@@ -22588,7 +22466,7 @@
    "engine_sets": [
     {
      "file": "src/core/nv_defaults_test.cpp",
-     "line": 26
+     "line": 25
     }
    ],
    "engine_defaults": [],
@@ -22685,7 +22563,7 @@
    "engine_defaults": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 148,
+     "line": 109,
      "value": "2",
      "arch": "sm_86"
     }
@@ -22713,7 +22591,7 @@
    "reads": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 146,
+     "line": 107,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -22758,7 +22636,7 @@
    "engine_defaults": [
     {
      "file": "src/core/nv_defaults.cpp",
-     "line": 148,
+     "line": 109,
      "value": "200",
      "arch": "sm_86"
     }
@@ -22795,20 +22673,13 @@
    "default_state": "off",
    "code_default": null,
    "engine_sets": [],
-   "engine_defaults": [
-    {
-     "file": "src/core/nv_defaults.cpp",
-     "line": 76,
-     "value": "1",
-     "arch": "sm_121"
-    }
-   ],
+   "engine_defaults": [],
    "launch_files": [],
    "launch_sets": [],
    "launch_reads": [],
    "doc_mentions": [
-    "docs/ENGINE_NOTES.md:362",
-    "docs/ENGINE_NOTES.md:618",
+    "docs/ENGINE_NOTES.md:356",
+    "docs/ENGINE_NOTES.md:612",
     "docs/MEMORY_MANAGER_PLAN.md:639",
     "docs/UPSTREAM_PORTING.md:117"
    ],
@@ -23049,31 +22920,31 @@
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3245,
+     "line": 3243,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3292,
+     "line": 3290,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3321,
+     "line": 3319,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3786,
+     "line": 3783,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3905,
+     "line": 3902,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -23860,7 +23731,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4893,
+     "line": 4890,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -23926,13 +23797,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3558,
+     "line": 3556,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3558,
+     "line": 3556,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24070,7 +23941,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4615,
+     "line": 4612,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24207,7 +24078,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cpu/pool.cpp",
-     "line": 597,
+     "line": 593,
      "backend": "cpu",
      "fn": "getenv"
     }
@@ -24721,7 +24592,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 3486,
+     "line": 3485,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24755,13 +24626,13 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 3447,
+     "line": 3446,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 3475,
+     "line": 3474,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -24794,7 +24665,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 3477,
+     "line": 3476,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -24828,13 +24699,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4812,
+     "line": 4809,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4825,
+     "line": 4822,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
@@ -24879,13 +24750,13 @@
    "reads": [
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 6286,
+     "line": 6281,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/common/kernels/cuda/iq_kernels.cu",
-     "line": 6325,
+     "line": 6320,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
@@ -24978,7 +24849,7 @@
    "reads": [
     {
      "file": "src/common/experts/ram_tier.cpp",
-     "line": 57,
+     "line": 55,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -25182,7 +25053,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 5643,
+     "line": 5641,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -25288,13 +25159,13 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 3502,
+     "line": 3500,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3742,
+     "line": 3739,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -25360,13 +25231,13 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 4519,
+     "line": 4517,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/core/expert_source.cpp",
-     "line": 6082,
+     "line": 6080,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
@@ -25590,7 +25461,7 @@
    "reads": [
     {
      "file": "src/common/kernels/cpu/expert_layout.cpp",
-     "line": 196,
+     "line": 192,
      "backend": "cpu",
      "fn": "getenv"
     }
