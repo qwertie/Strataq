@@ -39,17 +39,15 @@ ENGINE_RE = re.compile(r"^strata-engine-(?P<v>\d[\d.]*)-(?P<plat>.+?)\.(?:tar\.g
 DSV41_RE = re.compile(r"^strata-dsv41-(?P<v>\d[\d.]*)-(?P<plat>.+?)\.(?:tar\.gz|zip)$")
 CONTROL_RE = re.compile(r"^strata-control-(?P<v>\d[\d.]*)-(?P<plat>.+?)\.(?:tar\.gz|zip)$")
 APP_RE = re.compile(r"^Strata-\d[\d.]*-(windows-x64-setup\.exe|linux-x86_64\.AppImage)(\.sig)?$")
-FEED_NAMES = ["strata-feed.json", "strata-feed.json.sig", "strata-feed-linux-aarch64.json", "strata-feed-linux-aarch64.json.sig"]
+FEED_NAMES = ["strata-feed.json", "strata-feed.json.sig"]
 SMALL_NAMES = ["SHA256SUMS.txt", "latest.json", "install.sh", "install.ps1", "install-manifest.txt"]
 
 # where each platform's Qwen engine is built (phaseA-tests/rel0211/RELEASE-STATE.md "Build plan" and the box rules)
 # (the Q4-P8 rehearsal of 2026-11-08, phaseA-tests/qwen4/RESULTS-Q4-P8.md section 5: five variants in 37 minutes)
-BUILD_BOX = {"linux-x86_64-cuda": "l620", "linux-x86_64-hip": "p620", "windows": "owner PC",
-             "linux-aarch64": "the Spark (dgxspark)"}
+BUILD_BOX = {"linux-x86_64-cuda": "l620", "linux-x86_64-hip": "p620", "windows": "owner PC"}
 BOX_NOTE = {"l620": "jobq; the CUDA build with its packaging takes about 15 min",
             "p620": "jobq; /data has little room, a package is about 4 GB",
-            "owner PC": "jobq --lock heavy, 20 min per job at most (split the release set); never while a model runs",
-            "the Spark (dgxspark)": "off limits unless the coordinator says"}
+            "owner PC": "jobq --lock heavy, 20 min per job at most (split the release set); never while a model runs"}
 
 
 def gib(n: int | None) -> str:
@@ -174,7 +172,7 @@ def plan(report: dict, set_index: int, a, prev: dict) -> dict:
     feed_cmd = ("python packaging/feed_tool.py build-feed --out <RELEASE> --key <FEED-KEY> --sequence %d --engine <engine-entries> --dsv41 <dsv41-entries> "
                 "--models <models-folder> --control <control-entries>%s%s   # OWNER'S KEY; `--models` is Q4-PREP-B's change"
                 % (a.sequence, " --shapes <shape-entries>" if case == "B" else "", " --app-json latest.json" if with_app else ""))
-    step("%d" % n, "Sign the feeds at sequence %d (the shared one and linux-aarch64)" % a.sequence, "owner PC, with the owner's key at that moment", 3,
+    step("%d" % n, "Sign the feed at sequence %d" % a.sequence, "owner PC, with the owner's key at that moment", 3,
          [feed_cmd, "python packaging/feed_tool.py verify-feed <RELEASE> --pub <FEED-KEY.pub.json>"],
          list(FEED_NAMES), owner=True)
     for x in FEED_NAMES:
@@ -184,7 +182,7 @@ def plan(report: dict, set_index: int, a, prev: dict) -> dict:
     step("%d" % n, "Assemble the upload folder and check it", "owner PC, python only", 5,
          ["python phaseA-tests/rel0211/scripts/relfinal/final_rc1.py --mode real --work <FINAL> --key <FEED-KEY> --pub <FEED-KEY.pub.json>   # 0.2.11's assembly: hard links, SHA256SUMS; copy it for this version first",
           "python phaseA-tests/rel0211/scripts/relfinal/check_sums_rc1.py --upload <UPLOAD>",
-          "python phaseA-tests/rel0211/scripts/relfinal/check_feeds_rc1.py --shared <UPLOAD>/strata-feed.json --arm <UPLOAD>/strata-feed-linux-aarch64.json --upload <UPLOAD> --pub <FEED-KEY.pub.json> --src <repo> --seq %d" % a.sequence],
+          "python phaseA-tests/rel0211/scripts/relfinal/check_feeds_rc1.py --shared <UPLOAD>/strata-feed.json --upload <UPLOAD> --pub <FEED-KEY.pub.json> --src <repo> --seq %d" % a.sequence],
          ["the upload folder"])
     n += 1
     up = sum(c["size"] or 0 for c in changed)

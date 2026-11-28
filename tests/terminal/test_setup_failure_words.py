@@ -26,7 +26,7 @@ class SetupFailureWords(unittest.TestCase):
         self.assertIn("/tmp/a.setup.log", error.next)
         self.assertEqual(setup_failure(["nothing useful"], "", "", None, True).text, "The model could not be installed.")
 
-    def test_setup_accepts_the_kv_format_the_docker_docs_offer(self):
+    def test_the_kv_error_names_the_choices(self):
         import subprocess, sys
         root = Path(__file__).resolve().parents[2]
         done = subprocess.run([sys.executable, str(root / "setup.py"), "--kv", "bogus"], capture_output=True, text=True, cwd=str(root), timeout=120)

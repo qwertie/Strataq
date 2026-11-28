@@ -40,7 +40,6 @@ class ProbeLib:
             "setup_images": lambda a, gpu, hip, models_dir: None,
             "hipblaslt_table": lambda arch, lib_dirs, ver=None, extra_dirs=(): None,
             "vision_threads": lambda logical=None: 8,
-            "is_gb10": lambda g: m.key == "dgx_spark",
             "engine_exe": lambda eng, new=None: str(eng / self.EXE),      # the simulated engine has no new engine
         }
 
@@ -72,11 +71,7 @@ def _gpu(setup, world: World) -> dict:
     if m.backend == "hip":
         g = {"index": 0, "name": m.card, "vram_gb": 2.0 if m.unified else m.vram_gb, "arch": m.arch_field, "count": 1}   # (an APU: its BIOS carve-out, 2 GB as on the maintainers' box)
         return setup.amd_apply_uma(g, ram=m.ram_gb)
-    g = {"index": 0, "name": m.card, "vram_gb": m.vram_gb, "arch": str(m.arch_field), "driver": "580.0", "count": 1}
-    if m.unified:                                                    # a DGX Spark: one memory for the CPU and the GPU, counted as gpus() counts it
-        shared = max(0.0, m.ram_gb - setup.UMA_OS_LEFT_GB)
-        g.update({"vram_gb": shared, "uma": True, "dedicated_gb": 0.0, "shared_gb": shared})
-    return g
+    return {"index": 0, "name": m.card, "vram_gb": m.vram_gb, "arch": str(m.arch_field), "driver": "580.0", "count": 1}
 
 
 def _qwen(setup, world: World, lib: ProbeLib, say) -> tuple[dict, dict]:

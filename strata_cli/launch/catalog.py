@@ -347,10 +347,6 @@ class Catalog:
             near = S.closest(family, list(families))
             raise ValueError(f"There is no model family called '{family}'." + (f" Did you mean '{near}'?" if near else "")
                              + " Families: " + ", ".join(families) + ".")
-        from strata_control import dsv41_fit
-        line = dsv41_fit.not_here(match)
-        if line:
-            raise ValueError(line + " Use ist-das-2.00bpw or ist-das-2.25bpw.")
         offered = [f for f in families if match in self.strata.sizes_of(models, f)]
         if family is not None:
             if family not in offered:

@@ -1,6 +1,6 @@
 """A feed that lists something this Control does not know (a platform, a backend or an archive format added in a later release) is still a feed:
 the entry is left out with one plain line, and the rest is read as usual. A Control up to 0.1.52 refused the whole feed in that case, which is why
-the first release with a new platform must not put it into the shared feed (see test_feed_aarch64.py). An entry of a KNOWN kind that is malformed
+the first release with a new platform must not put it into the shared feed. An entry of a KNOWN kind that is malformed
 still refuses the feed."""
 
 from __future__ import annotations
@@ -77,11 +77,6 @@ class UnknownEntriesAreSkipped(unittest.TestCase):
         self.assertEqual(a.engine, b.engine)
         self.assertEqual(a.control, b.control)
         self.assertEqual(a.skipped, ())
-
-    def test_linux_aarch64_is_known_here(self):
-        f = parse(doc(engine={"packages": [engine(platform="linux-aarch64", archs=["sm_121"], url="a")]}))
-        self.assertEqual(len(f.engine), 1)
-        self.assertEqual(f.skipped, ())
 
     def test_a_feed_of_only_unknown_entries_is_empty_not_an_error(self):
         f = parse(doc(engine={"packages": [engine(platform="freebsd-riscv")]}))

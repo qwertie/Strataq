@@ -1,5 +1,5 @@
 #!/bin/sh
-# Strata Terminal: one-line installer for Linux (x86_64, and ARM64 on the NVIDIA DGX Spark) and macOS (Apple silicon).
+# Strata Terminal: one-line installer for Linux x86_64.
 #
 #     curl -fsSL https://github.com/qwertie/Strataq/releases/latest/download/install.sh -o install.sh && sh install.sh
 #
@@ -54,10 +54,8 @@ main() {
   os=$(uname -s); arch=$(uname -m)
   case "$os-$arch" in
     Linux-x86_64|Linux-amd64) platform=linux-x86_64 ;;
-    Darwin-arm64|Darwin-aarch64) platform=macos-arm64 ;;
-    Linux-aarch64|Linux-arm64) platform=linux-aarch64 ;;      # the NVIDIA DGX Spark (GB10); the note below says so for any other ARM computer
-    Darwin-x86_64) die "this Mac has an Intel processor. The Strata Terminal for Mac is built for Apple silicon (M1 or newer) only." ;;
-    *) die "this computer ($os $arch) has no Strata Terminal. Supported: Linux x86_64 with an NVIDIA or AMD card, Linux ARM64 on an NVIDIA DGX Spark, macOS on Apple silicon (Windows: use install.ps1)." ;;
+    *-aarch64|*-arm64) die "Strata does not support ARM computers ($os $arch)." ;;
+    *) die "this computer ($os $arch) has no Strata Terminal. Supported: Linux x86_64 with an NVIDIA or AMD card (Windows: use install.ps1)." ;;
   esac
   gpu=""
   if command -v nvidia-smi >/dev/null 2>&1; then
@@ -71,20 +69,8 @@ main() {
     # the PCI class decides, not a word anywhere in the line (an SSD sold as "3D NAND" is not a graphics card)
     gpu=$(lspci 2>/dev/null | grep -iE '^[^ ]+ (vga compatible controller|3d controller|display controller)[^:]*:' | head -1 | sed 's/^[^ ]* [^:]*: *//' || true)
   fi
-  if [ -z "$gpu" ] && [ "$os" = Darwin ]; then
-    gpu=$(system_profiler SPDisplaysDataType 2>/dev/null | sed -n 's/^ *Chipset Model: //p' | head -1 || true)
-  fi
   say "Strata Terminal installer"
   say "  This computer: $os $arch ($platform)${gpu:+, graphics: $gpu}"
-  if [ "$platform" = linux-aarch64 ]; then      # recommend, never force: the Terminal installs on any ARM Linux, its engine is for one machine
-    case "$gpu" in
-      *GB10*) ;;
-      *) say "  Note: Strata's engine for ARM Linux is built and tested on the NVIDIA DGX Spark (GB10) only. This computer reports ${gpu:-no NVIDIA graphics}: the Terminal installs, but 'strata launch' may find no engine for it." ;;
-    esac
-  fi
-  if [ "$os" = Darwin ]; then
-    say "  Note: Strata's engine runs on NVIDIA and AMD graphics cards only. The Terminal installs, but 'strata launch' finds no engine for a Mac."
-  fi
   say "  Release folder: $FEED"
 
   # ---- 2. download and check

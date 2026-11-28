@@ -16,7 +16,7 @@ class Machine:
     key: str                      # file name of the golden
     title: str
     os: str                       # "windows" | "linux"
-    machine: str                  # "x86_64" | "aarch64"
+    machine: str                  # "x86_64"
     backend: str                  # engine family: cuda | hip
     archs: tuple[str, ...]        # what drafting.detect_hardware() answers for the cards
     card: str                     # the card's name as the hardware report gives it
@@ -37,8 +37,6 @@ MACHINES: tuple[Machine, ...] = (
             "NVIDIA RTX PRO 5000 Blackwell", "nvidia", 72.0, 256.0, arch_field=120),
     Machine("nv_12gb_streaming", "NVIDIA 12 GB streaming (RTX 3060)", "linux", "x86_64", "cuda", ("sm_86",),
             "NVIDIA GeForce RTX 3060", "nvidia", 12.0, 64.0, arch_field=86),
-    Machine("dgx_spark", "DGX Spark (linux-aarch64, GB10)", "linux", "aarch64", "cuda", ("sm_121",),
-            "NVIDIA GB10", "nvidia", 0.0, 128.0, arch_field=121, unified=True),
     Machine("strix_halo_win", "Strix Halo Windows (gfx1151)", "windows", "x86_64", "hip", ("gfx1151",),
             "AMD Radeon(TM) 8060S Graphics", "amd", 0.0, 128.0, arch_field="gfx1151", unified=True),
     Machine("r9700_linux", "Radeon AI PRO R9700 (gfx1201, Linux)", "linux", "x86_64", "hip", ("gfx1201",),

@@ -828,11 +828,7 @@ def cpu_info():
         try:
             txt = open("/proc/cpuinfo").read()
             mflags = re.search(r"^flags\s*:\s*(.*)$", txt, re.M)
-            if mflags is None:
-                # aarch64 lists Features, not the x86 flags line, and no "model name": lscpu names the cores (a DGX Spark:
-                # Cortex-X925 + Cortex-A725). No AVX of any kind; the arm64 engine needs none.
-                cores = re.findall(r"^\s*Model name:\s*(.+)$", out(["lscpu"]), re.M)
-                name = " + ".join(dict.fromkeys(c.strip() for c in cores)) or (sysinfo.processor() or "arm64 CPU")
+            if mflags is None:       # not an x86 CPU: no AVX, and cpu_floor() refuses it
                 return name, False, False
             flags = set(mflags.group(1).split())
             avx2 = "avx2" in flags
@@ -866,14 +862,9 @@ def _cpuid_floor() -> str:
 
 
 def is_arm64() -> bool:
-    """An ARM64 CPU (DGX Spark / GB10, Grace): there is no AVX here, and no ready-made engine for it."""
+    """Tells whether the CPU is ARM64, which Strata does not support. Kept only for tools/test_setup_pins.py's skip
+    condition; delete it together with that."""
     return sysinfo.machine().lower() in ("aarch64", "arm64")
-
-
-def is_gb10(g) -> bool:
-    """A DGX Spark's GPU: the GB10 (compute capability 12.1), on arm64 Linux, with the CPU's memory as its own. The part the Spark settings
-    below were measured on (docs/DGX_SPARK_LINUX.md); any other unified-memory NVIDIA GPU gets the ordinary settings."""
-    return isinstance(g, dict) and bool(g.get("uma")) and str(g.get("arch")) == "121" and is_arm64() and sys.platform.startswith("linux")
 
 
 def cpu_floor(avx2: bool) -> str:
@@ -883,8 +874,6 @@ def cpu_floor(avx2: bool) -> str:
     forced = os.environ.get("STRATA_ISA_FLOOR", "").strip().lower()
     if forced in ("avx", "none"):
         return forced
-    if is_arm64():
-        return ""
     if avx2:
         return ""
     if WIN:
@@ -963,7 +952,7 @@ def _cpuid_avx2() -> bool:
 
 def gpus():
     """Every NVIDIA GPU, numbered as nvidia-smi numbers them (by PCI bus, the order the engine is told to use)."""
-    return parse_nvidia_cards(out(NVIDIA_SMI_CARDS), ram_gb() if is_arm64() else None)
+    return parse_nvidia_cards(out(NVIDIA_SMI_CARDS))
 
 
 def gpu_drives_display(g) -> bool:
@@ -4947,13 +4936,6 @@ def get_prebuilt(url_base, gpu, vision, updating=False, toolkit=13) -> Path | No
             return eng
         say(f"  Updating the ready-made engine ({meta.get('version')} -> {'.'.join(map(str, MIN_ENGINE))} or newer) ...")
         info.replace(eng / "BUILD.json.prev")   # kept for the .previous copy
-    if is_arm64() and sys.platform.startswith("linux"):
-        # a DGX Spark: the release has no flat engine zip for it (and the CUDA 12 engine is x86). The signed feed has the linux-aarch64
-        # package when the release carries one; without it the caller compiles (spark/build_engine.sh does the same by hand)
-        got = engine_from_feed(eng, updating) if int(toolkit) != 12 else None
-        if got is None:
-            warn(f"no ready-made engine for {sysinfo.machine()} in the update feed" + ("" if updating else ": compiling it here, once"))
-        return got
     if not url_base:
         return None
     eng.mkdir(exist_ok=True)
@@ -5287,9 +5269,8 @@ def install_build_tools(gpu, yes):
                 fail("the CUDA Toolkit can be installed automatically on Ubuntu 22.04 / 24.04 and Debian 12 / 13 only",
                      "install it from https://developer.nvidia.com/cuda-downloads and run it again")
             deb = Path("/tmp/cuda-keyring.deb")
-            # NVIDIA's arm64 server repository is "sbsa" (a DGX Spark; DGX OS normally has the toolkit already)
-            download(f"https://developer.download.nvidia.com/compute/cuda/repos/{repo}/"
-                     f"{'sbsa' if is_arm64() else 'x86_64'}/cuda-keyring_1.1-1_all.deb", deb, "CUDA repository key")
+            download(f"https://developer.download.nvidia.com/compute/cuda/repos/{repo}/x86_64/cuda-keyring_1.1-1_all.deb", deb,
+                     "CUDA repository key")
             run(["sudo", "dpkg", "-i", str(deb)])
             run(["sudo", "apt-get", "update"])
             if repo.startswith("ubuntu"):                  # as before: 13.0, and a failed install stops setup here
@@ -6865,11 +6846,6 @@ def _start(cfg_path: Path, port: int | None, gpu: int | list | None = None, open
     for n, line in enumerate(textwrap.wrap(f"Settings ({cfg_path.name}): {settings_summary(cfg, port)}", 100,
                                            break_on_hyphens=False)):   # #564: what this start uses
         say(("  " if n == 0 else "    ") + line)
-    if not WIN and os.environ.get("STRATA_EXECV"):
-        # Replace this process instead of spawning a child. The Docker image sets STRATA_EXECV=1,
-        # so there the server is PID 1 and docker stop's SIGTERM reaches the process that can
-        # answer the engine with QUIT. Normal Linux starts keep spawning the server as a child.
-        os.execve(cmd[0], cmd, {**os.environ, acquisition.ENV: "1"})
     # the server and everything it starts are told, too: nothing in a running model installs or downloads
     return subprocess.call(cmd, env={**os.environ, acquisition.ENV: "1"})
 
@@ -8270,12 +8246,9 @@ def install_dsv41(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopted, 
         except Exception:                                    # noqa: BLE001 - the disk is only a hint here
             room = None
         rec = dsv41_fit.recommend(ram, room)                 # the best version this computer's memory and disk suit; warn-never-refuse
-        names = [m for m in names if not dsv41_fit.not_here(m)]   # the Unsloth 1-bit sets: untested on a DGX Spark
         for i, m in enumerate(names, 1):
             say(f"  {i}) {fam['models'][m].get('label', m)}: {fam['models'][m]['about']}" + ("   (recommended)" if m == rec else ""))
         model = names[int(ask("Which version?", [str(i) for i in range(1, len(names) + 1)], str(names.index(rec) + 1), a.yes)) - 1]
-    if dsv41_fit.not_here(model):       # DGX Spark: never run (strata_control/dsv41_fit.not_here); said before anything is fetched or packed
-        fail(dsv41_fit.not_here(model), "choose --model ISTA-DAS-2.00bpw or --model ISTA-DAS-2.25bpw (the older spelling IST-DAS-... works too; their files work with --gguf-dir too); nothing has been downloaded")
     ok(f"size: {model}")
     md = fam["models"][model]
     say("  Its GGUF files: " + ("ISTA-DAS / ISTA-DASLab (huggingface.co/ISTA-DASLab/DeepSeek-V4.1-Flash-1017-GSQ-RCO-GGUF), with the DSpark drafter from Unsloth"
@@ -8404,8 +8377,7 @@ def install_dsv41(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopted, 
         fail("DeepSeek's engine is not available for this computer yet",
              "Supported graphics cards: NVIDIA RTX 30, 40 and 50 series, the Radeon AI PRO R9700, and a Ryzen AI Max (Strix Halo) on "
              "Windows with the AMD DeepSeek engine package. "
-             + ("The DGX Spark (GB10) builds its own: spark/build_engine.sh puts strata-ds41 beside the engine (docs/DGX_SPARK_LINUX.md). "
-                if is_arm64() else "") + dsv41_manual_steps(eng)
+             + dsv41_manual_steps(eng)
              + " Or update Strata later (a newer version may add your card), pick another model, or build the engine for your card yourself "
              "(docs/DEEPSEEK41.md, \"Building the engine for your card\"). Nothing has been downloaded.")
 
@@ -8990,8 +8962,7 @@ def main() -> int:
     pf = page_file_gb()
     if pf is not None and pf < 4:
         warn(page_file_advice(pf, page_file_setting()))
-    ok(f"CPU: {cpu} ({'ARM64' if is_arm64() else 'AVX-512' if avx512 else 'AVX2' if avx2 else 'no AVX2'})")
-    # (a unified-memory GPU - a DGX Spark's GB10 - is on the CPU's own link, not PCIe: nvidia-smi's "1.0 x1" there means nothing)
+    ok(f"CPU: {cpu} ({'AVX-512' if avx512 else 'AVX2' if avx2 else 'no AVX2'})")
     link = None if hip or gpu.get("uma") else pcie_link(int(gpu.get("index", 0)))
     if link is not None:
         line, problem = pcie_lines(link)
@@ -9001,13 +8972,7 @@ def main() -> int:
     floor = cpu_floor(avx2)
     if floor == "unsupported":
         fail("this CPU has neither AVX2 nor SSE4.2; Strata needs at least SSE4.2 (Intel Nehalem, 2008, or newer)")
-    if is_arm64():
-        # DGX Spark / GB10 (#3622): the engine is the linux-aarch64 package of the signed feed when the release has one, else compiled here
-        # (spark/build_engine.sh). A warning, not a stop.
-        warn("ARM64 CPU (a DGX Spark): the CPU's share of the experts runs on ggml-cpu's NEON kernels. Tested: Qwen3.8-Flash-Next IQ3_S and "
-             "the NVFP4 pack, and DeepSeek-V4.1 2.00 bpw, on one DGX Spark (GB10). The Q2_0 and Gyro packs need the x86 kernels and do not "
-             "run on this CPU")
-    elif not avx2:
+    if not avx2:
         # #394 #595 #623: the ready-made engine is AVX2; an older CPU gets one compiled here, whose CPU experts run on
         # ggml-cpu's kernels for this CPU.  Experimental: measured only on newer CPUs with the older path forced, and by
         # users on a few Xeons.  A warning, not a stop.

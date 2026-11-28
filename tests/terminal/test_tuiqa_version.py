@@ -53,12 +53,11 @@ class Readme(unittest.TestCase):
         self.assertTrue((ROOT / "docs" / "TERMINAL_LAUNCH.md").is_file())
 
     def test_free_memory_guidance_fits_the_system(self):
-        win, lin, mac = (self.readme(t) for t in ("windows-x86_64", "linux-x86_64", "darwin-arm64"))
+        win, lin = (self.readme(t) for t in ("windows-x86_64", "linux-x86_64"))
         self.assertNotIn("free -g", win)
         self.assertIn("FreePhysicalMemory", win)
         self.assertIn("Task Manager", win)
         self.assertIn("free -g", lin)
-        self.assertNotIn("free -g", mac)
 
 
 if __name__ == "__main__":

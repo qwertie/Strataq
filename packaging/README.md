@@ -25,12 +25,10 @@ Each row is an OS, CPU ABI and backend. A row is `qualified` only after the acce
 
 | Target | App artifact | Engine package recipe | Status |
 | --- | --- | --- | --- |
-| `darwin-arm64` Terminal | self-contained `.tar.gz` | none: no engine runs on a Mac | Built and verified. Runs from a moved directory with no system Python. |
 | `windows-x86_64-cuda` | NSIS `.exe` (Tauri) | `cuda13` and `cuda12` | Built and tested on a Windows PC with an NVIDIA card: silent install with a System32-only PATH, a real model, an agent chat. |
 | `windows-x86_64-hip` | NSIS `.exe` (Tauri) | `tools/hip/build_release.py` | Published. Strix Halo inference is recorded in [STRIX_HALO.md](../docs/STRIX_HALO.md). This does not qualify every discrete Radeon card ([AMD_HIP.md](../docs/AMD_HIP.md)). |
 | `linux-x86_64-cuda` | AppImage (Tauri) | `packaging/build_cuda_linux.sh`, built in a glibc 2.35 chroot | `cuda13` built and tested on RTX 3060 and RTX A4000 (app in the browser, a real model, a picture). `cuda12` built. |
 | `linux-x86_64-hip` | AppImage (Tauri) | `packaging/build_hip_linux.sh` | `rx9070` (gfx1200 / gfx1201) built and tested on a Radeon AI PRO R9700. `rx7900` (gfx1100 / 1101 / 1102) built, not run on an RX 7000 card. `rx6000` (gfx1030 / 1031) built, not tested on a real RX 6000 card. |
-| `linux-aarch64-cuda` | none (no AppImage for arm64) | `packaging/build_cuda_linux_aarch64.sh`, built on the DGX Spark (`cuda13`, `sm_121`) | Engine packages (Qwen with `strata-dsv41` inside, and the separate DeepSeek one) and the Terminal archive built and tested on one DGX Spark ([DGX_SPARK_LINUX.md](../docs/DGX_SPARK_LINUX.md)). Not tried on any other arm64 machine. |
 
 **DeepSeek V4.1-Flash.** The signed feed's `dsv41` member carries the DeepSeek engine `strata-dsv41` as its own package: Windows
 NVIDIA `cuda13`, Linux NVIDIA `cuda13`, Linux AMD `rx9070`, and since 0.2.7 Windows AMD `rdna3` (Ryzen AI Max, gfx1151). All other
@@ -121,7 +119,7 @@ separate, explicit action. `apps/host/tests/no-acquire.test.mjs` fails on any ou
 
 ## The Terminal archive
 
-The Terminal bundles a private Python and its dependencies for `windows-x86_64`, `linux-x86_64`, `linux-aarch64` (DGX Spark) and `darwin-arm64`
+The Terminal bundles a private Python and its dependencies for `windows-x86_64` and `linux-x86_64`
 (`package_terminal.py --target ...`, built on the target OS).
 
 - The interpreter is python-build-standalone CPython 3.12.15, digest-checked at build time.
@@ -142,7 +140,7 @@ The Terminal bundles a private Python and its dependencies for `windows-x86_64`,
 
 ## Release checks and gaps
 
-- CI covers scripts, Terminal checks, CUDA and HIP compile checks and Docker images ([.github/workflows](../.github/workflows)). It does not replace native desktop
+- CI covers scripts, Terminal checks and CUDA and HIP compile checks ([.github/workflows](../.github/workflows)). It does not replace native desktop
   packaging, signing or real-GPU acceptance on every target. Some recipes still run by hand.
 - Signing needs the owner's credentials, which are never in this tree. The feed and every engine package are signed with the feed key
   (`feed_tool.py`); the app installers with the Tauri updater key ([UPDATES.md](UPDATES.md)). No Windows code-signing certificate is configured, so Windows may warn about the installer.

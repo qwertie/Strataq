@@ -20,8 +20,6 @@ setup.py, tools/strata_mcp.py and strata_cli/launch import it.  Recommend, never
 from __future__ import annotations
 
 import os
-from strata_base import sysinfo
-import sys
 from typing import Any
 
 from strata_common import catalog, gpu_fit
@@ -112,7 +110,7 @@ if CODER:
         "spill_words": "This computer has {ram:.0f} GB of RAM. This set was measured down to 16 GB (about 8 tokens a second on one R9700); with less, most experts come from the SSD while it answers: it works but is slower, and a word can take seconds. More RAM fixes it. It is still allowed.",
         "tight_short": "tight: runs, with the experts RAM cannot hold read from the SSD (about 21 to 15 tokens a second measured with 40 to 24 GB of RAM on one R9700)",
         "spill_short": "slow here: this computer has {ram:.0f} GB of RAM and the set was measured down to 16 GB (about 8 tokens a second on one R9700); it can still be installed",
-        "unproven_uma": "Not run on a Ryzen AI Max (Strix Halo) or a DGX Spark yet: the sizes above are exact, the speed is not measured on a shared-memory computer.",
+        "unproven_uma": "Not run on a Ryzen AI Max (Strix Halo) yet: the sizes above are exact, the speed is not measured on a shared-memory computer.",
         "disk_total": round((_coder_bytes + ISTA_ENGRAM_BYTES + ISTA_DSPARK_BYTES) / GB),
         "quality": "ISTA-DAS's coding version, half of the model's experts removed (192 of 384 in every layer); against the original model perplexity +48% and KL 0.40 (code and agent work: KL 0.23 and 0.20; 2.00 bpw 0.10 and 0.11)"}
 ISTA_DENSE_GB = 6.16                  # the dense weights in the shards (attention, router, shared experts, the head; the embedding stays on the CPU)
@@ -145,9 +143,6 @@ UMA_RESERVE_GB = 12.0                 # kept for Windows, the desktop and the en
 UMA_MEASURED = ("a Ryzen AI Max+ 395 (Radeon 8060S, 128 GB unified: a 64 GB BIOS carve-out plus 64 GB seen by Windows) on Windows: answers "
                 "14-16 tokens a second on code in the default Faster mode (5 experts) and 10-11 on chat; a 4,000-token prompt 77-81 tokens a "
                 "second, 8,000 tokens 108-111")
-# A DGX Spark (GB10, Linux, 128 GB unified, no BIOS carve-out): the same one-pool plan.  Measured with the 2.00 bpw set, six experts per word.
-UMA_MEASURED_GB10 = ("an NVIDIA DGX Spark (GB10, 128 GB unified) on Linux with six experts per word: about 17 tokens a second on a first short "
-                     "chat and 20-23 once warm; a 1,700-token prompt read at 213-237 tokens a second, a 500-token one at 76")
 
 
 def variant(model: str | None) -> dict | None:
@@ -465,19 +460,11 @@ def _plan_uma(key: str, model: str, card: dict, ram_gb: float | None, disk_free_
     lines.append("The n-gram table stays on the SSD and is read a few rows for each word: use an NVMe drive for the model files (a slow "
                  "disk makes every word slower). The same table serves every ISTA-DAS set, so installing another one downloads it once.")
     name = card.get("name") or "the built-in Radeon"
-    if float(card.get("dedicated_gb") or 0.0) > 0 or "GB10" not in str(card.get("name") or ""):
-        lines.append(f"{name} shares this PC's memory: the RAM and the GPU's BIOS carve-out are one pool of {total:.0f} GB. About "
-                     f"{resident:.0f} GB of the {float(v['experts_gb']):.0f} GB of experts stay in it beside {dense_gb_v:.1f} GB of "
-                     f"dense weights and {UMA_RESERVE_GB:.0f} GB kept for Windows; the other {streamed:.0f} GB are read from the SSD while it answers.")
-        if not v.get("unproven_uma"):                   # (these speeds are the 2.00 set's: a set not run there says so below instead)
-            lines.append(f"Measured on this kind of PC: {UMA_MEASURED}.")
-    else:       # a DGX Spark's GB10: one memory for the CPU and the GPU, nothing set aside in a BIOS, Linux
-        lines.append(f"{name} shares this computer's memory: the CPU and the GPU are one pool of {total:.0f} GB. About "
-                     f"{resident:.0f} GB of the {float(v['experts_gb']):.0f} GB of experts stay in it beside {dense_gb_v:.1f} GB of "
-                     f"dense weights and {UMA_RESERVE_GB:.0f} GB kept for the system; the other {streamed:.0f} GB are read from the SSD while it answers.")
-        if not v.get("unproven_uma"):
-            lines.append(f"Measured on this kind of computer: {UMA_MEASURED_GB10}.")
-        out["measured"] = "" if v.get("unproven_uma") else UMA_MEASURED_GB10
+    lines.append(f"{name} shares this PC's memory: the RAM and the GPU's BIOS carve-out are one pool of {total:.0f} GB. About "
+                 f"{resident:.0f} GB of the {float(v['experts_gb']):.0f} GB of experts stay in it beside {dense_gb_v:.1f} GB of "
+                 f"dense weights and {UMA_RESERVE_GB:.0f} GB kept for Windows; the other {streamed:.0f} GB are read from the SSD while it answers.")
+    if not v.get("unproven_uma"):                   # (these speeds are the 2.00 set's: a set not run there says so below instead)
+        lines.append(f"Measured on this kind of PC: {UMA_MEASURED}.")
     if v.get("unproven_uma"):
         lines.append(v["unproven_uma"])
     if streamed > 0.5:
@@ -648,15 +635,7 @@ def options(cards: list[dict], ram_gb: float | None, vendor: str | None = None, 
     return out
 
 
-# Unsloth's two 1-bit sets (UD-IQ1_S, UD-IQ1_M) were kept off a DGX Spark (linux-aarch64, GB10) until a Spark run passed: both passed there on 2026-10-30 (real `strata launch --model-path`,
-# 10 of 10 answers, tool call correct), so the tuple is empty.  Put a name back here to hide a set from the Spark again.
-AARCH64_NOT_YET = ()
-AARCH64_NOT_YET_LINE = "Unsloth's 1-bit DeepSeek sets were not tested on a DGX Spark yet; the 2.00 and 2.25 sets were."
-
-
 def not_here(model: str | None) -> str | None:
-    """The plain line when `model` is not offered on THIS computer (linux-aarch64, the DGX Spark: AARCH64_NOT_YET), else None.
-    Read at call time from sys.platform and sysinfo.machine(), so one rule serves the model lists, setup, `strata launch` and the app's file check."""
-    if sys.platform.startswith("linux") and sysinfo.machine().lower() in ("aarch64", "arm64") and model in AARCH64_NOT_YET:
-        return AARCH64_NOT_YET_LINE
+    """Gets None: every DeepSeek set is offered on every supported computer. Kept only because tools/strata_mcp.py
+    (model_table, dsv41_not_here) still calls it; delete it together with those calls."""
     return None

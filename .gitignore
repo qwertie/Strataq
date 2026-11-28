@@ -92,8 +92,3 @@ node_modules/
 # the NVIDIA test session's output (tools/nvidia_session/run.ps1)
 /tools/nvidia_session/results/
 
-# DGX Spark build outputs and local venv (docs/DGX_SPARK_LINUX.md)
-/out-spark/
-/build-spark/
-/build-vision-spark/
-/.venv-build/

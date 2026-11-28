@@ -83,9 +83,7 @@ def main(argv=None) -> int:
             folder = extract_terminal(term.resolve(), work)
             v = version or (folder / "VERSION").read_text(encoding="utf-8").strip()
             version = v
-            platform = ("windows-x86_64" if (folder / "python" / "python.exe").exists() else
-                        "macos-arm64" if ("darwin" in term.name or "macos" in term.name) else
-                        "linux-aarch64" if "aarch64" in term.name else "linux-x86_64")      # the feed's own platform names
+            platform = "windows-x86_64" if (folder / "python" / "python.exe").exists() else "linux-x86_64"
             fmt = "zip" if platform.startswith("windows") else "tar.gz"
             entry = ft.pack_control(folder, out / "control", version=v, platform=platform, fmt=fmt)
             print(f"control {platform} {v}: {entry['size'] // 1048576} MB")
@@ -105,9 +103,6 @@ def main(argv=None) -> int:
             shutil.rmtree(copy.parent, ignore_errors=True)
     ft.build_feed(out, key=key, sequence=a.sequence, channel=a.channel, engine_dir=out / "engine" if a.engine else None,
                   control_dir=out / "control" if a.terminal else None, dsv41_dir=out / "dsv41" if a.dsv41 else None)
-    if any("linux-aarch64" in p.name for p in (out / "control").glob("*.entry.json")):       # the Linux ARM64 Terminal reads its own feed file (same bytes here)
-        for suffix in ("", ".sig"):
-            shutil.copy2(out / ("strata-feed.json" + suffix), out / ("strata-feed-linux-aarch64.json" + suffix))
     base = a.url.rstrip("/")
     for name in ("install.sh", "install.ps1"):
         text = (ROOT / "packaging" / name).read_text(encoding="utf-8").replace(RELEASE_FEED, base)

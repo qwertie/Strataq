@@ -1,4 +1,4 @@
-"""install.ps1 / install.sh: an ARM computer is refused with the reason and the way out; the Windows script survives the usual environment trouble."""
+"""install.ps1 / install.sh: an ARM computer is refused; the Windows script survives the usual environment trouble."""
 
 import os
 import shutil
@@ -22,12 +22,9 @@ class Text(unittest.TestCase):
         self.ps1 = PS1.read_text(encoding="utf-8")
         self.sh = SH.read_text(encoding="utf-8")
 
-    def test_arm_is_refused_with_a_reason_and_a_next_step(self):
-        self.assertIn("Windows on ARM PC", self.ps1)
-        self.assertIn("no engine for ARM", self.ps1)
-        self.assertNotIn("has no Strata Terminal yet", self.ps1)
-        self.assertIn("NVIDIA DGX Spark", self.sh)      # 0.2.7.1: Linux ARM64 installs the Terminal (the engine is for the Spark only)
-        self.assertIn("Apple silicon", self.sh)
+    def test_arm_is_refused(self):
+        self.assertIn("does not support this computer's processor", self.ps1)
+        self.assertIn("does not support ARM computers", self.sh)
 
     def test_tls12_proxy_sign_in_and_the_real_error_text(self):
         self.assertIn("Tls12", self.ps1)
@@ -51,7 +48,7 @@ class Run(unittest.TestCase):
         done = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(PS1)],
                               capture_output=True, text=True, env=env, timeout=120)
         self.assertNotEqual(done.returncode, 0)
-        self.assertIn("Windows on ARM PC", done.stderr + done.stdout)
+        self.assertIn("does not support this computer's processor (ARM64)", done.stderr + done.stdout)
         self.assertNotIn("Downloading", done.stdout)
 
 

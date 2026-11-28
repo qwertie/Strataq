@@ -152,15 +152,12 @@ def feed_source(feed: str | None, root: Path) -> str:
     if os.environ.get(ENV_FEED):
         return os.environ[ENV_FEED]
     remembered = (State(root).data.get("feed") or {}).get("source")
-    if remembered == DEFAULT_FEED:                    # the common feed remembered from before: a Linux ARM64 machine reads its own file
-        return default_feed()
     return remembered if _may_be_remembered(remembered) else default_feed()
 
 
 def default_feed() -> str:
-    """Gets DEFAULT_FEED for this machine: a Linux ARM64 machine (the DGX Spark) reads strata-feed-linux-aarch64.json from
-    the same release."""
-    return DEFAULT_FEED.rsplit("/", 1)[0] + "/" + feedmod.feed_name()
+    """Gets the address of the project's release feed."""
+    return DEFAULT_FEED
 
 
 def _may_be_remembered(source) -> bool:

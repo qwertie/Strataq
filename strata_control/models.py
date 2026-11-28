@@ -340,7 +340,6 @@ def _already_set_up(shards: list[Path], candidate: dict | None) -> dict | None:
 
 
 ISSUE_WORDS = {
-    "not_on_this_spark": "Unsloth's 1-bit DeepSeek sets were not tested on a DGX Spark yet; the 2.00 and 2.25 sets were",
     "multiple_model_groups": "the folder holds more than one model",
     "incomplete_or_invalid_shard_set": "some parts of the model are missing",
     "unrecognized_or_unsupported_model_variant": "this is not a model size Strata knows",
@@ -369,11 +368,6 @@ _REASON_WORDS = (
     ("unsupported_architecture", "this model type is not supported by the Strata engine (add it as a Custom model API with llama-server instead)"),
     ("symlink", "this is a shortcut (symbolic link) that cannot be followed"),
 )
-
-
-def _not_here(model: str) -> str | None:
-    from strata_control import dsv41_fit
-    return dsv41_fit.not_here(model)
 
 
 def plain_issue(code: str) -> str:
@@ -681,11 +675,6 @@ def _dsv41_plan(path: Path, details) -> dict | None:
         candidate = {"family": dsv41_sets.FAMILY, "model": row["model"], "basis": "known_names_and_sizes", "expected_expert_types": [],
                      "expected_tensor_count": None,
                      "setup_args_hint": ["--family", dsv41_sets.FAMILY, "--model", row["model"], "--gguf-dir", str(place)]}
-        line = _not_here(row["model"])
-        if line:       # recommend, never force: say what does work and stop before anything is copied or packed
-            issues.append("not_on_this_spark")
-            candidate = None
-            messages.append(line)
         messages.append(f"This is DeepSeek-V4.1-Flash, {row['label']}: all {len(row['present'])} model files are here"
                         + (", and the n-gram table." if row["engram"] else "."))
         if not row["engram"]:

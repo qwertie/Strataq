@@ -51,7 +51,7 @@ SECOND_MODEL_SENTENCE = ("Running two models at the same time, one on each make 
 #: The nvidia-smi command whose answer parse_nvidia_cards reads (setup.py and tools/strata_mcp.py run it).
 NVIDIA_SMI_CARDS = ["nvidia-smi", "--query-gpu=index,name,memory.total,compute_cap,driver_version",
                     "--format=csv,noheader,nounits"]
-#: The share of a unified memory (Strix Halo, DGX Spark) kept for the OS: what the engine's device_free_bytes() leaves.
+#: The share of a unified memory (Strix Halo) kept for the OS: what the engine's device_free_bytes() leaves.
 UMA_OS_LEFT_GB = 6
 
 

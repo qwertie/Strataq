@@ -108,8 +108,8 @@ class OtherSystemsKeepTheirAnswers(unittest.TestCase):
                 mock.patch.object(sysinfo.platform, "machine", return_value="arm64"):
             self.assertEqual(targets.host_platform(), "macos-arm64")
         with mock.patch.object(sys, "platform", "linux"), mock.patch.object(sysinfo.platform, "system", return_value="Linux"), \
-                mock.patch.object(sysinfo.platform, "machine", return_value="aarch64"):
-            self.assertEqual(targets.host_platform(), "linux-aarch64")
+                mock.patch.object(sysinfo.platform, "machine", return_value="x86_64"):
+            self.assertEqual(targets.host_platform(), "linux-x86_64")
 
     def test_the_answer_is_a_key_of_the_backend_matrix(self):
         self.assertIn(targets.host_platform(), {t for ts in targets.BACKEND_MATRIX.values() for t in ts})
