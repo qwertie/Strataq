@@ -6,22 +6,34 @@ launches a second time with no new flags. The Control and the engine are doubles
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
-from unittest import mock
+from pathlib import Path
 
 from strata_cli.launch import settings as S
 from strata_cli.launch.runner import derive_config
 from strata_control import arg_layers
-from strata_common import drafting, tune_knobs
-from tests.terminal.test_drafting_single import Base, flag
+from strata_common import tune_knobs
 
 
-class Launches(Base):
-    def server_args(self, cfg, backend="cuda", archs=("sm_120",), vram=8000.0):
+def flag(args, name):
+    return args[args.index(name) + 1] if name in args and args.index(name) + 1 < len(args) else None
+
+
+class Launches(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        data = Path(self.tmp.name) / "data"
+        (data / "mtp" / "rt").mkdir(parents=True)
+        (data / "packs" / "tag").mkdir(parents=True)
+        (data / "mtp" / "rt" / "experts.bin").write_bytes(b"e" * 100)
+        self.args = ["--native", "m.gguf", "--pack", str(data / "packs" / "tag"), "--mtp", str(data / "mtp" / "rt"), "--spec", "4",
+                     "--batch-mtp", "--mtp-q4", "all", "--spec-min-p", "0.5", "--max-context", "131072"]
+
+    def server_args(self, cfg):
         from strata_common.engine_client import engine_args
-        with mock.patch.object(drafting, "detect_hardware", return_value=(backend, list(archs))), mock.patch("strata_common.engine_client.drafting_vram_mib", return_value=vram), \
-                mock.patch.object(drafting, "installed_engine_exe", return_value=self.exe):
-            return engine_args(cfg, str(self.exe), announce=False)
+        return engine_args(cfg)
 
     def base(self, **extra):
         return {"exe": "component:strata-engine", "model_name": "qwen3.8-flash-next-iq3_s", "port": 8080, "args": list(self.args), **extra}
@@ -29,15 +41,14 @@ class Launches(Base):
     def launch(self, base=None, extra=None, prev=None, **settings):
         """What `Runner.build_config` writes: derive, stamp, and a round trip through the file."""
         s = S.LaunchSettings(extra=dict(extra or {}), **settings)
-        with mock.patch.object(drafting, "detect_hardware", return_value=("cuda", ["sm_120"])):
-            cfg = derive_config(base or self.base(), s, bool_flags=tune_knobs.BOOL_FLAGS, prev=prev)
+        cfg = derive_config(base or self.base(), s, bool_flags=tune_knobs.BOOL_FLAGS, prev=prev)
         arg_layers.stamp(cfg)
         return json.loads(json.dumps(cfg))
 
     # ---- #5178
     def test_an_explicit_value_is_not_remembered_when_the_next_launch_leaves_it_out(self):
-        first = self.launch(extra={"--pcie-frac": "0.35"}, drafting="dflash2")
-        second = self.launch(prev=first, drafting="dflash2")
+        first = self.launch(extra={"--pcie-frac": "0.35"})
+        second = self.launch(prev=first)
         argv = self.server_args(second)
         self.assertNotEqual(flag(argv, "--pcie-frac"), "0.35", "back to Auto")
         self.assertNotIn("--pcie-frac", second.get("user_args") or [])
@@ -132,7 +143,7 @@ class Launches(Base):
         cases = [dict(), dict(extra={"--draft-conf": "0.35"}), dict(extra={"--pcie-frac": "0.4", "--spec": "3"}), dict(extra={"--aux-cpus": "off"})]
         prev = None
         for kw in cases:
-            cfg = self.launch(prev=prev, drafting="dflash2", **kw)
+            cfg = self.launch(prev=prev, **kw)
             argv = self.server_args(cfg)
             for name in set(a for a in argv if a.startswith("--") and a not in tune_knobs.BOOL_FLAGS):
                 self.assertEqual(argv.count(name), 1, (kw, name))

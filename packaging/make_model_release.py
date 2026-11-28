@@ -172,7 +172,7 @@ def plan(report: dict, set_index: int, a, prev: dict) -> dict:
     else:
         kept += [{"name": e["name"], "size": e["size"], "why": "no app change"} for e in prev["app"]]
     feed_cmd = ("python packaging/feed_tool.py build-feed --out <RELEASE> --key <FEED-KEY> --sequence %d --engine <engine-entries> --dsv41 <dsv41-entries> "
-                "--drafters <drafter-entries> --models <models-folder> --control <control-entries>%s%s   # OWNER'S KEY; `--models` is Q4-PREP-B's change"
+                "--models <models-folder> --control <control-entries>%s%s   # OWNER'S KEY; `--models` is Q4-PREP-B's change"
                 % (a.sequence, " --shapes <shape-entries>" if case == "B" else "", " --app-json latest.json" if with_app else ""))
     step("%d" % n, "Sign the feeds at sequence %d (the shared one and linux-aarch64)" % a.sequence, "owner PC, with the owner's key at that moment", 3,
          [feed_cmd, "python packaging/feed_tool.py verify-feed <RELEASE> --pub <FEED-KEY.pub.json>"],

@@ -78,7 +78,7 @@ _LIVE_RANGE = {"rows": (1, 16), "concurrent": (1, None), "context": (1, None), "
 # Alternate spellings accepted by the page-pool engines, removed when their canonical flag is saved.
 _LIVE_ALIASES = {"--vram-reserve-mib": ("--reserve-mib",), "--prefill-chunk": ("--chunk",)}
 # Alternate spellings that a saved default writes over in place instead: setup and its tools find Qwen's prompt chunk
-# by --prefill (setup_config.py, vram_fit.py, tune_knobs.py).
+# by --prefill (setup_config.py, tune_knobs.py).
 _KEPT_ALIASES = {"--prefill-chunk": ("--prefill",)}
 
 

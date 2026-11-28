@@ -6760,8 +6760,6 @@ def _start(cfg_path: Path, port: int | None, gpu: int | list | None = None, open
     cfg_path.touch()                                     # the most recently used model
     if "--mtp" in cfg["args"][:-1] and not own_path_config(cfg):
         refresh_draft_vocab(Path(cfg["args"][cfg["args"].index("--mtp") + 1]), cfg.get("draft_vocab", "cjk"))
-        from strata_common import drafting
-        refresh_dflash2_vocab(drafting.data_dir_of(cfg["args"]), cfg.get("draft_vocab", "cjk"))
     cmd = [sys.executable, str(ROOT / "strata_server" / "server.py"), "--engine", "strata", "--config", str(cfg_path),
            "--port", str(port or cfg.get("port", 8080))]
     if cfg.get("backend") == "hip":                    # AMD, numbered as HIP numbers them (setup's KFD order)
@@ -7163,24 +7161,6 @@ def mtp_corrupt(mtp: Path, env=None) -> bool:
     return r.returncode == 3
 
 
-def provide_dflash2_vocab(data: Path, choice: str = "cjk") -> None:
-    """A DFlash2-only install has no MTP folder to hold the draft vocabulary: it is kept beside the DFlash2 pack (strata_control/drafting.py provide_vocab), as the subset the person chose
-    in setup (--draft-vocab, saved in the model's config; the default file when none)."""
-    from strata_common import drafting
-    if drafting.provide_vocab(data, choice or "cjk") is None:
-        warn("the draft vocabulary file (data/draft_vocab.bin) is missing from this Strata folder, so DFlash2 cannot start; update Strata")
-
-
-def refresh_dflash2_vocab(data: Path | None, choice: str = "cjk") -> None:
-    """The DFlash2 copy of the draft subset (beside its pack) follows the person's choice too, when that copy exists: an update, a start and setup run again keep or apply the
-    choice for a DFlash2-only install, which has no MTP folder for refresh_draft_vocab to work on."""
-    if data is None:
-        return
-    from strata_common import drafting
-    if drafting.vocab_target(data).is_file():
-        drafting.refresh_vocab(data, choice or "cjk")
-
-
 def refresh_draft_vocab(rt: Path, choice: str = "cjk") -> None:
     """The draft layer's token subset in the MTP folder: `cjk` (data/draft_vocab.bin, since 0.1.27, #137), `en`
     (data/draft_vocab_en.bin, the English/code subset before it: ~110 MiB less VRAM, English answers 1-2% faster) or
@@ -7214,13 +7194,6 @@ def refresh_shared_draft_vocab(cfg: dict, done: set) -> None:
     args = cfg.get("args") or []
     if "--mtp" not in args[:-1]:
         return
-    from strata_common import drafting
-    data = drafting.data_dir_of(args)
-    if data is not None:                                  # the DFlash2 copy, once per data folder, the config used last first like the MTP folder below
-        dkey = ("dflash2", os.path.normcase(os.path.abspath(data)))
-        if dkey not in done:
-            done.add(dkey)
-            refresh_dflash2_vocab(data, cfg.get("draft_vocab", "cjk"))
     rt = Path(args[args.index("--mtp") + 1])
     key = os.path.normcase(os.path.abspath(rt))
     if key in done:
@@ -8710,10 +8683,6 @@ def main() -> int:
                     help="the draft layer (MTP): off starts the model without it, which frees about 1 GB of graphics memory "
                          "for the expert cache and takes less RAM, at the price of speed; it is kept in the run config "
                          "(\"mtp\": false) and a later setup run does not undo it. on: back to the default")
-    ap.add_argument("--drafter", choices=["mtp", "dflash2"],
-                    help="which drafter this model will use. dflash2: the MTP draft layer's ~5 GB are not downloaded (the DFlash2 drafter is fetched by `strata drafting fetch`); "
-                         "the arguments keep the --mtp folder so a later switch to the MTP works. mtp (the default): the draft layer is fetched as before. Nothing is written about it "
-                         "in the run config: the choice is its \"drafting\" key")
     ap.add_argument("--parallel", type=int, metavar="N",
                     help="up to N requests decode together (batch slots, opt-in; default: one at a time, the others "
                          "wait). Each slot takes VRAM from the expert cache; setup says what it recommends")
@@ -9422,7 +9391,7 @@ def main() -> int:
     prep_gb = MODELS[model].get("prepare_gb", 0.0) if ready and MODELS[model].get("prepare") and \
         not prepared_done(model, models_dir) else 0.0
     margin = 2 if mtp_have else 8                      # working room: a guess, not bytes that will be written
-    mtp_fetch = 5.2 if (not mtp_have and not ready and a.mtp != "off" and getattr(a, "drafter", None) != "dflash2") else 0.0      # the draft layer's tensors step 6 fetches (strata_control.discovery.MTP_FETCH_GB)
+    mtp_fetch = 5.2 if (not mtp_have and not ready and a.mtp != "off") else 0.0      # the draft layer's tensors step 6 fetches (strata_control.discovery.MTP_FETCH_GB)
     copy_gb = MODELS[model]["arena_gb"] + 1 if low_ram and not q2_avx and not pack_bin else 0      # the low-RAM mode's copy of the experts (goes to the data folder's packs)
     real = to_fetch + prep_gb + mtp_fetch + \
         (40 if q2_avx and not pack_bin else 0) + (1 if vision != "none" else 0) + copy_gb
@@ -9565,9 +9534,6 @@ def main() -> int:
              "fetching them again and rebuilding the draft layer")
     if a.mtp == "off" and not (rt / "experts.bin").exists():
         ok("the draft layer (MTP) is off: its ~5 GB are not downloaded (`--mtp on` fetches it later)")   # round 8, N3
-    elif getattr(a, "drafter", None) == "dflash2" and not (rt / "experts.bin").exists():
-        ok("DFlash2 is the drafter: the MTP draft layer's ~5 GB are not downloaded (choosing the MTP later fetches it once)")
-        provide_dflash2_vocab(data, a.draft_vocab or saved_draft_vocab(home() / f"strata-{tag.lower()}.json") or "cjk")
     elif corrupt or not (rt / "experts.bin").exists():
         say("  The MTP draft layer (speculative decoding, ~2x faster output) comes from the original Qwen checkpoint:")
         say("  only its ~5 GB of MTP tensors are downloaded.")
@@ -9581,7 +9547,6 @@ def main() -> int:
     if (rt / "experts.bin").exists():
         refresh_draft_vocab(rt, draft_vocab or "cjk")
         ok(f"MTP draft layer: {rt}")
-    refresh_dflash2_vocab(data, draft_vocab or "cjk")        # an existing DFlash2 copy follows the choice too
     for line in draft_vocab_note(gpu.get("vram_gb", 0.0), draft_vocab):   # #474: a recommendation, nothing changes
         say("  " + line)
 

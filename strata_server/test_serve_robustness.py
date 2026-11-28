@@ -102,7 +102,7 @@ class FailedStart(unittest.TestCase):
                 mock.patch.object(engine_client, "end_leftover_engines", lambda exe: None), \
                 mock.patch.object(engine_client, "transient_start_failure", lambda *a, **k: False):
             with self.assertRaises(engine_client.EngineDied):
-                engine.__init__("strata", [], retry_args=None)
+                engine.__init__("strata", [])
 
 
 class ControlNotify(unittest.TestCase):

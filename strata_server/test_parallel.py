@@ -312,45 +312,6 @@ class ParallelArgs(unittest.TestCase):
         self.assertEqual(args[-2:], ["--batch", "2"])
 
 
-class DFlash2ChosenWithRequests(unittest.TestCase):
-    """Owner 2026-11-03: the person's own choice wins. The MTP chosen by name keeps the number of requests, and the all-cards split engine keeps its DFlash2 flags and
-    takes the person's number as its lanes. Nothing is started: the arguments the server builds."""
-
-    BASE = ["--pack", "/d/packs/x", "--native", "/m/x.gguf", "--mtp", "/d/mtp/rt", "--spec", "4", "--spec-min-p", "0.5", "--batch-mtp"]
-
-    def build(self, **cfg):
-        import contextlib
-        import io
-        from strata_common import drafting
-        shaped = {"model_name": "qwen3.8-flash-next-gyro-gyro-s", "args": list(self.BASE), **cfg}
-        patches = (mock.patch.object(drafting, "detect_hardware", return_value=("cuda", ["sm_120"])), mock.patch.object(drafting, "pack_ready", return_value=True),
-                   mock.patch.object(drafting, "vocab_path", return_value=Path("/d/draft_vocab.bin")), mock.patch.object(drafting, "mtp_ready", return_value=True),
-                   mock.patch("strata_common.engine_client.drafting_vram_mib", return_value=None), contextlib.redirect_stdout(io.StringIO()))
-        with contextlib.ExitStack() as stack:
-            for patch in patches:
-                stack.enter_context(patch)
-            args = engine_args(shaped, None)
-        return args, drafting.take_note()
-
-    def value(self, args, flag):
-        return args[args.index(flag) + 1] if flag in args else None
-
-    def test_the_mtp_by_name_is_unchanged(self):
-        args, note = self.build(drafting="mtp", parallel=4)
-        self.assertNotIn("--draft", args)
-        self.assertEqual((self.value(args, "--mtp"), self.value(args, "--batch"), note), ("/d/mtp/rt", "4", ""))
-
-    def test_the_all_cards_split_engine_run_config_keeps_its_dflash2_flags_and_the_persons_lanes(self):
-        split = ["--native", "/m/x.gguf", "--draft", "dflash2", "--draft-model", "/d/p.pack", "--draft-vocab", "/e/draft_vocab_en.bin", "--max-context", "131072",
-                 "--spec", "6", "--lookup", "15", "--conversation-cache-mib", "4096", "--batch", "6"]
-        args, note = self.build(args=list(split), exe="/e/strata-split-2", drafting="dflash2", split_engine_note="Using the all-cards split engine on 2 cards.",
-                                gpu=[0, 1], parallel=3)
-        self.assertEqual(args[:len(split) - 2], split[:-2], "nothing added or taken out")
-        self.assertEqual((self.value(args, "--batch"), "--mtp" in args, "--draft-fallback" in args, note), ("3", False, False, ""))
-        args, _ = self.build(args=list(split), exe="/e/strata-split-2", drafting="dflash2", split_engine_note="x", gpu=[0, 1])
-        self.assertEqual(self.value(args, "--batch"), "6")
-
-
 class PickSlot(unittest.TestCase):
     def test_vram_conversation_limit_waits_even_when_token_space_is_available(self):
         engine = self.engine(2)

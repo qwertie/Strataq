@@ -72,8 +72,7 @@ def get_effective(cfg: dict, saved: dict | None, cli: argparse.Namespace | None 
     if values["queue_timeout"] is not None and values["max_queue"] is None:
         raise ProfileError("queue_timeout requires max_queue to bound pending calls")
     if values["parallel"] is not None and any(flag in cfg["args"] for flag in ("--batch", "--slots")):
-        # (the all-cards split engine's run config, split_config's "split_engine_note", always carries --batch; the server turns "parallel" into its lane count)
-        if origins["parallel"] != "run_config" and not cfg.get("split_engine_note"):
+        if origins["parallel"] != "run_config":
             raise ProfileError("parallel override conflicts with --batch/--slots in run config args")
     if values["batch_groups"] is not None and "--batch-groups" in cfg["args"]:
         raise ProfileError("batch_groups override conflicts with --batch-groups in run config args")
