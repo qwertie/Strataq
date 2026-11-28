@@ -3494,7 +3494,9 @@ def engine_args(cfg: dict) -> list[str]:
             args += ["--layer-split", layer_split_value(cfg)]
         args += parallel_args(cfg, args) + pool_cores_args(cfg, args)
         return paged_launch.translate_args(cfg, args)
-    # Saved drafting choices apply after the generated engine arguments.
+    # "mtp": false or "drafting": "off" (the Models settings, `strata launch --mtp off` / `--drafting off`, or by hand): no
+    # draft layer, whatever the args say. A setup run that writes --mtp back into the args cannot undo it, because this is
+    # applied at every start.
     if draft_layer.is_off(cfg) or drafting.normalize(cfg.get("drafting")) == "off":
         args, removed = draft_layer.strip(args)
         if removed:
