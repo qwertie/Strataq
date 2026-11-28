@@ -8,11 +8,10 @@ What it does: reads tools/qwen4_intake.py's JSON, takes the verdict (case A: the
 engines have to be rebuilt for its shape; case C is refused) and prints the plan in the order of the 0.2.11 release
 (phaseA-tests/rel0211: final_rc1.py, publish211.sh, PUBLISH-PLAN.md):
 
-    case A  the feed (a `models` entry, the feed re-signed at the next sequence). No app rebuild: the app lists feed models
-            from the feed (the Settings update check is enough). `--with-app` adds the app steps when a release has app text anyway.
-            Engines, DeepSeek packages and Controls stay as they are: same files, same names.
+    case A  the feed (a `models` entry, the feed re-signed at the next sequence). Engines, DeepSeek packages and Controls stay as
+            they are: same files, same names.
     case B  the engine of the model's shape, as its own component (`--shape`, package_engine.py --shape, feed member shape_engines: strata_control/shape_engine.py),
-            plus the feed. The Strata engine, the DeepSeek packages, the Controls and the app are not rebuilt: a Control of 0.2.13 or later already installs and runs
+            plus the feed. The Strata engine, the DeepSeek packages and the Controls are not rebuilt: a Control of 0.2.13 or later already installs and runs
             a shape engine, and the model's family `qwen4exp_<shape>` makes it fetch it.
 
 Each step shows where it runs, a rough time, the command (printed, never run) and its outputs with sizes.  Sizes are those of the
@@ -38,9 +37,8 @@ sys.path.insert(0, str(ROOT))                         # strata_control.shape_eng
 ENGINE_RE = re.compile(r"^strata-engine-(?P<v>\d[\d.]*)-(?P<plat>.+?)\.(?:tar\.gz|zip)$")
 DSV41_RE = re.compile(r"^strata-dsv41-(?P<v>\d[\d.]*)-(?P<plat>.+?)\.(?:tar\.gz|zip)$")
 CONTROL_RE = re.compile(r"^strata-control-(?P<v>\d[\d.]*)-(?P<plat>.+?)\.(?:tar\.gz|zip)$")
-APP_RE = re.compile(r"^Strata-\d[\d.]*-(windows-x64-setup\.exe|linux-x86_64\.AppImage)(\.sig)?$")
 FEED_NAMES = ["strata-feed.json", "strata-feed.json.sig"]
-SMALL_NAMES = ["SHA256SUMS.txt", "latest.json", "install.sh", "install.ps1", "install-manifest.txt"]
+SMALL_NAMES = ["SHA256SUMS.txt", "install.sh", "install.ps1", "install-manifest.txt"]
 
 # where each platform's Qwen engine is built (phaseA-tests/rel0211/RELEASE-STATE.md "Build plan" and the box rules)
 # (the Q4-P8 rehearsal of 2026-11-08, phaseA-tests/qwen4/RESULTS-Q4-P8.md section 5: five variants in 37 minutes)
@@ -62,14 +60,14 @@ def box_for(plat: str) -> str:
 
 
 def scan_upload(folder: Path | None) -> dict:
-    out = {"engine": [], "dsv41": [], "control": [], "app": [], "feed": [], "small": [], "other": []}
+    out = {"engine": [], "dsv41": [], "control": [], "feed": [], "small": [], "other": []}
     if folder is None:
         return out
     for p in sorted(folder.iterdir()):
         if not p.is_file():
             continue
         n, size = p.name, p.stat().st_size
-        for key, rx in (("engine", ENGINE_RE), ("dsv41", DSV41_RE), ("control", CONTROL_RE), ("app", APP_RE)):
+        for key, rx in (("engine", ENGINE_RE), ("dsv41", DSV41_RE), ("control", CONTROL_RE)):
             m = rx.match(n)
             if m:
                 out[key].append({"name": n, "size": size, "plat": m.groupdict().get("plat", ""), "version": m.groupdict().get("v", "")})
@@ -98,7 +96,6 @@ def plan(report: dict, set_index: int, a, prev: dict) -> dict:
     if case not in ("A", "B"):
         raise SystemExit("case %s: %s. A model release is planned for case A or B only (run tools/qwen4_intake.py)."
                          % (case, v.get("reading", "no verdict in the report")))
-    with_app = bool(a.with_app)                         # a feed model needs no app rebuild (the app lists it from the feed), case B included: the shape engine is fetched by the Control
     steps: list[dict] = []
     changed: list[dict] = []        # files that are new or different in the upload folder
     kept: list[dict] = []
@@ -157,21 +154,9 @@ def plan(report: dict, set_index: int, a, prev: dict) -> dict:
          ["python packaging/make_model_release.py --intake <report> --id %s ... --write <OUTDIR>   # writes models/%s.entry.json (the feed's schema; build-feed refuses every [FILL: ...] left in it) and models/%s.model.json (the older draft)" % (a.id, a.id, a.id)],
          ["models/%s.entry.json" % a.id], note="the entry follows strata_control/feed.py: fill the [FILL: ...] values (about, licence_url, ram_gb) by hand or with --about/--licence-url/--ram-gb, then `feed_tool.py build-feed --models <OUTDIR>/models`")
     n += 1
-    if with_app:
-        for e in prev["app"]:
-            nm = re.sub(r"Strata-\d[\d.]*-", "Strata-%s-" % a.app_version, e["name"])
-            changed.append({"name": nm, "size": e["size"], "est": True, "why": "app rebuilt with the Models page text"})
-        step("%d" % n, "App text for the model (Models page) and the app bundles", "owner PC (Windows installer), a Linux box (AppImage)", 40,
-             ["# edit apps/host/src (the model's name and one line), then the 0.2.11 app recipe: scripts/relwin/win_installer_rc1.ps1 and the AppImage script",
-              "python packaging/feed_tool.py set-app-platform --app-json latest.json --target <target> --archive <installer> --sig <installer.sig> --version %s" % a.app_version],
-             [c["name"] for c in changed if APP_RE.match(c["name"])])
-        n += 1
-        changed.append({"name": "latest.json", "size": None, "est": True, "why": "updater json at %s" % a.app_version})
-    else:
-        kept += [{"name": e["name"], "size": e["size"], "why": "no app change"} for e in prev["app"]]
     feed_cmd = ("python packaging/feed_tool.py build-feed --out <RELEASE> --key <FEED-KEY> --sequence %d --engine <engine-entries> --dsv41 <dsv41-entries> "
-                "--models <models-folder> --control <control-entries>%s%s   # OWNER'S KEY; `--models` is Q4-PREP-B's change"
-                % (a.sequence, " --shapes <shape-entries>" if case == "B" else "", " --app-json latest.json" if with_app else ""))
+                "--models <models-folder> --control <control-entries>%s   # OWNER'S KEY; `--models` is Q4-PREP-B's change"
+                % (a.sequence, " --shapes <shape-entries>" if case == "B" else ""))
     step("%d" % n, "Sign the feed at sequence %d" % a.sequence, "owner PC, with the owner's key at that moment", 3,
          [feed_cmd, "python packaging/feed_tool.py verify-feed <RELEASE> --pub <FEED-KEY.pub.json>"],
          list(FEED_NAMES), owner=True)
@@ -188,7 +173,7 @@ def plan(report: dict, set_index: int, a, prev: dict) -> dict:
     up = sum(c["size"] or 0 for c in changed)
     step("%d" % n, "Publish (the owner's word first): draft release, upload, feed LAST, then flip Latest", "owner PC", None,
          ["bash phaseA-tests/rel0211/publish211.sh   # the dry run of the 0.2.11 publish; copy it for this release (tag, sequence, folders) and print its plan",
-          "# the printed plan: gh release create <TAG> --draft ...; gh release upload ... (packages, Controls, installers, install files, strata-feed.json LAST); gh release edit <TAG> --draft=false --latest"],
+          "# the printed plan: gh release create <TAG> --draft ...; gh release upload ... (packages, Controls, install files, strata-feed.json LAST); gh release edit <TAG> --draft=false --latest"],
          ["upload: %s in %d files, %s" % (gib(up), len(changed), upload_minutes(up))], owner=True)
     n += 1
     step("%d" % n, "Verify from the public URLs", "any box", 20,
@@ -313,7 +298,7 @@ def main(argv=None) -> int:
     ap.add_argument("--intake", type=Path, required=True, help="the JSON report of tools/qwen4_intake.py")
     ap.add_argument("--set", type=int, default=0, help="which set of the report (default 0)")
     ap.add_argument("--id", required=True, help="the model's id in the feed")
-    ap.add_argument("--app-version", required=True)
+    ap.add_argument("--app-version", required=True, help="the release's version (the Terminal's; {{app_version}} in the templates)")
     ap.add_argument("--engine-version", help="case B: the version of the new shape engine")
     ap.add_argument("--shape", help="case B: the name of the geometry the engines are compiled for (q4_lite): the engine ships as its own component strata-q4-<shape> and the model's family is qwen4exp_<shape>")
     ap.add_argument("--min-engine", help="the minimum engine version for the model (case A: the engine that runs it)")
@@ -331,8 +316,6 @@ def main(argv=None) -> int:
     ap.add_argument("--quant", help="the quant's name in the entry (default: --hf-dir, or the folder of the files)")
     ap.add_argument("--quant-about", help="one plain line about the quant")
     ap.add_argument("--ram-gb", type=float, help="the RAM the quant needs, measured (the intake's estimate is not used)")
-    ap.add_argument("--no-app", action="store_true", help="case B: no app change in this release (case A has none unless --with-app)")
-    ap.add_argument("--with-app", action="store_true", help="plan the app steps (Models page text, installers) too; a case-A feed model needs none")
     ap.add_argument("--templates", type=Path, help="the folder with RELEASE-NOTES.md, MODEL-CARD.md and CHECKLIST.md (phaseA-tests/qwen4/templates)")
     ap.add_argument("--write", type=Path, metavar="OUTDIR", help="also write the plan, the entry and the filled templates into this new folder")
     ap.add_argument("--json", action="store_true", help="print the plan as JSON")

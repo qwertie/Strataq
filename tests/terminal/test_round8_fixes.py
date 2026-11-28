@@ -320,7 +320,7 @@ class UpdateCheckNamesTheChoice(unittest.TestCase):
                   "engine": {"status": "install", "installed": None, "download_bytes": 5 << 20,
                              "offered": {"version": "0.1.47", "platform": "linux-x86_64", "backend": "cuda", "variant": "cuda12"},
                              "reasons": ["0.1.47 linux-x86_64-cuda-cuda13 needs driver 580"], "note": None},
-                  "control": {"status": "current", "installed": "0.1.47", "offered": None}, "app": {"status": "not-in-feed"}}
+                  "control": {"status": "current", "installed": "0.1.47", "offered": None}}
         out = io.StringIO()
         with redirect_stdout(out):
             update_cmd._print_check(report)

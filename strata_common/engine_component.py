@@ -210,8 +210,7 @@ def cached_notice(root: Path | None = None) -> str | None:
     The notice belongs to the versions the check was made for: it is dropped when Control or the installed engine is not the one
     recorded then (an app install, an update, a rollback), and an engine that is not newer than the installed one is never offered."""
     offers = cached_offers(root)
-    parts = ([f"engine {offers['engine']}"] if offers.get("engine") else []) + ([f"DeepSeek engine {offers['dsv41']}"] if offers.get("dsv41") else []) \
-        + ([f"app {offers['app']}"] if offers.get("app") else [])
+    parts = ([f"engine {offers['engine']}"] if offers.get("engine") else []) + ([f"DeepSeek engine {offers['dsv41']}"] if offers.get("dsv41") else [])
     return f"update available ({', '.join(parts)}): run `strata update`" if parts else None
 
 
@@ -228,11 +227,11 @@ def _installed_dsv41_version(profile_configs=None) -> str | None:
 
 
 def cached_offers(root: Path | None = None) -> dict:
-    """What the last explicit check found newer, as {"engine": version|None, "dsv41": version|None, "app": version|None}; local reads only (the cached
+    """What the last explicit check found newer, as {"engine": version|None, "dsv41": version|None}; local reads only (the cached
     check, the installed packages), never the network.  The same rules as `cached_notice`: it belongs to the Control and the packages it was made for,
     and a package that is not newer than the installed one is never offered."""
     base = root or components_dir()
-    none = {"engine": None, "dsv41": None, "app": None}
+    none = {"engine": None, "dsv41": None}
     try:
         last = (json.loads((base / UPDATE_STATE).read_text(encoding="utf-8-sig")).get("last_check") or {})
     except (OSError, ValueError, AttributeError):
@@ -242,7 +241,7 @@ def cached_offers(root: Path | None = None) -> dict:
     control = runtime_version()
     if "control" in last and last["control"] != control:
         return none
-    engine, app, dsv41 = last.get("engine"), last.get("app"), last.get("dsv41")
+    engine, dsv41 = last.get("engine"), last.get("dsv41")
     installed = newest_installed_version(base)
     if "engine_installed" in last and last["engine_installed"] != installed:
         engine = None
@@ -252,7 +251,7 @@ def cached_offers(root: Path | None = None) -> dict:
         have = _installed_dsv41_version()
         if have is None or "dsv41_installed" in last and last["dsv41_installed"] != have or _version_key(str(dsv41)) <= _version_key(have):
             dsv41 = None
-    return {"engine": engine or None, "dsv41": dsv41 or None, "app": app or None}
+    return {"engine": engine or None, "dsv41": dsv41 or None}
 
 
 def previous_folder(root: Path | None = None) -> str | None:

@@ -12,7 +12,7 @@ Typical use (the owner's offline machine; replace ``KEYDIR`` with a folder that 
     python packaging/feed_tool.py pack-engine  <that folder> --out RELEASE/engine           # archive + <name>.entry.json
     python packaging/feed_tool.py pack-control <control bundle folder> --version 0.1.46 --platform linux-x86_64 --out RELEASE/control
     python packaging/feed_tool.py build-feed --out RELEASE --sequence 12 --key KEYDIR/feed-key.json \
-        --engine RELEASE/engine --control RELEASE/control [--app-json tauri-latest.json] [--channel stable] [--expires-days 365]
+        --engine RELEASE/engine --control RELEASE/control [--channel stable] [--expires-days 365]
     python packaging/feed_tool.py verify-feed RELEASE --pub KEYDIR/feed-key.pub.json
 
 A new model ships as a signed feed update with the optional `models` member: write one <id>.entry.json for each model in a folder
@@ -21,8 +21,6 @@ fails when Control would leave one out.
 
 ``keygen`` never prints the secret and refuses to write inside a git checkout or over an existing file. The public file's
 entry goes into ``strata_common/update_keys.json`` (``keys``) once, in the commit that ships the first signed release.
-The Tauri updater key is a different key (minisign, made by ``tauri signer generate``); its public half goes in
-``update_keys.json`` as ``app_minisign_public``.
 """
 
 from __future__ import annotations
@@ -202,7 +200,7 @@ def model_files(paths: list[Path], repo_dir: str = "") -> list[dict]:
 
 
 def build_feed(out: Path, *, key: dict, sequence: int, channel: str = "stable", engine_dir: Path | None = None,
-               control_dir: Path | None = None, app_json: Path | None = None, expires_days: int | None = None,
+               control_dir: Path | None = None, expires_days: int | None = None,
                now: dt.datetime | None = None, dsv41_dir: Path | None = None, models_dir: Path | None = None,
                shapes_dir: Path | None = None) -> dict:
     now = now or dt.datetime.now(dt.timezone.utc)
@@ -257,8 +255,6 @@ def build_feed(out: Path, *, key: dict, sequence: int, channel: str = "stable", 
                           f"(the one-line installer needs {want}; pack-control --format {want})", file=sys.stderr)
                     continue
                 install_manifest += f"{e['platform']} {e['version']} {e['url']} {e['sha256']} {e['size']}\n"
-    if app_json:
-        document["app"] = json.loads(Path(app_json).read_text(encoding="utf-8"))
     payload = (json.dumps(document, indent=1, sort_keys=True) + "\n").encode("utf-8")
     Path(out).mkdir(parents=True, exist_ok=True)
     (Path(out) / feedmod.FEED_NAME).write_bytes(payload)
@@ -266,61 +262,12 @@ def build_feed(out: Path, *, key: dict, sequence: int, channel: str = "stable", 
     (Path(out) / (feedmod.FEED_NAME + feedmod.SIGNATURE_SUFFIX)).write_text(json.dumps(signature) + "\n", encoding="utf-8")
     if install_manifest:                        # what install.sh / install.ps1 read: platform version url sha256 size, one line per Terminal (Control) package
         (Path(out) / "install-manifest.txt").write_text(install_manifest, encoding="utf-8", newline="\n")
-    if "app" in document:                       # the file the Tauri updater plugin reads
-        latest = Path(out) / "app" / "latest.json"
-        latest.parent.mkdir(parents=True, exist_ok=True)
-        latest.write_text(json.dumps({k: v for k, v in document["app"].items()}, indent=1) + "\n", encoding="utf-8")
     # a parse of what was written is the last check: a feed this tool makes must be a feed Control accepts
     checked = feedmod.verify_and_parse(payload, json.dumps(signature).encode(), source=str(Path(out) / feedmod.FEED_NAME),
                                        trusted={key["key_id"]: __import__("base64").b64decode(key["public"])}, now=now)
     if checked.models_dropped or len(checked.models) != len((document.get("models") or {}).get("packages", [])):
         raise SystemExit("the feed was written, but Control would leave out a model: " + " ".join(checked.models_dropped))
     return document
-
-
-TAURI_TARGET_NAMES = tuple(feedmod.TAURI_TARGETS.values())
-
-
-def _default_app_pubkey() -> str:
-    """Gets the app installer's minisign public key that release builds ship (update_keys.json ``app_minisign_public``)."""
-    return json.loads(signing.BUILTIN_KEYS.read_text(encoding="utf-8-sig"))["app_minisign_public"]
-
-
-def set_app_platform(app_json: Path, *, target: str, archive: Path, signature_file: Path, url: str, version: str | None = None,
-                     notes: str | None = None, pub_date: str | None = None, pubkey: str | None = None,
-                     now: dt.datetime | None = None) -> dict:
-    """Add or replace one platform in the Tauri updater JSON (the file ``build-feed --app-json`` takes; it becomes ``latest.json``).
-
-    The ``.sig`` is made by ``npx tauri signer sign`` (or by ``tauri build`` for the Windows / Linux installers) and is only READ here;
-    this tool never touches the Tauri private key. It is checked against the public key in ``update_keys.json`` (or ``pubkey``) over the
-    exact archive bytes, so a signature of an older or unsigned file, or one from another key, is refused before it can be published.
-    ``sha256`` and ``size`` are taken from the archive."""
-    if target not in TAURI_TARGET_NAMES:
-        raise SystemExit(f"unknown target {target!r}; use one of {', '.join(TAURI_TARGET_NAMES)}")
-    archive, signature_file = Path(archive), Path(signature_file)
-    signature = signature_file.read_text(encoding="utf-8").strip()
-    try:
-        with archive.open("rb") as stream:
-            signing.minisign_verify(pubkey or _default_app_pubkey(), signature, iter(lambda: stream.read(1 << 20), b""))
-    except signing.SignatureError as exc:
-        raise SystemExit(f"{signature_file.name} does not verify for {archive.name}: {exc}")
-    document: dict = {}
-    if Path(app_json).exists():
-        document = json.loads(Path(app_json).read_text(encoding="utf-8"))
-    if version:
-        if document.get("version") not in (None, version):
-            raise SystemExit(f"{app_json} is for version {document['version']}, not {version}")
-        document["version"] = version
-    if not document.get("version"):
-        raise SystemExit("a new app json needs --version")
-    document.setdefault("notes", notes or "")
-    if notes:
-        document["notes"] = notes
-    document["pub_date"] = pub_date or document.get("pub_date") or (now or dt.datetime.now(dt.timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    document.setdefault("platforms", {})[target] = {"url": url, "signature": signature, "sha256": sha256_file(archive),
-                                                    "size": archive.stat().st_size}
-    Path(app_json).write_text(json.dumps(document, indent=1) + "\n", encoding="utf-8")
-    return document["platforms"][target]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -357,18 +304,7 @@ def main(argv: list[str] | None = None) -> int:
     bf.add_argument("--shapes", type=Path, help="folder of the model-shape engines' .entry.json files (feed member shape_engines; pack-engine writes them for a package made with package_engine.py --shape)")
     bf.add_argument("--models", type=Path, help="folder of the models' <id>.entry.json files (feed member models: the model list setup and the screens show after the built-in ones)")
     bf.add_argument("--control", type=Path)
-    bf.add_argument("--app-json", type=Path)
     bf.add_argument("--expires-days", type=int)
-    sa = sub.add_parser("set-app-platform", help="add one signed app installer to the Tauri updater json")
-    sa.add_argument("--app-json", type=Path, required=True, help="the file to create or patch (what build-feed --app-json takes)")
-    sa.add_argument("--target", required=True, help="windows-x86_64 or linux-x86_64")
-    sa.add_argument("--archive", type=Path, required=True)
-    sa.add_argument("--sig", type=Path, required=True, help="the .sig file made by tauri signer sign")
-    sa.add_argument("--url", help="where the archive is published (default: the latest GitHub release)")
-    sa.add_argument("--version")
-    sa.add_argument("--notes")
-    sa.add_argument("--pub-date")
-    sa.add_argument("--pubkey", help="the Tauri public key (default: update_keys.json app_minisign_public)")
     vf = sub.add_parser("verify-feed")
     vf.add_argument("source")
     vf.add_argument("--pub", type=Path, required=True)
@@ -389,19 +325,14 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({k: entry[k] for k in ("version", "platform", "size", "sha256")}, indent=1))
     elif a.cmd == "build-feed":
         doc = build_feed(a.out, key=_load_key(a.key), sequence=a.sequence, channel=a.channel, engine_dir=a.engine,
-                         control_dir=a.control, app_json=a.app_json, expires_days=a.expires_days, dsv41_dir=a.dsv41, models_dir=a.models, shapes_dir=a.shapes)
+                         control_dir=a.control, expires_days=a.expires_days, dsv41_dir=a.dsv41, models_dir=a.models, shapes_dir=a.shapes)
         print(f"wrote {a.out / feedmod.FEED_NAME} (+ .sig); engines {len((doc.get('engine') or {}).get('packages', []))}, "
-              f"deepseek engines {len((doc.get('dsv41') or {}).get('packages', []))}, shape engines {len((doc.get('shape_engines') or {}).get('packages', []))}, models {len((doc.get('models') or {}).get('packages', []))}, control {'yes' if 'control' in doc else 'no'}, app {'yes' if 'app' in doc else 'no'}")
-    elif a.cmd == "set-app-platform":
-        url = a.url or f"https://github.com/Niko1221/Strata/releases/latest/download/{a.archive.name}"
-        entry = set_app_platform(a.app_json, target=a.target, archive=a.archive, signature_file=a.sig, url=url, version=a.version,
-                                 notes=a.notes, pub_date=a.pub_date, pubkey=a.pubkey)
-        print(f"{a.app_json}: {a.target} -> {entry['url']} ({entry['size']} bytes, sha256 {entry['sha256'][:16]}..., signature verified)")
+              f"deepseek engines {len((doc.get('dsv41') or {}).get('packages', []))}, shape engines {len((doc.get('shape_engines') or {}).get('packages', []))}, models {len((doc.get('models') or {}).get('packages', []))}, control {'yes' if 'control' in doc else 'no'}")
     elif a.cmd == "verify-feed":
         trusted = signing.load_trusted_keys(a.pub, environ={})
         loaded = feedmod.fetch(a.source, trusted)
         print(f"ok: sequence {loaded.sequence}, channel {loaded.channel}, signed by {loaded.key_id}, "
-              f"{len(loaded.engine)} engine packages, control {len(loaded.control)}, app {'yes' if loaded.app else 'no'}"
+              f"{len(loaded.engine)} engine packages, control {len(loaded.control)}"
               + (f", {len(loaded.shape_engines)} shape engines ({', '.join(sorted({p.shape for p in loaded.shape_engines}))})" if loaded.shape_engines else "")
               + (f", {len(loaded.models)} models ({', '.join(m.id for m in loaded.models)})" if loaded.models else ""))
         if loaded.models_dropped:                 # Control would skip these: a signed feed must not carry them

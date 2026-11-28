@@ -137,14 +137,12 @@ class UpdatePath(_up.Upgrade):
         self.publish("0.1.49.1")
         ctx = self.ctx()
         with mock.patch.object(updater, "update_engine", return_value={"component": "engine", "status": "current", "changed": False}), \
-                mock.patch.object(updater, "decide_engine", return_value={"status": "current", "offered": None, "installed": None}), \
-                mock.patch.object(updater, "decide_app", return_value={"status": "not-in-feed", "offered": None}):
+                mock.patch.object(updater, "decide_engine", return_value={"status": "current", "offered": None, "installed": None}):
             out = updater.run_update(ctx, engine=True, control=False)
         names = [r["component"] for r in out["results"]]
         self.assertEqual(names, ["engine", "dsv41"], out)
         self.assertEqual(out["results"][1]["status"], "updated")
-        with mock.patch.object(updater, "decide_engine", return_value={"status": "current", "offered": None, "installed": None}), \
-                mock.patch.object(updater, "decide_app", return_value={"status": "not-in-feed", "offered": None}):
+        with mock.patch.object(updater, "decide_engine", return_value={"status": "current", "offered": None, "installed": None}):
             out = updater.run_update(ctx, engine=False, control=False)
         self.assertEqual(out["results"], [], "--no-engine leaves the DeepSeek engine alone too")
 
@@ -153,8 +151,7 @@ class UpdatePath(_up.Upgrade):
         self.publish("0.1.49.1")
         ctx = self.ctx()
         with mock.patch.object(updater, "decide_engine", return_value={"status": "current", "offered": None, "installed": None}), \
-                mock.patch.object(updater, "decide_control", return_value={"status": "not-in-feed", "installed": None, "offered": None}), \
-                mock.patch.object(updater, "decide_app", return_value={"status": "not-in-feed", "offered": None}):
+                mock.patch.object(updater, "decide_control", return_value={"status": "not-in-feed", "installed": None, "offered": None}):
             report = updater.check(ctx)
         self.assertEqual((report["dsv41"]["status"], report["dsv41"]["installed"], report["dsv41"]["offered"]), ("available", "0.1.49", "0.1.49.1"))
         with mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("network")), mock.patch.object(socket, "create_connection", side_effect=AssertionError("network")):

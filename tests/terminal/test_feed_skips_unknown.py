@@ -61,13 +61,12 @@ class UnknownEntriesAreSkipped(unittest.TestCase):
         self.assertEqual(f.engine[0].variant, "cuda14-new")
         self.assertEqual(f.skipped, ())
 
-    def test_unknown_app_platform(self):
+    def test_the_app_member_of_an_older_feed_is_ignored(self):
         app = {"version": "0.2.8", "notes": "", "pub_date": "2026-10-28T00:00:00Z", "platforms": {
-            "windows-x86_64": {"url": "a", "signature": "s", "sha256": "a" * 64, "size": 5},
-            "plan9-mips": {"url": "b", "signature": "s", "sha256": "a" * 64, "size": 5}}}
-        f = parse(doc(app=app))
-        self.assertEqual(sorted(f.app.platforms), ["windows-x86_64"])
-        self.assertEqual(len(f.skipped), 1)
+            "windows-x86_64": {"url": "a", "signature": "s", "sha256": "a" * 64, "size": 5}}}
+        f = parse(doc(engine={"packages": [engine()]}, app=app))
+        self.assertEqual(len(f.engine), 1)
+        self.assertEqual(f.skipped, ())
 
     def test_the_known_entries_are_unchanged_by_the_skipped_ones(self):
         base = doc(engine={"packages": [engine()]}, control={"version": "0.1.53", "packages": [control()]})

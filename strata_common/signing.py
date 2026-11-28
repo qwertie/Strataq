@@ -5,14 +5,10 @@ widen that lock for no gain. Ed25519 (RFC 8032) is small enough to carry here: v
 runs, signing is what the owner's release machine runs (`packaging/feed_tool.py`). Both are checked against the RFC's
 test vectors in tests/terminal/test_update_feed.py.
 
-Two kinds of key exist and must not be mixed up:
-
-* the **feed/component key** (this module): an Ed25519 key the owner keeps offline. It signs the update feed index and every
-  engine package manifest. Installed copies of Control carry the public half in ``update_keys.json`` and nothing else
-  can add to it except the explicit, documented override ``STRATA_UPDATE_TRUSTED_KEYS`` (a file of extra public keys;
-  the test suite and a local feed use it, and the CLI says so when it is in effect).
-* the **app updater key** (Tauri's minisign key): signs the desktop installer. ``minisign_verify`` below checks such a
-  signature so the Terminal can verify an app installer it downloads, the same way the Tauri updater does.
+The feed/component key is an Ed25519 key the owner keeps offline. It signs the update feed index and every engine package
+manifest. Installed copies of Control carry the public half in ``update_keys.json`` and nothing else can add to it except the
+explicit, documented override ``STRATA_UPDATE_TRUSTED_KEYS`` (a file of extra public keys; the test suite and a local feed use
+it, and the CLI says so when it is in effect).
 
 A public key is ``{"key_id": "<16 hex>", "alg": "ed25519", "public": "<base64 of the 32 bytes>"}``. ``key_id`` is the first 8 bytes
 of SHA-256 of the public key, so a signature names the key that made it without anyone choosing the name.
@@ -271,60 +267,3 @@ def ensure_component_verifier() -> bool:
     install_component_verifier(trusted)
     return True
 
-
-# ---------------------------------------------------------------------------------------------- minisign (Tauri updater)
-
-def minisign_public(text_or_b64: str) -> tuple[bytes, bytes]:
-    """(key id, public key) from a minisign public key: the Tauri ``pubkey`` value (base64 of the .pub file) or the file text."""
-    text = text_or_b64.strip()
-    if "untrusted comment" not in text:
-        try:
-            text = base64.b64decode(text, validate=True).decode("utf-8")
-        except (ValueError, UnicodeError):
-            raise SignatureError("the minisign public key is not valid") from None
-    lines = [line for line in text.splitlines() if line.strip() and not line.startswith("untrusted comment")]
-    if not lines:
-        raise SignatureError("the minisign public key has no key line")
-    raw = _b64(lines[0].strip(), "the minisign public key", 42)
-    if raw[:2] != b"Ed":
-        raise SignatureError("the minisign public key is not an Ed25519 key")
-    return raw[2:10], raw[10:42]
-
-
-def minisign_verify(public_text: str, signature_text: str, data_chunks) -> None:
-    """Check a minisign signature (the Tauri updater's format) over `data_chunks` (an iterable of bytes).
-
-    Legacy ``Ed`` signs the data itself, ``ED`` signs its BLAKE2b-512 digest (what Tauri produces); both are accepted.
-    The signature can be the Tauri updater JSON value (base64 of the .sig file) or the file text."""
-    key_id, public = minisign_public(public_text)
-    text = signature_text.strip()
-    if "untrusted comment" not in text:
-        try:
-            text = base64.b64decode(text, validate=True).decode("utf-8")
-        except (ValueError, UnicodeError):
-            raise SignatureError("the app signature is not valid base64") from None
-    lines = [line for line in text.splitlines() if line.strip()]
-    body = [line for line in lines if not line.startswith(("untrusted comment", "trusted comment"))]
-    if not body:
-        raise SignatureError("the app signature has no signature line")
-    raw = _b64(body[0].strip(), "the app signature", 74)
-    algorithm, signer, signature = raw[:2], raw[2:10], raw[10:74]
-    if signer != key_id:
-        raise SignatureError("the app signature was made by a different key than the one this build trusts")
-    if algorithm == b"ED":
-        digest = hashlib.blake2b(digest_size=64)
-        for chunk in data_chunks:
-            digest.update(chunk)
-        message = digest.digest()
-    elif algorithm == b"Ed":
-        message = b"".join(data_chunks)
-    else:
-        raise SignatureError("the app signature uses an unknown algorithm")
-    if not verify_raw(public, message, signature):
-        raise SignatureError("the app installer does not match its signature")
-    # the global signature covers the trusted comment: it is checked when present so a tampered comment is refused too
-    comment = next((line[len("trusted comment: "):] for line in lines if line.startswith("trusted comment: ")), None)
-    if comment is not None and len(body) > 1:
-        global_sig = _b64(body[1].strip(), "the app signature's global part", 64)
-        if not verify_raw(public, signature + comment.encode("utf-8"), global_sig):
-            raise SignatureError("the app signature's comment was changed")

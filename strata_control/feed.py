@@ -3,9 +3,6 @@
 One small document, ``strata-feed.json``, with a detached Ed25519 signature ``strata-feed.json.sig`` (the signature covers the
 file's exact bytes, so there is no canonicalisation to get wrong). It lists, for one channel:
 
-* ``app``: the desktop app, in exactly the shape of Tauri's static updater JSON (``version``, ``notes``, ``pub_date``,
-  ``platforms{<tauri target>: {url, signature}}``), plus ``sha256`` and ``size`` per platform. The Tauri updater plugin
-  reads a copy of this member at ``app/latest.json`` and checks the minisign signature itself;
 * ``control``: the runtime component (Control: bundled Python, ``strata_control``, the CLI and server), one archive per platform;
 * ``engine``: the engine packages, one entry per platform / backend / variant, each with ``version``, ``archs``,
   ``min_driver``, ``min_runtime``, ``size``, ``sha256`` of the archive, ``manifest_sha256`` of the package's
@@ -37,10 +34,7 @@ SCHEMA_VERSION = 1
 FEED_NAME = "strata-feed.json"
 SIGNATURE_SUFFIX = ".sig"
 FORMATS = ("tar.gz", "tar.xz", "zip")
-PLATFORMS = ("windows-x86_64", "linux-x86_64", "macos-arm64", "macos-x86_64")
-#: Tauri's names for the same platforms.
-TAURI_TARGETS = {"windows-x86_64": "windows-x86_64", "linux-x86_64": "linux-x86_64",
-                 "macos-arm64": "darwin-aarch64", "macos-x86_64": "darwin-x86_64"}
+PLATFORMS = ("windows-x86_64", "linux-x86_64")
 _VERSION = re.compile(r"\d+\.\d+\.\d+(?:\.\d+)?")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _log = logging.getLogger("strata.feed")
@@ -66,15 +60,6 @@ def version_key(value: str) -> tuple[int, ...]:
         raise FeedError(f"{value!r} is not a version number (expected like 0.1.46 or 0.1.46.1)")
     parts = [int(p) for p in value.split(".")]
     return tuple(parts + [0] * (4 - len(parts)))
-
-
-def app_version_key(value: str) -> tuple[int, ...]:
-    """Compare the INSTALLED app's version: like `version_key`, but a pre-release (0.2.0-beta) is allowed and sorts below the same number without
-    the suffix. The feed's own versions stay strict (`version_key`)."""
-    base, dash, pre = str(value).partition("-")
-    if dash and not re.fullmatch(r"[0-9A-Za-z.]+", pre):
-        raise FeedError(f"{value!r} is not a version number (expected like 0.2.0 or 0.2.0-beta)")
-    return version_key(base) + (0 if dash else 1,)
 
 
 def _need(obj: dict, key: str, kind, where: str):
@@ -232,24 +217,12 @@ class ControlPackage:
         return f"control {self.version} {self.platform}"
 
 
-@dataclass(frozen=True)
-class AppRelease:
-    version: str
-    notes: str
-    pub_date: str
-    platforms: dict          # {platform: {"url", "signature", "sha256", "size", "format"?}}
-
-    def for_platform(self, platform: str) -> dict | None:
-        return self.platforms.get(platform)
-
-
 @dataclass
 class Feed:
     sequence: int
     channel: str
     generated_at: str
     expires_at: str | None
-    app: AppRelease | None
     control: tuple[ControlPackage, ...]
     engine: tuple[EnginePackage, ...]
     source: str                    # where it was read from (the base for relative URLs)
@@ -517,30 +490,6 @@ def parse(payload: bytes, *, source: str, key_id: str) -> Feed:
     if expires is not None:
         _time(expires, "expires_at")
     skipped: list = []
-    app = None
-    raw_app = data.get("app")
-    if raw_app is not None:
-        if not isinstance(raw_app, dict):
-            raise FeedError("the feed's app member is not an object")
-        app_version_key(_need(raw_app, "version", str, "app entry"))
-        platforms = raw_app.get("platforms")
-        if not isinstance(platforms, dict) or not platforms:
-            raise FeedError("the feed's app entry lists no platforms")
-        parsed_platforms = {}
-        by_tauri = {v: k for k, v in TAURI_TARGETS.items()}
-        for target, entry in platforms.items():
-            plat = by_tauri.get(str(target).split("-nsis")[0].split("-msi")[0])
-            if plat is None:
-                _skipping(skipped, f"the app for {target}", "a platform this Strata does not know")
-                continue
-            if not isinstance(entry, dict):
-                raise FeedError(f"the feed's app entry for {target!r} is not an object")
-            parsed_platforms[plat] = {"url": _need(entry, "url", str, "app entry"),
-                                      "signature": _need(entry, "signature", str, "app entry"),
-                                      "sha256": _hex(entry.get("sha256"), "app entry"),
-                                      "size": _need(entry, "size", int, "app entry"), "target": target}
-        app = AppRelease(version=raw_app["version"], notes=str(raw_app.get("notes") or ""),
-                         pub_date=str(raw_app.get("pub_date") or ""), platforms=parsed_platforms)
     control = []
     raw_control = data.get("control")
     if raw_control is not None:
@@ -586,7 +535,7 @@ def parse(payload: bytes, *, source: str, key_id: str) -> Feed:
                 raise FeedError(f"the feed lists the engine for {pkg.shape} {pkg.label} twice")
             seen.add(ident)
     models, models_dropped = _models_member(data.get("models"))
-    return Feed(sequence=sequence, channel=channel, generated_at=generated, expires_at=expires, app=app,
+    return Feed(sequence=sequence, channel=channel, generated_at=generated, expires_at=expires,
                 control=tuple(control), engine=tuple(engine), source=source, key_id=key_id, raw=payload, dsv41=tuple(dsv41),
                 skipped=tuple(skipped), models=tuple(models), models_dropped=tuple(models_dropped), shape_engines=tuple(shapes))
 
