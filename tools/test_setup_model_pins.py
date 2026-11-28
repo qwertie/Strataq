@@ -238,13 +238,9 @@ class InstalledModelsNeedNoNetwork(unittest.TestCase):
         tools and the catalog's pinned addresses (strata_common/catalog.py, which only setup.py downloads from) only (and
         strata_common.acquisition refuses a download under STRATA_NO_ACQUIRE=1)."""
         hosts = re.compile(r"huggingface\.co|hf-mirror|HF_ENDPOINT|modelscope|hf_hub_download", re.I)
-        # The harmless mentions: the model-card link a benchmark result file names (nothing opens it), and the pinned
-        # DFlash2 drafter address, which only `strata drafting fetch` downloads from, behind acquisition.require (refused
-        # under STRATA_NO_ACQUIRE, so a start or a server never reaches it). Dropping just those lines from the scan keeps
-        # the rule exact for everything else.
-        harmless = ('MODEL_CARD_URL = "https://huggingface.co/Qwen/Qwen3.8-Flash-Next"',
-                    'BASE_URL = f"https://huggingface.co/{REPO}/resolve/{REVISION}/"',
-                    'https://huggingface.co/nazeshinjite/Qwen3.8-Flash-Next-DFlash2-GGUF')   # the credit link in drafting.py's comment and drafting_fetch.py's docstring (nothing opens it)
+        # The harmless mention: the model-card link a benchmark result file names (nothing opens it). Dropping just
+        # that line from the scan keeps the rule exact for everything else.
+        harmless = ('MODEL_CARD_URL = "https://huggingface.co/Qwen/Qwen3.8-Flash-Next"',)
         found = []
         for folder in ("strata_base", "strata_cli", "strata_common", "strata_control", "strata_server"):
             for p in (ROOT / folder).rglob("*.py"):

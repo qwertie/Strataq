@@ -861,12 +861,6 @@ def _cpuid_floor() -> str:
         return ""
 
 
-def is_arm64() -> bool:
-    """Tells whether the CPU is ARM64, which Strata does not support. Kept only for tools/test_setup_pins.py's skip
-    condition; delete it together with that."""
-    return sysinfo.machine().lower() in ("aarch64", "arm64")
-
-
 def cpu_floor(avx2: bool) -> str:
     """The experimental older-CPU build this PC needs (#394 #595 #623): "" with AVX2 (the normal engine), "avx" (Sandy /
     Ivy Bridge, AMD Bulldozer), "none" (SSE4.2 + POPCNT: Nehalem, Westmere), or "unsupported".  STRATA_ISA_FLOOR=avx|

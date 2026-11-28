@@ -394,8 +394,8 @@ class Pinning(Base):
         self.assertEqual(calls, list(setup.UNSLOTH_SHARDS))
 
 
-class FileSetsAndSplit(unittest.TestCase):
-    """strata_control: the known-file-set table the app's "Use a local GGUF" reads, and the split engine's clean decline."""
+class FileSets(unittest.TestCase):
+    """strata_control: the known-file-set table that files a person already has are matched against."""
 
     def test_known_file_sets(self):
         from strata_control import models
@@ -408,38 +408,6 @@ class FileSetsAndSplit(unittest.TestCase):
         self.assertEqual(models._candidate_selection(three)["model"], "UD-IQ4_XS")
         q4 = [Path("/m") / n for n in setup.UNSLOTH_Q4_V31_SHARDS]
         self.assertEqual(models._candidate_selection(q4)["model"], "UD-Q4_K_XL")
-
-    def _facts(self, set_name):
-        from strata_control import split_engine
-        with tempfile.TemporaryDirectory() as t:
-            first = None
-            for i, s in enumerate(shards_of(set_name)):
-                if s["header"]:
-                    p = FX.materialize(s, Path(t) / s["name"], first=(i == 0))
-                else:
-                    p = FX.materialize({"header": {"split": [0, len(shards_of(set_name)), 1224], "tensors": []}}, Path(t) / s["name"], first=True)
-                first = first or p
-            return split_engine.scan_model(first)
-
-    def _decide(self, facts):
-        from strata_control import split_engine as se
-        cards = [se.Card(index=i, name="RTX A6000", vram_mib=49140, cc=86) for i in range(2)]
-        return se.decide(enabled=True, system="linux", cards=cards, ram_total_gib=128, ram_available_gib=100, model=facts)
-
-    def test_the_split_engine_declines_what_it_cannot_read(self):
-        for model, bad in (("UD-IQ1_M", "IQ2_XXS"), ("UD-Q2_0", "IQ2_XXS"), ("UD-IQ2_XS", "IQ2_XXS"), ("UD-Q2_K_XL", "IQ2_XXS"),
-                           ("UD-Q3_K_XL", "Q5_0"), ("UD-IQ4_XS-v31", "Q5_0")):
-            with self.subTest(model=model):
-                d = self._decide(self._facts(HUB[model]))
-                self.assertFalse(d.use_split)
-                self.assertTrue(any("routed experts use" in r and bad in r for r in d.reasons), d.reasons)
-                self.assertTrue(d.line.startswith("Using the normal layer split"))
-
-    def test_the_split_engine_reads_the_sets_whose_types_it_knows(self):
-        for model in ("UD-IQ3_XXS", "UD-Q4_K_XL"):
-            d = self._decide(self._facts(HUB.get(model, model)))
-            self.assertFalse(any("routed experts use" in r for r in d.reasons), (model, d.reasons))
-
 
 class HeaderRegression(unittest.TestCase):
     """Every set of the repository at d9620119: the pins and the tensor directories agree with each other."""
@@ -485,7 +453,7 @@ class HeaderRegression(unittest.TestCase):
                     self.assertGreaterEqual(h["data_start"] + end, s["bytes"] - 64)     # (the file ends where its last tensor does)
 
     def test_the_catalog_sets_have_the_tensor_mix_of_the_plan(self):
-        """PLAN-QUANTS section 2: routed gate/up types by layer, down types, the Q5_0 downs that decide the split engine."""
+        """PLAN-QUANTS section 2: routed gate/up types by layer, down types, the Q5_0 downs."""
         want = {
             "UD-IQ1_M": ({"IQ2_XXS": 23, "IQ2_S": 18, "IQ2_XS": 7}, {"Q2_0": 46, "IQ4_NL": 2}),
             "UD-Q2_0": ({"IQ2_XXS": 18, "IQ2_S": 30}, {"Q2_0": 39, "IQ4_NL": 9}),
