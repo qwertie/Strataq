@@ -19,9 +19,9 @@ from __future__ import annotations
 
 from typing import Any
 
-DENSE_GB = 5.0                 # = native-fit.ts DENSE_GB
-SYSTEM_ROOM_GB = 10.0          # = native-fit.ts SYSTEM_ROOM_GB
-DENSE_EXTRA_GB = 1.0           # = native-fit.ts DENSE_EXTRA_GB
+DENSE_GB = 5.0
+SYSTEM_ROOM_GB = 10.0
+DENSE_EXTRA_GB = 1.0
 SPLIT_CARD_OVERHEAD_GB = 2.0   # each extra card of a split: its own dense layers and prompt buffers
 SPLIT_MIN_VRAM_GB = 8          # a card sharing a model holds the dense weights and its own prompt buffers too
 SPLIT_PROMPT_VRAM_GB = 12      # #448: a split stage lends a prompt chunk's buffers from its own cache; below this one
@@ -151,7 +151,7 @@ def other_vendor_note(cards: list[dict], vendor: str | None) -> str | None:
 
 
 def memory_needed(variant: dict) -> float:
-    """RAM + VRAM the model asks for (native-fit.ts memoryNeeded)."""
+    """Gets the combined RAM and VRAM the model needs."""
     if isinstance(variant.get("memory_gb"), (int, float)):
         return float(variant["memory_gb"])
     if variant.get("mem_total") and isinstance(variant.get("ram_needed_gb"), (int, float)):
@@ -160,7 +160,10 @@ def memory_needed(variant: dict) -> float:
 
 
 def fit(memory_gb: float, ram_gb: float | None, vram_gb: float) -> dict[str, Any]:
-    """native-fit.ts `fitOn` for a given memory need: where the weights go. Keys: vram_use_gb, ram_use_gb, spill_gb, spare_ram_gb, known."""
+    """Works out where the weights go for a given memory need.
+
+    Returns vram_use_gb, ram_use_gb, spill_gb, spare_ram_gb and known.
+    """
     vram = float(vram_gb or 0)
     if not ram_gb or ram_gb <= 0:
         return {"vram_use_gb": 0.0, "ram_use_gb": 0.0, "spill_gb": 0.0, "spare_ram_gb": 0.0, "known": False}

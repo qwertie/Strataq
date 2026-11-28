@@ -3184,7 +3184,7 @@ def ensure_nvfp4_local_packages() -> None:
         return
     if CONTROL:
         fail("preparing NVIDIA's FP4-Local checkpoint needs PyTorch and transformers, which Strata Control does not include",
-             "install this model from the source download (SETUP.bat on Windows, ./setup.sh on Linux), or pick another version")
+             "install this model from the source download (START-HERE.bat on Windows, ./setup.sh on Linux), or pick another version")
     pkgs = nvfp4_local_packages()
     if not pkgs:
         fail("requirements-nvfp4-local.txt is missing", "update Strata, or run: python -m pip install torch transformers safetensors")

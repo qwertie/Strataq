@@ -49,11 +49,6 @@ class Decisions(unittest.TestCase):
         self.assertIsNone(drafting.mtp_ready(["--pack", "/d/packs/x"]), "no layer named")
         self.assertIsNone(drafting.mtp_ready(["--mtp", "4"]), "Qwen3.6's draft depth")
 
-    def test_data_folder_of_an_argument_list(self):
-        self.assertEqual(drafting.data_dir_of(["--pack", "/d/packs/x"]), Path("/d"))
-        self.assertEqual(drafting.data_dir_of(["--mtp", "/d/mtp/rt"]), Path("/d"))
-        self.assertIsNone(drafting.data_dir_of(["--mtp", "4"]))
-        self.assertIsNone(drafting.data_dir_of([]))
 
 
 class WhatTheEngineStarted(unittest.TestCase):

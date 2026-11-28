@@ -265,7 +265,7 @@ def apply(cfg: dict, changes: dict) -> tuple[dict, list[str]]:
 
 def _set_arg(cfg: dict, flag: str, v) -> None:
     """Sets engine option `flag` to `v` (None: removes it) in cfg's "args", in place, as the person's own (user_args),
-    so that it survives setup and the app writing "args" again."""
+    so that it survives setup writing "args" again."""
     mine = user_args.capture(cfg)
     a = list(cfg.get("args") or [])
     kept = _KEPT_ALIASES.get(flag, ())

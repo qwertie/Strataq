@@ -3474,7 +3474,7 @@ def engine_args(cfg: dict) -> list[str]:
     layer_split_value)."""
     args = list(cfg["args"])
     # "user_args" (strata_common/user_args.py): the options the person set by hand, over the generated ones at every start,
-    # so a setup run or the app rewriting "args" cannot undo them (#3216 #3215 #3270)
+    # so setup rewriting "args" cannot undo them (#3216 #3215 #3270)
     if cfg.get("user_args"):
         args = user_args.merge(args, cfg["user_args"])
     # #1322: a config with a "vision" section but without --vision in its args (written by an older setup run, or edited by
@@ -3494,12 +3494,11 @@ def engine_args(cfg: dict) -> list[str]:
             args += ["--layer-split", layer_split_value(cfg)]
         args += parallel_args(cfg, args) + pool_cores_args(cfg, args)
         return paged_launch.translate_args(cfg, args)
-    # "mtp": false (the Models settings, `strata launch --mtp off`, or by hand): no draft layer, whatever the args say.  A setup run
-    # that writes --mtp back into the args cannot undo it, because this is applied at every start.
-    if draft_layer.is_off(cfg):
+    # Saved drafting choices apply after the generated engine arguments.
+    if draft_layer.is_off(cfg) or drafting.normalize(cfg.get("drafting")) == "off":
         args, removed = draft_layer.strip(args)
         if removed:
-            print(f'[strata] "mtp": false - starting without the draft layer ({" ".join(removed)} left out)', flush=True)
+            print(f'[strata] starting without the draft layer ({" ".join(removed)} left out)', flush=True)
     if layer_split_of(cfg) and "--layer-split" not in args:
         args += ["--layer-split", layer_split_value(cfg)]
     return args + parallel_args(cfg, args)

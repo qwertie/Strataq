@@ -16,7 +16,6 @@ Folder names are chosen so that, in alphabetical order, shared code comes before
   under these names.
 - Neither stack imports the other. The server starts an engine program (built from `src/program/`) and talks to
   it over the engine's standard input and output. What both sides must agree on is in `contracts/`.
-- The desktop app (`apps/`) sits on top of both and is not part of these layers.
 
 ## The C++ layers
 
@@ -56,9 +55,8 @@ Both expose the same [request-ID protocol](../contracts/requests.md). The paged 
 conversation state when it is needed. Qwen3.6's loop keeps its execution structures behind a shared adapter.
 The Python client does not choose a solo path or an execution slot for an updated engine.
 
-`src/common/serve/README.md` lists which parts each one uses. Much of upstream's documentation was written for the
-per-session engines that came before the paged one: when a doc says "session", "slot" or "`--batch`", check which loop
-it means.
+`src/common/serve/README.md` lists which parts each one uses. When code says "session", "slot" or "`--batch`",
+check which loop it means.
 
 ## The Python layers
 
@@ -75,7 +73,7 @@ Packages in the same layer do not import each other: what they share moves down 
 
 ## Language-neutral
 
-`contracts/` holds what the C++ and Python sides (and the app) must agree on: the engine protocol and the model
+`contracts/` holds what the C++ and Python sides must agree on: the engine protocol and the model
 family catalog. It depends on nothing.
 
 ## Where does new code go?

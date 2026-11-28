@@ -192,12 +192,6 @@ at 700 and 512, 56,286 at 256, 56,541 at 128). During the first answer the engin
 95 MiB outside the pools, at every reserve, so at 128 MiB the free dedicated memory fell to 102 MiB. The desktop's
 responsiveness at so little free memory was not measured, which is why the default is 256 and not 128.
 
-For strata-q38, the desktop app's Performance profile keeps at least 512 MiB on a display card, or 2,048 when its
-picture reader runs on the GPU. A headless card keeps 256 MiB, or 2,048 with the GPU reader. Work also keeps a fifth
-of a dedicated display card, capped at 1,536 MiB on cards up to 16 GB. Explicit reserves still take precedence.
-The old engines' display floors stay at 1,024 above 16 GB and 1,536 at 16 GB or less. DeepSeek loads bypass the app's
-resource profiles, so strata-ds41 uses its engine default unless a reserve is set in its config or arguments.
-
 At start, strata-q38's pools also leave room for what it allocates after them: 256 MiB
 a card (352 on a later card of a layer split), what the old engine measured after its expert cache (#4474), and the
 drafter's head. The Memory panel changes the reserve while the engine runs ("Reserve free VRAM",

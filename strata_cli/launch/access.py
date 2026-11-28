@@ -176,7 +176,7 @@ def find_tailscale() -> str | None:
     found = shutil.which("tailscale")
     if found:
         return found
-    for guess in ("/usr/bin/tailscale", "/usr/local/bin/tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+    for guess in ("/usr/bin/tailscale", "/usr/local/bin/tailscale",
                   r"C:\Program Files\Tailscale\tailscale.exe"):
         if Path(guess).is_file():
             return guess

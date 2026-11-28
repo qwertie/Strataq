@@ -1407,10 +1407,11 @@ class Host:
         return not self.starting and self.last_error is not None
 
     def _die_with_gone(self) -> bool:
-        """Whether the process this instance lives for (`die_with_pid`) is gone. A look that cannot read the process (the macOS
-        `ps` that timed out, a handle that was refused) is not an answer: the engine used to be stopped on it, cleanly and without a word,
-        hours into an idle session (#4973). A different start time is a later process with that number: gone at once. Nothing found is
-        confirmed against a plain liveness check, and has to repeat DIE_WITH_MISSES times."""
+        """Checks whether the process named by `die_with_pid` has ended.
+
+        An unreadable process is not evidence of exit. A different start time means the PID was reused;
+        an absent process must also fail the liveness check DIE_WITH_MISSES times.
+        """
         pid, token = self.die_with
         found = procs.start_token(pid)
         if found == token:
