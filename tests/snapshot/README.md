@@ -2,7 +2,7 @@
 
 For every **machine class x model set x entry point** this records what the engine would be started with, and a test fails on any difference.
 
-Nothing real is used: no GPU, no model file (the model files are empty), no engine (a text stub), no download (the drafter fetch is a recorder), no network,
+Nothing real is used: no GPU, no model file (the model files are empty), no engine (a text stub), no download, no network,
 no real user folder (every run has its own scratch HOME, data folder and install folder, removed afterwards).
 
 ## Run it
@@ -27,13 +27,13 @@ The same command works on Windows, Linux and macOS; the golden files hold no pat
 
 | entry | how it is driven | what is real | what is replaced |
 |---|---|---|---|
-| `launch` | `strata launch --model <set> --yes --no-tui` through `strata_cli.cli.main` | the whole command: settings, `Runner.run()`, the drafter step, config derivation and writing | the engine download, the model download (`ensure_model` returns the stand-in below), tuning, the server start, the drafter download |
+| `launch` | `strata launch --model <set> --yes --no-tui` through `strata_cli.cli.main` | the whole command: settings, `Runner.run()`, config derivation and writing | the engine download, the model download (`ensure_model` returns the stand-in below), tuning, the server start |
 | `setup` | `strata_control.setup_config.config_for` (qwen / unsloth) and `dsv41_config_for` (DeepSeek), the moved last stretch of `setup.py` main(), called with inputs built by `setup_driver.py` | the whole run-config construction: engine arguments, speed switches, cards, vision section | what `setup.py` decides before it (the cards and RAM come from the class, the context, budget, low-RAM, vision and resident choices from setup's own pure functions), the probes of the machine (`ProbeLib`), the model reader |
 
 For `launch` the last step is the same code the server runs when it starts the engine:
-`serve.server.engine_args(cfg, exe)` and `serve.server.child_env(cfg)`.  The record has the run config the entry point
+`strata_common.engine_client.engine_args(cfg)` and `child_env(cfg)`.  The record has the run config the entry point
 left (`config_file`), the argument list (`engine.argv`), the variables the start adds to the environment
-(`engine.env_set`), the notes the start prints, and the drafter downloads that were asked for (`fetches`).
+(`engine.env_set`) and the notes the start prints.
 
 ### The `setup` entry point and the stand-in
 
@@ -63,6 +63,5 @@ No workflow is added in step 0 (step 2.5/2.7).  A job needs `actions/setup-pytho
 
 ## Known limits
 
-* The record is of a model that is installed and has **no drafter on disk yet**: the state a first Load / launch meets.  The state "drafter already downloaded" is not in the matrix.
 * `engine_args` and `child_env` are called as the server calls them, but the server's other start-time steps (component engine resolution, vision reader choice, effort end arguments) are not.
 * Host-OS code paths (a Windows-only branch) run on the host the test runs on; the golden files were checked to be identical when made on Windows and on Linux.

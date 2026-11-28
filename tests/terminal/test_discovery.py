@@ -1,5 +1,5 @@
 """Tester report 2026-10-18, T03 / T04 / T05: existing models are found the same way by the launch screens, `strata models list`, the
-own-files import and `strata launch` (strata_control/discovery.py), with a mock of the desktop app's folders and a Gyro-S file header
+own-files import and `strata launch` (strata_control/discovery.py), with a mock of the default folders and a Gyro-S file header
 (TQK6 / TQK7 experts, the one-file layout)."""
 
 from __future__ import annotations
@@ -54,8 +54,8 @@ def gyro_m_bytes() -> bytes:
     return gguf_with([("blk.0.ffn_gate_exps.weight", TQ2_T, 256, 68)])
 
 
-class GuiLayout(unittest.TestCase):
-    """The desktop app's folders, as the Windows (and Linux) app lays them out, plus an empty Terminal folder."""
+class DefaultLayout(unittest.TestCase):
+    """A model in the default install folder with its files in Documents/Strata, plus an empty Terminal folder."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="strata-discovery-")
@@ -88,7 +88,7 @@ class GuiLayout(unittest.TestCase):
         p = mock.patch.object(models, "ROOT", self.terminal)
         p.start()
         self.addCleanup(p.stop)
-        self.install = discovery.app_install_dir()
+        self.install = discovery.default_install_dir()
         self.docs = base / "home" / "Documents" / "Strata"
         gyro = self.docs / "Models" / "gyro-Gyro-S"
         gyro.mkdir(parents=True)
@@ -112,17 +112,16 @@ class GuiLayout(unittest.TestCase):
                     "vision": {"exe": str(engine), "mmproj": str(self.mmproj), "model": str(self.gguf), "gpu": False}}
         self.config_path = self.install / "strata-gyro-gyro-s.json"
         self.config_path.write_text(json.dumps(self.cfg))
-        (self.install.parent / "app-settings.json").write_text(json.dumps({"data_dir": str(self.docs), "installs": [str(self.install)]}))
 
     def catalog(self) -> Catalog:
         return Catalog(hardware=HW_12)
 
     # ---- T04: one answer for list and the wizard
-    def test_models_list_finds_the_app_install_by_default(self):
+    def test_models_list_finds_the_default_install(self):
         result = models.list_installed()
         self.assertEqual([m["id"] for m in result["models"]], ["gyro-gyro-s"])
         self.assertEqual(Path(result["install_dir"]).resolve(), self.install.resolve())
-        self.assertEqual(result["install_dir_source"], "app")
+        self.assertEqual(result["install_dir_source"], "default")
 
     def test_list_and_the_wizard_agree_on_the_install(self):
         cat = self.catalog()
@@ -147,7 +146,7 @@ class GuiLayout(unittest.TestCase):
         self.assertEqual(models.list_installed(str(other))["models"], [])
         self.assertEqual([p.source for p in discovery.places(explicit=str(other))], ["explicit"])
 
-    def test_a_remembered_older_install_and_the_app_install_are_both_listed(self):
+    def test_a_remembered_older_install_and_the_default_install_are_both_listed(self):
         old = self.base / "T-Strata"
         old.mkdir()
         (old / "strata-qwen-iq3_xxs.json").write_text(json.dumps({"exe": "e", "tokenizer": "t", "args": []}))
@@ -158,12 +157,12 @@ class GuiLayout(unittest.TestCase):
         self.assertEqual(sorted(m["id"] for m in got["models"]), ["gyro-gyro-s", "qwen-iq3_xxs"])
         self.assertEqual(got["install_dir_source"], "remembered")
 
-    def test_inside_the_app_an_older_install_is_still_not_adopted(self):
+    def test_with_a_settings_file_of_its_own_an_older_install_is_not_adopted(self):
         old = self.base / "T-Strata"
         old.mkdir()
         (old / "strata-x.json").write_text(json.dumps({"exe": "e", "tokenizer": "t", "args": []}))
-        app_settings = self.install.parent / "app-settings.json"
-        with mock.patch.dict(os.environ, {"STRATA_SETTINGS_FILE": str(app_settings)}):
+        own = self.base / "own-settings.json"
+        with mock.patch.dict(os.environ, {"STRATA_SETTINGS_FILE": str(own)}):
             settings = self.settings_path
             settings.parent.mkdir(parents=True)
             settings.write_text(json.dumps({"installs": [str(old)]}))
@@ -262,9 +261,9 @@ class GuiLayout(unittest.TestCase):
         cat = self.catalog()
         self.assertEqual(cat.data_dir().resolve(), self.docs.resolve())
         self.assertEqual(cat.data_dir_for("gyro", "Gyro-S").resolve(), self.docs.resolve())
-        self.assertEqual(cat.data_dir_choice()[1], "app")
+        self.assertEqual(cat.data_dir_choice()[1], "documents")
 
-    def test_an_own_setting_beats_the_apps_folder(self):
+    def test_an_own_setting_beats_the_documents_folder(self):
         mine = self.base / "mine"
         mine.mkdir()
         settings = self.settings_path
@@ -311,7 +310,7 @@ class GuiLayout(unittest.TestCase):
         self.assertFalse(st.installed)
         self.assertGreater(st.remaining_gb, 50)
 
-    def test_runner_counts_only_the_missing_helper_and_gives_setup_the_apps_folder(self):
+    def test_runner_counts_only_the_missing_helper_and_gives_setup_the_documents_folder(self):
         (self.docs / "mtp" / "rt" / "experts.bin").unlink()
         cat = self.catalog()
         r = Runner(S.LaunchSettings(family="gyro", model="Gyro-S", context=131072, kv="int8", vision="cpu"), catalog=cat)

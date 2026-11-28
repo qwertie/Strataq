@@ -2,7 +2,7 @@
 
 Everything lives under one temporary folder that is also HOME, the data folder, the install folder and every per-user folder, so nothing real is read or written.
 No model file is needed (the model files are empty), no engine runs (the engine is a text stub that carries the strings the program's own checks read), nothing is
-downloaded (the drafter fetch is replaced by a recorder that writes a small stand-in file), and nothing touches the network.
+downloaded, and nothing touches the network.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ class World:
         self.pack = self.data / "packs" / mset.key
         self.mtp = self.data / "mtp" / "rt"
         self.gguf_dir = self.models / mset.model
-        self.exe = self.engine_dir / ("strata-dsv41" if mset.multi_file else "strata")
+        self.exe = self.engine_dir / ("strata-ds41" if mset.multi_file else "strata-q38")
         self.tag = (("deepseek-v4.1-flash-" if mset.multi_file else {"qwen": "", "unsloth": "unsloth-"}[mset.family]) + mset.model).lower()
         self.config_path = self.install / f"strata-{self.tag}.json"
         self.env = {

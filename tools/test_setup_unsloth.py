@@ -680,14 +680,6 @@ class StrixHaloCache(Base):
         asked = self.run_halo(63.7, ("--context", "8192", "--resident-budget-gib", "24"), amd=self.HALO64, m="UD-IQ2_XS", version="0.1.57")[2]["args"]
         self.assertIn("--resident-budget-gib", asked)                                    # the budget the person asked for is written (setup's own pool check may lower it, as before)
 
-    def test_the_spark_profile(self):
-        """A DGX Spark (GB10, unified memory, 128 GB): the old sets keep the budget plan, a v3.1 set that fits the pool has all of its experts in it."""
-        spark = {"vram_gb": 119.0, "uma": True, "arch": "121"}
-        for model in ("UD-IQ4_XS", "UD-Q4_K_XL", "UD-Q5_K_XL", "UD-Q6_K_XL", "Q8_0"):
-            self.assertTrue(setup.unsloth_budget(model, 121.0, spark), model)
-        for model in ("UD-IQ1_M", "UD-IQ2_XS", "UD-IQ3_XXS", "UD-Q3_K_XL", "UD-IQ4_XS-v31"):
-            self.assertFalse(setup.unsloth_budget(model, 121.0, spark), model)
-
     def test_nvidia_plans_are_the_same_for_every_set(self):
         for model in ("UD-IQ4_XS", "UD-Q4_K_XL", "UD-IQ1_M", "UD-IQ4_XS-v31"):
             for ram in (47.0, 63.7, 124.0):

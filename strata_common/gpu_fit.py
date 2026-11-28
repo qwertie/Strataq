@@ -53,25 +53,15 @@ NVIDIA_SMI_CARDS = ["nvidia-smi", "--query-gpu=index,name,memory.total,compute_c
 UMA_OS_LEFT_GB = 6
 
 
-def parse_nvidia_cards(text: str, ram_gb: float | None = None) -> list[dict]:
+def parse_nvidia_cards(text: str) -> list[dict]:
     """Reads the answer to NVIDIA_SMI_CARDS: one card per line, as {"index", "name", "vram_gb" (GiB), "arch" ("89" for
-    compute capability 8.9), "driver"}; a line that does not parse is skipped.  `ram_gb`: the installed RAM (GiB) on a
-    machine whose GPU may share the CPU's memory (arm64: a DGX Spark's GB10).  A card whose memory nvidia-smi gives as
-    [N/A] is then listed as "uma" with the RAM less UMA_OS_LEFT_GB, and no memory beside the RAM ("dedicated_gb" 0) so
-    the low-RAM rules do not count it twice.  None (x86): such a card is skipped."""
-    uma_gb = None if ram_gb is None else max(0.0, ram_gb - UMA_OS_LEFT_GB)
+    compute capability 8.9), "driver"}; a line that does not parse, such as a card whose memory is [N/A], is skipped."""
     found = []
     for line in text.strip().splitlines():
         try:
             idx, name, mem, cc, drv = [x.strip() for x in line.split(",")]
-            card = {"index": int(idx), "name": name, "arch": cc.replace(".", ""), "driver": drv}
-            try:
-                card["vram_gb"] = float(mem) / 1024.0           # nvidia-smi nounits: MiB
-            except ValueError:
-                if uma_gb is None:
-                    raise
-                card.update(vram_gb=uma_gb, uma=True, dedicated_gb=0.0, shared_gb=uma_gb)
-            found.append(card)
+            found.append({"index": int(idx), "name": name, "arch": cc.replace(".", ""), "driver": drv,
+                          "vram_gb": float(mem) / 1024.0})          # nvidia-smi nounits: MiB
         except ValueError:
             continue
     return found

@@ -54,12 +54,12 @@ class Classification(unittest.TestCase):
         self.assertIn("not in ALLOWED", out)
 
     def test_the_shipped_table_allows_its_own_measurements_and_a_lowered_allowance_fails(self):
-        mangled = "_ZN6strata7kernels12_GLOBAL__N_113rope_table_kernelEPKiifPf"
-        demangled = "strata::kernels::(anonymous namespace)::rope_table_kernel(int const*, int, float, float*)"
-        rows = [("dflash2.cu.o", "sm_86", mangled, {"REG": 16, "STACK": 32, "LOCAL": 0})]
+        mangled = "_ZN6strata7prefill12_GLOBAL__N_120rms_rope_rows_kernelEv"
+        demangled = "strata::prefill::(anonymous namespace)::rms_rope_rows_kernel()"
+        rows = [("prefill.cu.o", "sm_86", mangled, {"REG": 16, "STACK": 32, "LOCAL": 0})]
         rc, out = quiet(CS.check, "x.a", rows, {mangled: demangled})
         self.assertEqual(rc, 0, out)                       # the measured frame is the allowance
-        key = "strata::kernels::{anonymous}::rope_table_kernel"
+        key = "strata::prefill::{anonymous}::rms_rope_rows_kernel"
         self.assertEqual(CS.ALLOWED[key]["sm_86"], (32, 0))
         with mock.patch.dict(CS.ALLOWED, {key: {"sm_86": (16, 0)}}):
             rc, out = quiet(CS.check, "x.a", rows, {mangled: demangled})

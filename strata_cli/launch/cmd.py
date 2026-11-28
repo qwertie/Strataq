@@ -77,7 +77,7 @@ def add_parsers(sp: argparse._SubParsersAction) -> list[argparse.ArgumentParser]
         description="Set up a model, tune it, start serving and watch it, in one place. With no flags it opens the guided screens: "
                     "start from a saved preset or set up from the beginning, one decision per screen. With flags it does the same "
                     "without asking, and opens the monitor (or, with --no-tui, prints the address and returns). "
-                    "Presets are shared with the Strata app's profiles and tuning presets.")
+                    "Presets are shared with the profiles and tuning presets.")
     g = p.add_argument_group("what to run")
     g.add_argument("--preset", metavar="NAME", help="start a saved preset (other flags change it for this start)")
     g.add_argument("--model", metavar="NAME", help="the model size, e.g. iq3_xxs, q2_0, ud-q4_k_xl (any case)")

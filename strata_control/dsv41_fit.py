@@ -633,9 +633,3 @@ def options(cards: list[dict], ram_gb: float | None, vendor: str | None = None, 
     opts[0]["recommended"] = True
     out["options"], out["recommended"] = opts, "all"
     return out
-
-
-def not_here(model: str | None) -> str | None:
-    """Gets None: every DeepSeek set is offered on every supported computer. Kept only because tools/strata_mcp.py
-    (model_table, dsv41_not_here) still calls it; delete it together with those calls."""
-    return None

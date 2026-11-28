@@ -173,7 +173,7 @@ class DraftLayerInTheDataDir(Base):
         self.assertEqual(got["mtp"], str(rt))
 
     def test_remembered_data_dirs_reads_only_the_folders_that_exist(self):
-        with mock.patch.object(discovery, "data_dir_choices", return_value=[(self.base, "settings"), (self.base / "gone", "app"), (self.base, "documents")]):
+        with mock.patch.object(discovery, "data_dir_choices", return_value=[(self.base, "settings"), (self.base / "gone", "settings"), (self.base, "documents")]):
             self.assertEqual(discovery.remembered_data_dirs(), [self.base])
 
 

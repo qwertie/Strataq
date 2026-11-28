@@ -859,7 +859,7 @@ def card_roles_lines(cfg: dict) -> list[str]:
             out.append("[strata] every graphics card is Off: " + gpu_roles.CPU_ONLY_LINE)
             return out
         raise SystemExit("[strata] every graphics card is set to Off, and this engine cannot start without one. Turn a card on "
-                         "(Main or Helper) in the app or with strata launch --gpu-roles.")
+                         "(Main or Helper) with strata launch --gpu-roles.")
     word = {"main": "Main", "helper": "Helper", "off": "Off"}
     out.append("[strata] card roles: " + ", ".join(f"{word[r]} GPU {i}" for r in ("main", "helper", "off")
                                                     for i in sorted(roles) if roles[i] == r) + " (numbers as nvidia-smi gives them)")
@@ -6726,8 +6726,7 @@ def tool_call_recovery_setting(cfg: dict) -> bool:
 
 def main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> int:
     """Serve until stopped. For as long as it runs this server holds the shared activity lease of the runtime folder (the same one `strata serve` and
-    a runtime host take), so `strata update` and a calibration run see an engine that was started by running this file directly - the desktop app's
-    source install does - and wait for it or refuse, instead of test-starting a second copy of the model beside it (#4463). A lease that cannot be
+    a runtime host take), so `strata update` and a calibration run see an engine that was started by running this file directly and wait for it or refuse, instead of test-starting a second copy of the model beside it (#4463). A lease that cannot be
     taken (an exclusive holder, a runtime folder that is not usable) never stops the server.
 
     Its console output goes through a bounded queue (strata_server/nonblocking_out.py, #4479 / #2481): a console that stops taking output must not hold a

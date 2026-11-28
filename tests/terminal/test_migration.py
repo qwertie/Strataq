@@ -54,7 +54,7 @@ class ExistingInstallIsFoundInPlace(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"APPDATA": str(self.appdata), "XDG_CONFIG_HOME": str(self.appdata),
                                            "STRATA_PROFILE_DIR": str(self.profiles),
                                            "STRATA_RUNTIME_DIR": str(base / "runtime"),
-                                           # the desktop app's folders of whoever runs the tests are not part of this fixture
+                                           # the default folders of whoever runs the tests are not part of this fixture
                                            "LOCALAPPDATA": str(base / "local"), "XDG_DATA_HOME": str(base / "localshare"),
                                            "STRATA_COMPONENTS_DIR": ""})
         env.start()
@@ -154,9 +154,9 @@ class ExistingInstallIsFoundInPlace(unittest.TestCase):
             self.assertEqual(models.resolve_install()[1], "explicit")
 
     def test_nothing_remembered_means_this_folder_and_no_error(self):
-        # nothing found anywhere: the folder a new model would be installed into (the desktop app's, which the Terminal shares), no error
+        # nothing found anywhere: the folder a new model would be installed into, no error
         from strata_control import discovery
-        default = (discovery.app_install_dir(), "default")
+        default = (discovery.default_install_dir(), "default")
         setup.settings_path().unlink()
         self.assertEqual(models.resolve_install(), default)
         setup.settings_path().write_text("not json")

@@ -560,52 +560,6 @@ class OtherComponents(UpdaterCase):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def build_with_app(self, version="0.2.0", tamper=False):
-        public, secret = fx.minisign_pair()
-        installer = os.urandom(5000)
-        (self.release / "app").mkdir(parents=True, exist_ok=True)
-        (self.release / "app" / "Strata_setup.bin").write_bytes(installer)
-        sig = fx.minisign_sign(installer + (b"x" if tamper else b""), secret)
-        app = {"version": version, "notes": "Faster starts.", "pub_date": "2026-10-15T00:00:00Z",
-               "platforms": {feedmod.TAURI_TARGETS[PLATFORM]: {"url": "app/Strata_setup.bin", "signature": sig,
-                                                              "sha256": hashlib.sha256(installer).hexdigest(), "size": len(installer)}}}
-        (self.root / "tauri.json").write_text(json.dumps(app))
-        from feed_tool import build_feed
-        (self.release / "engine").mkdir(exist_ok=True)
-        build_feed(self.release, key=self.key, sequence=self.sequence + 1, app_json=self.root / "tauri.json")
-        self.sequence += 1
-        return public, installer
-
-    def test_the_app_installer_is_downloaded_and_its_signature_checked(self):
-        public, installer = self.build_with_app()
-        ctx = self.ctx(app_version="0.1.0", environ={**os.environ, "STRATA_APP_UPDATE_PUBKEY": public})
-        report = updater.check(ctx)
-        self.assertEqual((report["app"]["status"], report["app"]["offered"]), ("available", "0.2.0"))
-        out = updater.run_update(ctx, engine=False, control=False, app=True)
-        result = out["results"][0]
-        self.assertEqual((out["exit_code"], result["status"]), (0, "downloaded"), out)
-        self.assertEqual(Path(result["path"]).read_bytes(), installer)
-        self.assertEqual((self.release / "app" / "latest.json").exists(), True, "the Tauri updater's file is written beside the feed")
-        self.assertEqual(self.engine_folders(), [], "an app-only update downloads 0 engine bytes")
-        self.assertEqual(self.archive_requests(), [])
-        self.assertTrue(all(r[1].startswith(("/strata-feed", "/app/")) for r in self.server.requests))
-
-    def test_an_installer_with_a_bad_signature_is_deleted(self):
-        public, _ = self.build_with_app(tamper=True)
-        ctx = self.ctx(app_version="0.1.0", environ={**os.environ, "STRATA_APP_UPDATE_PUBKEY": public})
-        out = updater.run_update(ctx, engine=False, control=False, app=True)
-        self.assertEqual(out["exit_code"], 5)
-        self.assertIn("signature", out["results"][0]["error"])
-        self.assertFalse((self.components / ".updates" / "app").exists() and any((self.components / ".updates" / "app").iterdir()))
-
-    def test_no_app_key_no_app_download(self):
-        self.build_with_app()
-        ctx = self.ctx(app_version="0.1.0", environ={k: v for k, v in os.environ.items() if k != "STRATA_APP_UPDATE_PUBKEY"})
-        with mock.patch.object(updater, "app_public_key", return_value=None):
-            out = updater.run_update(ctx, engine=False, control=False, app=True)
-        self.assertEqual(out["exit_code"], 5)
-        self.assertEqual([r for r in self.server.requests if r[1].startswith("/app/")], [])
-
     def test_control_is_staged_run_once_and_pointed_at(self):
         bundle = self.root / "control-bundle"
         (bundle / "strata_control").mkdir(parents=True)
@@ -726,10 +680,10 @@ class Cli(UpdaterCase):
         with mock.patch.object(ec, "newest_installed_version", return_value="0.1.44"):
             self.assertIsNone(ec.cached_notice(self.components))
         # an old file without the recorded versions: still never offers an engine that is not newer
-        saved["last_check"] = {"at": "x", "engine": "0.1.45", "app": None}
+        saved["last_check"] = {"at": "x", "engine": "0.1.45"}
         state_file.write_text(json.dumps(saved), encoding="utf-8")
         self.assertIsNone(ec.cached_notice(self.components))
-        saved["last_check"] = {"at": "x", "engine": "0.1.46", "app": None}
+        saved["last_check"] = {"at": "x", "engine": "0.1.46"}
         state_file.write_text(json.dumps(saved), encoding="utf-8")
         self.assertEqual(ec.cached_notice(self.components), notice)
 

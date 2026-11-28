@@ -24,7 +24,7 @@ def _install_dirs() -> list[Path]:
         if str(ENGINE) not in sys.path:
             sys.path.append(str(ENGINE))
         from strata_control import discovery
-        out.append(discovery.app_install_dir())
+        out.append(discovery.default_install_dir())
         out += [pl.path for pl in discovery.places(here=ENGINE)]
     except Exception:
         pass
@@ -40,7 +40,7 @@ def gguf_py() -> str:
             return str(c)
     sys.exit("llama.cpp's gguf-py was not found. Set STRATA_GGUF_PY to the gguf-py folder of any llama.cpp checkout "
              "(<llama.cpp>/gguf-py), or run setup.py once (it downloads llama.cpp into third_party/ of the install "
-             "folder; in the desktop app or the Terminal package that folder is STRATA_INSTALL_DIR, which this tool also "
+             "folder; in the Terminal package that folder is STRATA_INSTALL_DIR, which this tool also "
              "looks in)")
 
 

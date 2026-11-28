@@ -57,19 +57,6 @@ class Ed25519(unittest.TestCase):
         with self.assertRaises(signing.SignatureError):
             signing.parse_public(entry)
 
-    def test_minisign_app_signature(self):
-        public, secret = fx.minisign_pair()
-        blob = os.urandom(5000)
-        sig = fx.minisign_sign(blob, secret)
-        signing.minisign_verify(public, sig, [blob[:1000], blob[1000:]])
-        with self.assertRaises(signing.SignatureError):
-            signing.minisign_verify(public, sig, [blob + b"x"])
-        other_public, _ = fx.minisign_pair()
-        with self.assertRaisesRegex(signing.SignatureError, "different key"):
-            signing.minisign_verify(other_public, sig, [blob])
-        text = base64.b64decode(sig).decode().replace("timestamp:1", "timestamp:2")
-        with self.assertRaisesRegex(signing.SignatureError, "comment was changed"):
-            signing.minisign_verify(public, base64.b64encode(text.encode()).decode(), [blob])
 
 
 def entry(version="0.1.46", backend="cuda", variant="cuda13", archs=("sm_86", "compute_89"), driver="580.65", **extra):
@@ -338,69 +325,6 @@ class DeepSeekEnginePackages(FeedChecks):
             doc = build_feed(release, key=key, sequence=3, dsv41_dir=d)
             self.assertEqual(len(doc["dsv41"]["packages"]), 1)
             self.assertNotIn("engine", doc)
-
-
-class AppPlatform(unittest.TestCase):
-    """`feed_tool.py set-app-platform`: the signed installer goes into the Tauri updater json, and only if it verifies."""
-
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
-        self.public, self.secret = fx.minisign_pair()
-        self.archive = self.root / "Strata.AppImage"
-        self.archive.write_bytes(b"ELF stand-in installer")
-        self.sig = self.root / "Strata.AppImage.sig"
-        self.sig.write_text(fx.minisign_sign(self.archive.read_bytes(), self.secret) + "\n")
-        self.app_json = self.root / "latest.json"
-
-    def run_tool(self, **extra):
-        from feed_tool import set_app_platform
-        args = dict(target="linux-x86_64", archive=self.archive, signature_file=self.sig, url="https://example.invalid/Strata.AppImage",
-                    version="0.2.0", pubkey=self.public)
-        args.update(extra)
-        return set_app_platform(self.app_json, **args)
-
-    def test_a_signed_installer_is_added_with_its_hash_and_size(self):
-        import hashlib
-        entry = self.run_tool()
-        document = json.loads(self.app_json.read_text())
-        self.assertEqual(document["version"], "0.2.0")
-        self.assertEqual(document["platforms"]["linux-x86_64"], entry)
-        self.assertEqual(entry["sha256"], hashlib.sha256(self.archive.read_bytes()).hexdigest())
-        self.assertEqual(entry["size"], self.archive.stat().st_size)
-        self.assertEqual(entry["signature"], self.sig.read_text().strip())
-
-    def test_the_result_is_a_feed_app_member_control_accepts(self):
-        from feed_tool import build_feed, keygen
-        self.run_tool()
-        keygen(self.root / "keys")
-        key = json.loads((self.root / "keys" / "feed-key.json").read_text())
-        document = build_feed(self.root / "release", key=key, sequence=1, app_json=self.app_json)
-        self.assertIn("linux-x86_64", document["app"]["platforms"])
-        self.assertTrue((self.root / "release" / "app" / "latest.json").exists())
-
-    def test_a_second_platform_is_added_beside_the_first(self):
-        self.run_tool()
-        self.run_tool(target="windows-x86_64")
-        self.assertEqual(sorted(json.loads(self.app_json.read_text())["platforms"]), ["linux-x86_64", "windows-x86_64"])
-
-    def test_a_signature_of_a_different_file_is_refused_and_nothing_is_written(self):
-        self.archive.write_bytes(self.archive.read_bytes() + b"x")
-        with self.assertRaises(SystemExit) as caught:
-            self.run_tool()
-        self.assertIn("does not verify", str(caught.exception))
-        self.assertFalse(self.app_json.exists())
-
-    def test_a_signature_from_another_key_is_refused(self):
-        other_public, _ = fx.minisign_pair()
-        with self.assertRaises(SystemExit):
-            self.run_tool(pubkey=other_public)
-
-    def test_a_version_mismatch_is_refused(self):
-        self.run_tool()
-        with self.assertRaises(SystemExit):
-            self.run_tool(version="0.2.1")
 
 
 if __name__ == "__main__":

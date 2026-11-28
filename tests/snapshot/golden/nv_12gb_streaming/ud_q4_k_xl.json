@@ -26,7 +26,7 @@
     "engine_version": "0.2.12"
    },
    "config_file": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "args": [
      "--pack",
      "<ROOT>/data/packs/ud_q4_k_xl",
@@ -70,7 +70,7 @@
     }
    },
    "engine": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "argv": [
      "--pack",
      "<ROOT>/data/packs/ud_q4_k_xl",
@@ -82,8 +82,6 @@
      "auto",
      "--prefill",
      "auto",
-     "--spec",
-     "4",
      "--spec-min-p",
      "0.5",
      "--mtp",
@@ -92,15 +90,13 @@
      "65536",
      "--kv",
      "int8",
-     "--kv-resident",
-     "32768",
-     "--resident-budget-gib",
-     "39",
+     "--ram-mib",
+     "39936",
      "--vision"
     ],
     "env_set": {},
     "notes": [
-     "[strata] Drafting: MTP (the DFlash2 drafter isn't downloaded yet)"
+     "[strata] paged engine: leaving out unsupported settings: --spec 4 --kv-resident 32768"
     ]
    },
    "setup_says": [
@@ -111,13 +107,6 @@
   "launch": {
    "entry": "launch",
    "command": "strata launch --model UD-Q4_K_XL --yes --no-tui --context 65536",
-   "fetches": [
-    {
-     "call": "ensure",
-     "file": "qwen3.8-flash-next-dflash2.q4_0.pack",
-     "gb": 1.2
-    }
-   ],
    "setup_args": [
     "--yes",
     "--no-start",
@@ -129,13 +118,11 @@
     "65536",
     "--vision",
     "cpu",
-    "--drafter",
-    "dflash2",
     "--data-dir",
     "<ROOT>/data"
    ],
    "config_file": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "args": [
      "--pack",
      "<ROOT>/data/packs/ud_q4_k_xl",
@@ -175,7 +162,7 @@
     "args_written": "=args"
    },
    "engine": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "argv": [
      "--pack",
      "<ROOT>/data/packs/ud_q4_k_xl",
@@ -187,30 +174,20 @@
      "auto",
      "--prefill",
      "auto",
+     "--spec-min-p",
+     "0.5",
+     "--mtp",
+     "<ROOT>/data/mtp/rt",
      "--max-context",
      "65536",
      "--kv",
      "int8",
-     "--kv-resident",
-     "32768",
-     "--resident-budget-gib",
-     "24",
-     "--draft",
-     "dflash2",
-     "--draft-model",
-     "<ROOT>/data/dflash2/qwen3.8-flash-next-dflash2.q4_0.pack",
-     "--draft-fallback",
-     "none",
-     "--mtp-draft-vocab",
-     "<ROOT>/data/mtp/rt/draft_vocab.bin",
-     "--spec",
-     "6",
-     "--draft-conf",
-     "0.8"
+     "--ram-mib",
+     "24576"
     ],
     "env_set": {},
     "notes": [
-     "[strata] drafting: DFlash2 alone (--draft dflash2, --draft-conf 0.8)"
+     "[strata] paged engine: leaving out unsupported settings: --spec 4 --kv-resident 32768"
     ]
    }
   }

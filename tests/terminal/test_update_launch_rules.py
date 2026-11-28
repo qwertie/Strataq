@@ -121,7 +121,7 @@ class DeepSeekLaunch(Dsv41Engine):
 
     def test_a_newer_engine_found_by_an_earlier_check_is_one_quiet_line(self):
         r = self.runner()
-        with mock.patch.object(ec, "cached_offers", return_value={"engine": None, "dsv41": "0.1.49.1", "app": None}), \
+        with mock.patch.object(ec, "cached_offers", return_value={"engine": None, "dsv41": "0.1.49.1"}), \
                 mock.patch.object(ec, "_installed_dsv41_version", return_value="0.1.49"):
             r.upgrade_dsv41_engine(self.old)
         self.assertEqual(len(r.notices), 1)

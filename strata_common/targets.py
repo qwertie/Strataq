@@ -25,7 +25,7 @@ class ComponentError(RuntimeError):
 BACKEND_MATRIX: dict[str, tuple[str, ...]] = {
     "cuda": ("windows-x86_64", "linux-x86_64"),
     "hip": ("windows-x86_64", "linux-x86_64"),
-    "cpu": ("macos-arm64", "macos-x86_64", "windows-x86_64", "linux-x86_64"),
+    "cpu": ("windows-x86_64", "linux-x86_64"),
 }
 
 def host_platform() -> str:

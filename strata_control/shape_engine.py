@@ -48,7 +48,7 @@ WORDS = {
     "start_failed": "The engine for {model} {version} was not installed because it did not start correctly ({why}). The Strata engine is unchanged.",
     "fetch_failed": "The engine for {model} could not be downloaded: {why}",
     "newer_failed": "A newer engine for {model} is available but could not be installed ({why}). Still using {have}.",
-    "missing": ("{model} needs its own engine, which is not installed or does not fit this PC: {reason}. Run `strata launch` again, or Download / repair in the app, "
+    "missing": ("{model} needs its own engine, which is not installed or does not fit this PC: {reason}. Run `strata launch` again "
                 "to fetch it. Starting a model never downloads an engine."),
     "current": "The engine for {model} is up to date.",
     # setup.py (the [X] / [ok] marks are setup's)

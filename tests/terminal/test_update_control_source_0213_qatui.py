@@ -42,8 +42,7 @@ class SourceTreeVersion(unittest.TestCase):
 def _report(installed):
     return {"feed": {"sequence": 1, "channel": "stable", "key_id": "k", "trusted_by": "test"},
             "engine": {"installed": None, "offered": None, "status": "not-in-feed", "download_bytes": 0},
-            "control": {"installed": installed, "offered": "0.1.56", "status": "available", "download_bytes": 1},
-            "app": {"status": "not-in-feed", "installed": None, "offered": None}}
+            "control": {"installed": installed, "offered": "0.1.56", "status": "available", "download_bytes": 1}}
 
 
 class PrintedLine(unittest.TestCase):

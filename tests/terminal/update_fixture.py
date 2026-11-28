@@ -4,7 +4,6 @@ supports Range requests and can cut a transfer short. Nothing here touches the n
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import os
 import re
@@ -72,26 +71,6 @@ def build_package(parent: Path, version: str, *, engine_source: str = GOOD_ENGIN
     if key is not None:
         feed_tool.sign_package(folder, key)
     return folder
-
-
-def minisign_pair() -> tuple[str, bytes]:
-    """(Tauri-style public key value, 32-byte seed): a TEST minisign key, ED25519 with the BLAKE2b-prehash 'ED' mode."""
-    seed = os.urandom(32)
-    public = signing.public_from_seed(seed)
-    key_id = os.urandom(8)
-    text = "untrusted comment: minisign public key: TEST\n" + base64.b64encode(b"Ed" + key_id + public).decode() + "\n"
-    return base64.b64encode(text.encode()).decode(), key_id + seed
-
-
-def minisign_sign(blob: bytes, key_id_and_seed: bytes, comment: str = "timestamp:1") -> str:
-    key_id, seed = key_id_and_seed[:8], key_id_and_seed[8:]
-    digest = hashlib.blake2b(blob, digest_size=64).digest()
-    sig = signing.sign_raw(seed, digest)
-    trusted = comment.encode()
-    global_sig = signing.sign_raw(seed, sig + trusted)
-    text = ("untrusted comment: signature from minisign secret key\n" + base64.b64encode(b"ED" + key_id + sig).decode() + "\n"
-            f"trusted comment: {comment}\n" + base64.b64encode(global_sig).decode() + "\n")
-    return base64.b64encode(text.encode()).decode()
 
 
 class FeedServer:

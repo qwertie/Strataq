@@ -26,7 +26,7 @@
     "engine_version": "0.2.12"
    },
    "config_file": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "args": [
      "--pack",
      "<ROOT>/data/packs/iq3_s",
@@ -70,7 +70,7 @@
     }
    },
    "engine": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "argv": [
      "--pack",
      "<ROOT>/data/packs/iq3_s",
@@ -84,8 +84,6 @@
      "auto",
      "--prefill",
      "auto",
-     "--spec",
-     "4",
      "--spec-min-p",
      "0.5",
      "--mtp",
@@ -94,12 +92,12 @@
      "65536",
      "--kv",
      "int8",
-     "--kv-resident",
-     "32768",
      "--vision"
     ],
     "env_set": {},
-    "notes": []
+    "notes": [
+     "[strata] paged engine: leaving out unsupported settings: --spec 4 --kv-resident 32768"
+    ]
    },
    "setup_says": [
     "[ok] KV streaming on: the context's KV cache lives in RAM (0.9 GB), more experts fit in VRAM"
@@ -108,7 +106,6 @@
   "launch": {
    "entry": "launch",
    "command": "strata launch --model IQ3_S --yes --no-tui --context 65536",
-   "fetches": [],
    "setup_args": [
     "--yes",
     "--no-start",
@@ -122,13 +119,11 @@
     "cpu",
     "--experimental-speed-projection",
     "off",
-    "--drafter",
-    "dflash2",
     "--data-dir",
     "<ROOT>/data"
    ],
    "config_file": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "args": [
      "--pack",
      "<ROOT>/data/packs/iq3_s",
@@ -168,7 +163,7 @@
     "args_written": "=args"
    },
    "engine": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "argv": [
      "--pack",
      "<ROOT>/data/packs/iq3_s",
@@ -182,8 +177,6 @@
      "auto",
      "--prefill",
      "auto",
-     "--spec",
-     "4",
      "--spec-min-p",
      "0.5",
      "--mtp",
@@ -191,12 +184,12 @@
      "--max-context",
      "65536",
      "--kv",
-     "int8",
-     "--kv-resident",
-     "32768"
+     "int8"
     ],
     "env_set": {},
-    "notes": []
+    "notes": [
+     "[strata] paged engine: leaving out unsupported settings: --spec 4 --kv-resident 32768"
+    ]
    }
   }
  }

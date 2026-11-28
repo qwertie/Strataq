@@ -49,8 +49,8 @@ PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")   # the revisions this se
 VERSION = "0.1.0"
 WIN = os.name == "nt"
 DEFAULT_ROOT = Path(__file__).resolve().parent.parent
-# The desktop app runs this under Strata Control's Python (STRATA_CONTROL_INSTALL=1): the install runs on that Python, makes no
-# .venv and installs no package (setup.py's own CONTROL mode).
+# Under Strata Control's Python (STRATA_CONTROL_INSTALL=1) the install runs on that Python, makes no .venv and installs no
+# package (setup.py's own CONTROL mode).
 CONTROL = os.environ.get("STRATA_CONTROL_INSTALL") == "1"
 DEFAULT_PORT = 8080
 STATE_DIR = ".strata-mcp"                             # in the Strata folder (git-ignored)
@@ -1107,8 +1107,6 @@ class Strata:
         for f, fd in sorted(families.items(), key=lambda kv: bool(kv[1].get("feed"))):      # the signed feed's models after the built-in ones (False sorts first, the order is kept)
             sizes = []
             for m in self.sizes_of(models, f):
-                if f == "deepseek41" and self.dsv41_not_here(m):      # the Unsloth 1-bit sets on a DGX Spark: not offered until a Spark run passes
-                    continue
                 own = self.own_size(f, m)
                 d = own or models[m]
                 tag = (fd.get("tag", "") + m).lower()
@@ -1168,12 +1166,6 @@ class Strata:
                 out.append({"family": fid, "title": u["title"], "about": u["reason"], "experimental": False, "images": False, "sizes": [], "feed": True,
                             "available": False, "unavailable_reason": u["reason"]})
         return out
-
-    @staticmethod
-    def dsv41_not_here(model: str) -> str | None:
-        """The plain line when this computer (a DGX Spark) is not offered `model`, else None: strata_control/dsv41_fit.not_here."""
-        from strata_control import dsv41_fit
-        return dsv41_fit.not_here(model)
 
     @staticmethod
     def dsv41_disk_gb(d: dict) -> float:
@@ -1613,8 +1605,7 @@ def progress_words_for(step, lines, download):
 def own_nvidia_gpus() -> list:
     """Lists the NVIDIA cards as setup.gpus() does, for when setup.py is not loaded or fails."""
     from strata_common import gpu_fit
-    arm64 = platform.machine().lower() in ("aarch64", "arm64")
-    return gpu_fit.parse_nvidia_cards(run_quiet(gpu_fit.NVIDIA_SMI_CARDS), (read_ram().total or 0) / 2**30 if arm64 else None)
+    return gpu_fit.parse_nvidia_cards(run_quiet(gpu_fit.NVIDIA_SMI_CARDS))
 
 
 def nvidia_display_active() -> dict:
@@ -1801,9 +1792,6 @@ def tool_defs(models: dict, families: dict, contexts: list) -> list:
                                          "Strata folder). Only the current data folder, a folder inside the Strata "
                                          "folder, or a new absolute path whose last folder is named Strata... "
                                          "(e.g. D:\\Strata-data) outside system folders"},
-             "drafter": {"type": "string", "enum": ["mtp", "dflash2"],
-                         "description": "which drafter this model will use: dflash2 downloads only DFlash2's drafter (a separate step), not the MTP draft layer's ~5 GB; "
-                                        "mtp (the default) downloads the draft layer"},
              "gguf_dir": {"type": "string", "maxLength": 260,
                           "description": "a folder that already holds this model's GGUF files under their original names: setup "
                                          "checks them (size and SHA-256) and does not download them again"},
@@ -2018,7 +2006,7 @@ class Tools:
 
     def strata_install(self, family=None, model=None, context=None, vision=None, kv=None, gpu=None, gpus=None,
                        backend=None, low_ram=None, port=None, data_dir=None, confirm=False, cancel=False,
-                       gguf_dir=None, drafter=None) -> dict:
+                       gguf_dir=None) -> dict:
         s = self.s
         with s.lock:
             job = s.install_job()
@@ -2051,7 +2039,7 @@ class Tools:
                                 "fix the problem above and call strata_install again with confirm=true (finished "
                                 "steps are skipped)"}
             plan, args = self.install_plan(family, model, context, vision, kv, gpu, gpus, backend, low_ram, port,
-                                           data_dir, gguf_dir, drafter)
+                                           data_dir, gguf_dir)
             tracked = s.tracked_server()
             if tracked and not tracked.get("ended"):
                 raise ToolError("Strata is running (started by strata_start): stop it first with strata_stop - setup "
@@ -2065,7 +2053,7 @@ class Tools:
                 raise ToolError(plan["disk_short"])
             return self.launch_install(plan, args)
 
-    def install_plan(self, family, model, context, vision, kv, gpu, gpus, backend, low_ram, port, data_dir, gguf_dir=None, drafter=None):
+    def install_plan(self, family, model, context, vision, kv, gpu, gpus, backend, low_ram, port, data_dir, gguf_dir=None):
         s = self.s
         models, families, contexts, _src = s.tables()
         if gpu is not None and gpus is not None:
@@ -2138,8 +2126,6 @@ class Tools:
             args += ["--gguf-dir", str(local)]
         if backend in ("cuda", "hip"):
             args += ["--backend", backend]
-        if drafter in ("mtp", "dflash2"):
-            args += ["--drafter", drafter]
         fit = None
         ram = hw.get("ram_gb")
         if ram is not None and md.get("multi_file"):

@@ -133,7 +133,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3316,
+     "line": 3054,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -199,7 +199,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2986,
+     "line": 2729,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -232,7 +232,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 5404,
+     "line": 5401,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -265,7 +265,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 776,
+     "line": 766,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -351,19 +351,19 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 5279,
+     "line": 5276,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 888,
+     "line": 846,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 888,
+     "line": 846,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -435,7 +435,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2984,
+     "line": 2727,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -468,7 +468,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 5352,
+     "line": 5349,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -501,13 +501,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4684,
+     "line": 4399,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4684,
+     "line": 4399,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -611,7 +611,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/kernels/cuda/verify_kernels.cu",
-     "line": 1052,
+     "line": 1044,
      "backend": "cuda",
      "fn": "env_tri"
     }
@@ -644,7 +644,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/kernels/cuda/verify_kernels.cu",
-     "line": 1070,
+     "line": 1062,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -758,7 +758,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3286,
+     "line": 3269,
      "value": "\"1\""
     }
    ],
@@ -889,7 +889,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3725,
+     "line": 3452,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -922,7 +922,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 179,
+     "line": 173,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -955,7 +955,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 798,
+     "line": 795,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -1034,7 +1034,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 2066,
+     "line": 1916,
      "backend": "cuda-hip",
      "fn": "env_tri"
     }
@@ -1067,39 +1067,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_BATCH_DF2",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/model.cpp",
-     "line": 2473,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "f70368b996",
-   "first_date": "2026-11-02",
-   "since": "v0.2.10",
-   "last_commit": "a1c7f05059",
-   "last_date": "2026-11-03",
-   "status": "research",
-   "owner": "program",
-   "note": "[auto] off unless set, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_BATCH_GDN_GROUPS",
    "backends": [
     "cuda-hip"
@@ -1107,13 +1074,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1764,
+     "line": 1614,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 3996,
+     "line": 3757,
      "backend": "cuda-hip",
      "fn": "env_tri"
     }
@@ -1153,7 +1120,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2460,
+     "line": 2314,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -1198,7 +1165,7 @@
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2482,
+     "line": 2320,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -1231,7 +1198,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2456,
+     "line": 2310,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -1264,13 +1231,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2646,
+     "line": 2483,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 884,
+     "line": 782,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -1548,7 +1515,7 @@
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3076,
+     "line": 2819,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -1581,7 +1548,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 3238,
+     "line": 2902,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -1614,7 +1581,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 5634,
+     "line": 5202,
      "backend": "cuda-hip",
      "fn": "is_env_off"
     }
@@ -1680,7 +1647,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 3814,
+     "line": 3575,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -1695,7 +1662,7 @@
    "launch_reads": [],
    "doc_mentions": [
     "docs/ENGINE_NOTES.md:465",
-    "docs/MEMORY_MANAGER_PLAN.md:535"
+    "docs/MEMORY_MANAGER_PLAN.md:536"
    ],
    "first_commit": "a1e4fb4c80",
    "first_date": "2026-10-01",
@@ -1716,7 +1683,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 3835,
+     "line": 3596,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -1749,7 +1716,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1223,
+     "line": 1075,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -1855,7 +1822,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 602,
+     "line": 599,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -1884,7 +1851,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3284,
+     "line": 3267,
      "value": "\"1\""
     }
    ],
@@ -1909,7 +1876,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6359,
+     "line": 5995,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -1942,7 +1909,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 5140,
+     "line": 4776,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -1975,13 +1942,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4795,
+     "line": 4431,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6815,
+     "line": 6438,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -2014,7 +1981,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4801,
+     "line": 4437,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -2047,7 +2014,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4910,
+     "line": 4546,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -2080,13 +2047,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/kernels/cuda/verify_kernels.cu",
-     "line": 1179,
+     "line": 1171,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/kernels/cuda/verify_kernels.cu",
-     "line": 1296,
+     "line": 1288,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -2126,25 +2093,25 @@
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 3634,
+     "line": 3398,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 5478,
+     "line": 5114,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6312,
+     "line": 5948,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6541,
+     "line": 6166,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -2177,19 +2144,19 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4796,
+     "line": 4432,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4811,
+     "line": 4447,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6815,
+     "line": 6438,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -2228,7 +2195,7 @@
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1371,
+     "line": 1221,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
@@ -2297,19 +2264,19 @@
    "launch_sets": [
     {
      "file": "strata_control/speed_switches.py",
-     "line": 54,
+     "line": 53,
      "value": "\"026\""
     },
     {
      "file": "strata_control/speed_switches.py",
-     "line": 61,
+     "line": 60,
      "value": "\"026\""
     }
    ],
    "launch_reads": [
     {
      "file": "setup.py",
-     "line": 7102
+     "line": 7067
     }
    ],
    "doc_mentions": [],
@@ -2332,7 +2299,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 5535,
+     "line": 5532,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -2523,39 +2490,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_DF2_FORK",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/dflash2.cpp",
-     "line": 584,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "89799596a6",
-   "first_date": "2026-10-21",
-   "since": "v0.2.3",
-   "last_commit": "89799596a6",
-   "last_date": "2026-10-21",
-   "status": "research",
-   "owner": "core",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_DF2_GATE",
    "backends": [
     "cuda-hip"
@@ -2587,375 +2521,6 @@
    "note": "Retired in 0.2.13 (cleanup 4.5, batch D): code removed, the setting is no longer read. Evidence: [checked] Calibrated DFlash2 window gate (AdaptiveGate) lost to the fixed confidence 0.5: -3.4% on UD-IQ4_XS-v31, -4.9% on UD-Q4_K_XL, -2.7% / -3.8% at row cost 6 / 9 ms, 0 of 4 rounds faster on chat and story (phaseA-tests/round0215/RESULTS-MAC-OUT.md:119, 'Negative; stays opt-in and off'). Not documented, not set by launch code; read at include/strata/spec/window_rule.hpp:119 and used in src/program/generate.cpp:18021,18889,19343. Companion STRATA_DF2_ROW_MS retires with it.",
    "retire_after": "",
    "retired_in": "0.2.13"
-  },
-  {
-   "name": "STRATA_DF2_GEMM",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/kernels/cuda/dflash2.cu",
-     "line": 1081,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "1",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "d7e50a515b",
-   "first_date": "2026-11-01",
-   "since": "v0.2.10",
-   "last_commit": "d7e50a515b",
-   "last_date": "2026-11-01",
-   "status": "default",
-   "owner": "kernels/cuda",
-   "note": "[auto] tunable with a built-in default 1 (src/kernels/cuda/dflash2.cu:1080)",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_DF2_GEMM4",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/kernels/cuda/dflash2.cu",
-     "line": 1033,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "0",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "d97d130902",
-   "first_date": "2026-11-01",
-   "since": "v0.2.10",
-   "last_commit": "b353ce7d4b",
-   "last_date": "2026-11-02",
-   "status": "research",
-   "owner": "kernels/cuda",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_DF2_HEAD",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "include/strata/models/qwen38/dflash2.hpp",
-     "line": 57,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "37e7b738f5",
-   "first_date": "2026-11-01",
-   "since": "v0.2.10",
-   "last_commit": "371a28ed11",
-   "last_date": "2026-11-02",
-   "status": "research",
-   "owner": "core",
-   "note": "[reviewed] Draft head format selector (native keeps Q6_K, 2x slower on Metal); tuning switch, not a shipped-vs-lost verdict. [phaseA-tests/notes-dflash2-ports.md:14]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_DF2_HEAD_IL",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/dflash2.cpp",
-     "line": 552,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "on",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "d7e50a515b",
-   "first_date": "2026-11-01",
-   "since": "v0.2.10",
-   "last_commit": "d7e50a515b",
-   "last_date": "2026-11-01",
-   "status": "default",
-   "owner": "core",
-   "note": "[auto] on unless set to 0 (src/core/dflash2.cpp:524)",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_DF2_LOG_MIB",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/dflash2.cpp",
-     "line": 780,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [
-    {
-     "file": "src/models/qwen38/dflash2_ring_test.cpp",
-     "line": 190
-    },
-    {
-     "file": "src/models/qwen38/dflash2_ring_test.cpp",
-     "line": 193
-    }
-   ],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "96f5227763",
-   "first_date": "2026-11-02",
-   "since": "v0.2.10",
-   "last_commit": "4e7866f91b",
-   "last_date": "2026-11-02",
-   "status": "research",
-   "owner": "core",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_DF2_LOOKUP_SKIP",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "include/strata/common/spec/window_rule.hpp",
-     "line": 54,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "c2b9218c76",
-   "first_date": "2026-11-02",
-   "since": "v0.2.10",
-   "last_commit": "f3face9402",
-   "last_date": "2026-11-02",
-   "status": "research",
-   "owner": "spec",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_DF2_PRIO",
-   "backends": [
-    "cuda",
-    "hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/dflash2.cpp",
-     "line": 224,
-     "backend": "hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "src/models/qwen38/dflash2.cpp",
-     "line": 229,
-     "backend": "cuda",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "3ae2123bce",
-   "first_date": "2026-10-22",
-   "since": "v0.2.3",
-   "last_commit": "3ae2123bce",
-   "last_date": "2026-10-22",
-   "status": "research",
-   "owner": "core",
-   "note": "[auto] off unless set, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_DF2_PROFILE",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/dflash2.cpp",
-     "line": 244,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "7f97c35aca",
-   "first_date": "2026-10-21",
-   "since": "v0.2.3",
-   "last_commit": "7f97c35aca",
-   "last_date": "2026-10-21",
-   "status": "research",
-   "owner": "core",
-   "note": "[auto] diagnostic / trace / measurement switch by name or by code, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_DF2_RING_LOG",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/dflash2.cpp",
-     "line": 778,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "src/models/qwen38/dflash2_ring_test.cpp",
-     "line": 99,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "src/models/qwen38/dflash2_ring_test.cpp",
-     "line": 99,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "on",
-   "code_default": null,
-   "engine_sets": [
-    {
-     "file": "src/split/src/df2_bridge.cpp",
-     "line": 50
-    }
-   ],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "96f5227763",
-   "first_date": "2026-11-02",
-   "since": "v0.2.10",
-   "last_commit": "c850b979b5",
-   "last_date": "2026-11-03",
-   "status": "research",
-   "owner": "core",
-   "note": "[auto] diagnostic / trace / measurement switch by name or by code, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_DF2_RING_STATS",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/dflash2.cpp",
-     "line": 856,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "src/models/qwen38/dflash2.cpp",
-     "line": 981,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "72cf167e3b",
-   "first_date": "2026-11-02",
-   "since": "v0.2.10",
-   "last_commit": "1b25b55444",
-   "last_date": "2026-11-02",
-   "status": "research",
-   "owner": "core",
-   "note": "[reviewed] Stats switch for the DFlash2 ring branch; diagnostic. [blackwell/RESULTS-DF2STRIX.md:31]",
-   "retire_after": "",
-   "retired_in": ""
   },
   {
    "name": "STRATA_DF2_ROW_MS",
@@ -2991,144 +2556,6 @@
    "retired_in": "0.2.13"
   },
   {
-   "name": "STRATA_DF2_SHARE_HEAD_OFF",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/dflash2.cpp",
-     "line": 365,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "src/models/qwen38/model.cpp",
-     "line": 2843,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "09c407d8f4",
-   "first_date": "2026-11-01",
-   "since": "v0.2.10",
-   "last_commit": "8ec2c8a918",
-   "last_date": "2026-11-02",
-   "status": "research",
-   "owner": "core",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_DF2_SKIP",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/dflash2.cpp",
-     "line": 84,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "5bc7f8cab3",
-   "first_date": "2026-10-21",
-   "since": "v0.2.3",
-   "last_commit": "5bc7f8cab3",
-   "last_date": "2026-10-21",
-   "status": "research",
-   "owner": "core",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_DF2_STAGE",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/model.cpp",
-     "line": 1895,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "f70368b996",
-   "first_date": "2026-11-02",
-   "since": "v0.2.10",
-   "last_commit": "f70368b996",
-   "last_date": "2026-11-02",
-   "status": "research",
-   "owner": "program",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_DF2_TIMING",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/dflash2.cpp",
-     "line": 245,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "7f97c35aca",
-   "first_date": "2026-10-21",
-   "since": "v0.2.3",
-   "last_commit": "b1f4c92961",
-   "last_date": "2026-11-02",
-   "status": "research",
-   "owner": "core",
-   "note": "[reviewed] Timing/diagnostic switch for DFlash2 screens. [blackwell/RESULTS-DF2NV.md:100]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_DF_BRANCH",
    "backends": [
     "cuda-hip"
@@ -3136,7 +2563,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1249,
+     "line": 1101,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -3182,13 +2609,13 @@
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1404,
+     "line": 1254,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1409,
+     "line": 1259,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
@@ -3227,7 +2654,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1554,
+     "line": 1404,
      "backend": "cuda-hip",
      "fn": "env_tri"
     }
@@ -3260,7 +2687,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1839,
+     "line": 1689,
      "backend": "cuda-hip",
      "fn": "env_tri"
     }
@@ -3392,7 +2819,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 302,
+     "line": 298,
      "backend": "hip",
      "fn": "is_env_on"
     }
@@ -3458,13 +2885,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/mtp.cpp",
-     "line": 1726,
+     "line": 1560,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2528,
+     "line": 2485,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -4267,7 +3694,7 @@
    "reads": [
     {
      "file": "src/models/deepseekv41/ds4_tq.cu",
-     "line": 473,
+     "line": 472,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -4333,7 +3760,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1625,
+     "line": 1475,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -4366,7 +3793,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 5298,
+     "line": 4934,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -4399,13 +3826,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 5300,
+     "line": 4936,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 5300,
+     "line": 4936,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -4438,7 +3865,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 827,
+     "line": 817,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -4507,7 +3934,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 404,
+     "line": 401,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -5099,7 +4526,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3287,
+     "line": 3270,
      "value": "\"1\""
     }
    ],
@@ -5213,13 +4640,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2099,
+     "line": 2063,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6601,
+     "line": 6226,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -5285,7 +4712,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3010,
+     "line": 2753,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -5417,7 +4844,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4401,
+     "line": 4116,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -5483,7 +4910,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3937,
+     "line": 3664,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -5561,7 +4988,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 3761,
+     "line": 3522,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -5627,7 +5054,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 6093,
+     "line": 6090,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -5660,7 +5087,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4424,
+     "line": 4139,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -5693,7 +5120,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 6092,
+     "line": 6089,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -5726,7 +5153,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 6094,
+     "line": 6091,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -5759,13 +5186,13 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 6082,
+     "line": 6079,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4423,
+     "line": 4138,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -5798,7 +5225,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 6095,
+     "line": 6092,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -5864,7 +5291,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 447,
+     "line": 443,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -5937,13 +5364,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/mtp.cpp",
-     "line": 1273,
+     "line": 1166,
      "backend": "cuda-hip",
      "fn": "env_tri"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 2341,
+     "line": 2190,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -5976,7 +5403,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 457,
+     "line": 453,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -6010,19 +5437,19 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 415,
+     "line": 411,
      "backend": "hip",
      "fn": "env_tri"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 429,
+     "line": 425,
      "backend": "cuda",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 439,
+     "line": 435,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -6263,13 +5690,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/kernels/cuda/verify_kernels.cu",
-     "line": 1178,
+     "line": 1170,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/kernels/cuda/verify_kernels.cu",
-     "line": 1294,
+     "line": 1286,
      "backend": "cuda-hip",
      "fn": "is_env_off"
     }
@@ -6352,7 +5779,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3283,
+     "line": 3266,
      "value": "\"1\""
     }
    ],
@@ -6478,7 +5905,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3283,
+     "line": 3266,
      "value": "\"1\""
     }
    ],
@@ -6565,7 +5992,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3283,
+     "line": 3266,
      "value": "\"1\""
     }
    ],
@@ -6685,7 +6112,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3283,
+     "line": 3266,
      "value": "\"2\""
     }
    ],
@@ -6793,13 +6220,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/kernels/cuda/verify_kernels.cu",
-     "line": 1177,
+     "line": 1169,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/kernels/cuda/verify_kernels.cu",
-     "line": 1267,
+     "line": 1259,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -6822,7 +6249,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3287,
+     "line": 3270,
      "value": "\"1\""
     }
    ],
@@ -7047,13 +6474,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 726,
+     "line": 684,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 731,
+     "line": 689,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -7117,19 +6544,19 @@
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 727,
+     "line": 685,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 732,
+     "line": 690,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 752,
+     "line": 710,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -7236,7 +6663,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 835,
+     "line": 793,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -7294,7 +6721,7 @@
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 836,
+     "line": 794,
      "backend": "hip",
      "fn": "getenv"
     },
@@ -7370,7 +6797,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 433,
+     "line": 430,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -7574,7 +7001,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 224,
+     "line": 220,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -7673,7 +7100,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2382,
+     "line": 2346,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -8130,7 +7557,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 628,
+     "line": 625,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -8367,7 +7794,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 480,
+     "line": 477,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -8400,7 +7827,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 497,
+     "line": 494,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -8433,7 +7860,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 584,
+     "line": 581,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -8638,13 +8065,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 1217,
+     "line": 1207,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 1217,
+     "line": 1207,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -8740,7 +8167,7 @@
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 557,
+     "line": 554,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -8805,7 +8232,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4339,
+     "line": 3975,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -8871,13 +8298,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3594,
+     "line": 3321,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4068,
+     "line": 3786,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
@@ -8948,25 +8375,25 @@
     },
     {
      "file": "src/models/qwen38/mtp.cpp",
-     "line": 1056,
+     "line": 949,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/mtp.cpp",
-     "line": 1061,
+     "line": 954,
      "backend": "cuda",
      "fn": "env_tri"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 382,
+     "line": 378,
      "backend": "hip",
      "fn": "env_tri"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 385,
+     "line": 381,
      "backend": "cuda",
      "fn": "env_tri"
     }
@@ -9056,7 +8483,7 @@
    "launch_sets": [
     {
      "file": "strata_control/setup_config.py",
-     "line": 443,
+     "line": 422,
      "value": "str(table)"
     }
    ],
@@ -9159,7 +8586,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 933,
+     "line": 891,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -9441,7 +8868,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 159,
+     "line": 153,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -9474,7 +8901,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4666,
+     "line": 4302,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -9684,13 +9111,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4534,
+     "line": 4170,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 7876,
+     "line": 7434,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -10094,7 +9521,7 @@
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3096,
+     "line": 2839,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -10160,7 +9587,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3072,
+     "line": 2815,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -10193,13 +9620,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3063,
+     "line": 2806,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4417,
+     "line": 4132,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -10232,7 +9659,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4443,
+     "line": 4158,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -10265,13 +9692,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3112,
+     "line": 2855,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4408,
+     "line": 4123,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -10807,7 +10234,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4888,
+     "line": 4580,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -10912,7 +10339,7 @@
    "reads": [
     {
      "file": "include/strata/models/qwen38/prefill/kva.hpp",
-     "line": 135,
+     "line": 134,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -10939,11 +10366,11 @@
     },
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 141
+     "line": 140
     },
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 151
+     "line": 150
     }
    ],
    "engine_defaults": [],
@@ -10953,7 +10380,7 @@
    "launch_sets": [
     {
      "file": "strata_control/speed_switches.py",
-     "line": 41,
+     "line": 40,
      "value": "\"1\""
     }
    ],
@@ -10978,7 +10405,7 @@
    "reads": [
     {
      "file": "include/strata/models/qwen38/prefill/kva.hpp",
-     "line": 142,
+     "line": 141,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -10989,11 +10416,11 @@
    "engine_sets": [
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 102
+     "line": 101
     },
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 104
+     "line": 103
     }
    ],
    "engine_defaults": [],
@@ -11020,7 +10447,7 @@
    "reads": [
     {
      "file": "include/strata/models/qwen38/prefill/kva.hpp",
-     "line": 143,
+     "line": 142,
      "backend": "cuda-hip",
      "fn": "env_text"
     }
@@ -11031,11 +10458,11 @@
    "engine_sets": [
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 107
+     "line": 106
     },
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 109
+     "line": 108
     }
    ],
    "engine_defaults": [],
@@ -11062,7 +10489,7 @@
    "reads": [
     {
      "file": "include/strata/models/qwen38/prefill/kva.hpp",
-     "line": 146,
+     "line": 145,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -11095,7 +10522,7 @@
    "reads": [
     {
      "file": "include/strata/models/qwen38/prefill/kva.hpp",
-     "line": 141,
+     "line": 140,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -11106,7 +10533,7 @@
    "engine_sets": [
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 144
+     "line": 143
     }
    ],
    "engine_defaults": [],
@@ -11133,7 +10560,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4393,
+     "line": 4029,
      "backend": "cuda-hip",
      "fn": "env_tri"
     }
@@ -11166,7 +10593,7 @@
    "reads": [
     {
      "file": "include/strata/models/qwen38/prefill/kva.hpp",
-     "line": 139,
+     "line": 138,
      "backend": "cuda-hip",
      "fn": "env_i64"
     }
@@ -11177,7 +10604,7 @@
    "engine_sets": [
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 118
+     "line": 117
     }
    ],
    "engine_defaults": [],
@@ -11204,7 +10631,7 @@
    "reads": [
     {
      "file": "include/strata/models/qwen38/prefill/kva.hpp",
-     "line": 157,
+     "line": 156,
      "backend": "cuda-hip",
      "fn": "env_text"
     }
@@ -11237,7 +10664,7 @@
    "reads": [
     {
      "file": "include/strata/models/qwen38/prefill/kva.hpp",
-     "line": 163,
+     "line": 162,
      "backend": "cuda-hip",
      "fn": "env_text"
     }
@@ -11248,7 +10675,7 @@
    "engine_sets": [
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 116
+     "line": 115
     }
    ],
    "engine_defaults": [],
@@ -11275,7 +10702,7 @@
    "reads": [
     {
      "file": "include/strata/models/qwen38/prefill/kva.hpp",
-     "line": 148,
+     "line": 147,
      "backend": "cuda-hip",
      "fn": "env_text"
     }
@@ -11286,7 +10713,7 @@
    "engine_sets": [
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 114
+     "line": 113
     }
    ],
    "engine_defaults": [],
@@ -11313,7 +10740,7 @@
    "reads": [
     {
      "file": "include/strata/models/qwen38/prefill/kva.hpp",
-     "line": 151,
+     "line": 150,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -11324,7 +10751,7 @@
    "engine_sets": [
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 115
+     "line": 114
     }
    ],
    "engine_defaults": [],
@@ -11351,7 +10778,7 @@
    "reads": [
     {
      "file": "include/strata/models/qwen38/prefill/kva.hpp",
-     "line": 140,
+     "line": 139,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -11384,7 +10811,7 @@
    "reads": [
     {
      "file": "include/strata/models/qwen38/prefill/kva.hpp",
-     "line": 153,
+     "line": 152,
      "backend": "cuda-hip",
      "fn": "env_text"
     }
@@ -11417,7 +10844,7 @@
    "reads": [
     {
      "file": "include/strata/models/qwen38/prefill/kva.hpp",
-     "line": 162,
+     "line": 161,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -11428,19 +10855,19 @@
    "engine_sets": [
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 129
+     "line": 128
     },
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 131
+     "line": 130
     },
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 133
+     "line": 132
     },
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 135
+     "line": 134
     }
    ],
    "engine_defaults": [],
@@ -11467,7 +10894,7 @@
    "reads": [
     {
      "file": "include/strata/models/qwen38/prefill/kva.hpp",
-     "line": 137,
+     "line": 136,
      "backend": "cuda-hip",
      "fn": "env_i64"
     }
@@ -11486,7 +10913,7 @@
     },
     {
      "file": "src/models/qwen38/prefill/kva_test.cpp",
-     "line": 117
+     "line": 116
     }
    ],
    "engine_defaults": [],
@@ -11513,7 +10940,7 @@
    "reads": [
     {
      "file": "include/strata/models/qwen38/prefill/kva.hpp",
-     "line": 138,
+     "line": 137,
      "backend": "cuda-hip",
      "fn": "env_i64"
     }
@@ -11563,7 +10990,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2351,
+     "line": 2205,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -11596,7 +11023,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2363,
+     "line": 2217,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -11629,13 +11056,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4476,
+     "line": 4112,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 7823,
+     "line": 7381,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -11645,7 +11072,9 @@
    "code_default": null,
    "engine_sets": [],
    "engine_defaults": [],
-   "launch_files": [],
+   "launch_files": [
+    "setup.py"
+   ],
    "launch_sets": [],
    "launch_reads": [],
    "doc_mentions": [],
@@ -11734,7 +11163,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 3547,
+     "line": 3211,
      "backend": "cuda-hip",
      "fn": "env_tri"
     }
@@ -11833,7 +11262,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 459,
+     "line": 453,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
@@ -11872,7 +11301,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 1420,
+     "line": 1417,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -11906,13 +11335,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 2894,
+     "line": 2661,
      "backend": "hip",
      "fn": "is_env_on"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 3280,
+     "line": 3047,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -11945,7 +11374,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2205,
+     "line": 2059,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -11978,7 +11407,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4240,
+     "line": 3958,
      "backend": "cuda-hip",
      "fn": "is_env_off"
     }
@@ -12011,7 +11440,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 104,
+     "line": 100,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -12034,7 +11463,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3287,
+     "line": 3270,
      "value": "\"1\""
     }
    ],
@@ -12059,7 +11488,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 169,
+     "line": 165,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -12092,7 +11521,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 170,
+     "line": 166,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -12125,7 +11554,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6782,
+     "line": 6407,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -12158,7 +11587,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 7181,
+     "line": 6778,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -12191,7 +11620,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 3611,
+     "line": 3375,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -12224,7 +11653,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 3796,
+     "line": 3557,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -12257,7 +11686,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4415,
+     "line": 4130,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -12290,7 +11719,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4439,
+     "line": 4154,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -12323,7 +11752,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4426,
+     "line": 4141,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -12356,7 +11785,7 @@
    "reads": [
     {
      "file": "include/strata/common/spec/window_planner.hpp",
-     "line": 165,
+     "line": 157,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -12399,16 +11828,8 @@
    "code_default": null,
    "engine_sets": [],
    "engine_defaults": [],
-   "launch_files": [
-    "strata_control/split_engine.py"
-   ],
-   "launch_sets": [
-    {
-     "file": "strata_control/split_engine.py",
-     "line": 507,
-     "value": "<file>"
-    }
-   ],
+   "launch_files": [],
+   "launch_sets": [],
    "launch_reads": [],
    "doc_mentions": [],
    "first_commit": "89f4fa18ee",
@@ -12430,7 +11851,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 190,
+     "line": 184,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -12607,7 +12028,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 8126,
+     "line": 7678,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -12737,7 +12158,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3552,
+     "line": 3535,
      "value": "\"1\""
     }
    ],
@@ -12896,7 +12317,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3286,
+     "line": 3269,
      "value": "\"1\""
     }
    ],
@@ -12921,7 +12342,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 175,
+     "line": 171,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -13354,7 +12775,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2456,
+     "line": 2413,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -13387,7 +12808,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2497,
+     "line": 2454,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -13420,7 +12841,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2461,
+     "line": 2418,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -13484,18 +12905,6 @@
     "cuda-hip"
    ],
    "reads": [
-    {
-     "file": "src/models/qwen38/model.cpp",
-     "line": 1710,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "src/models/qwen38/model.cpp",
-     "line": 2844,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
     {
      "file": "src/models/qwen38/mtp.cpp",
      "line": 593,
@@ -13624,7 +13033,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/mtp.cpp",
-     "line": 1588,
+     "line": 1451,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -13690,7 +13099,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/mtp.cpp",
-     "line": 933,
+     "line": 826,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -13721,12 +13130,6 @@
     "cuda-hip"
    ],
    "reads": [
-    {
-     "file": "src/models/qwen38/model.cpp",
-     "line": 2844,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
     {
      "file": "src/models/qwen38/mtp.cpp",
      "line": 76,
@@ -13762,7 +13165,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/mtp.cpp",
-     "line": 1281,
+     "line": 1174,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -13821,78 +13224,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_MTP_STAGE0",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/model.cpp",
-     "line": 1775,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "src/models/qwen38/model.cpp",
-     "line": 1887,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "24d972e542",
-   "first_date": "2026-10-12",
-   "since": "v0.1.44",
-   "last_commit": "14038ee30c",
-   "last_date": "2026-10-15",
-   "status": "research",
-   "owner": "program",
-   "note": "[reviewed] Overlap option reported slower on Turing; no engine verdict. [phaseA-tests/_issues_dump/3497.md:8]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_MTP_TOP2",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/mtp.cpp",
-     "line": 599,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "2312c83bfd",
-   "first_date": "2026-10-03",
-   "since": "v0.1.40.1",
-   "last_commit": "23a38a0bb7",
-   "last_date": "2026-10-07",
-   "status": "research",
-   "owner": "core",
-   "note": "[reviewed] Runner-up hit counter for MTP statistics; diagnostic. [gh-sweep-1028/SWEEP.md:295]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_MULTI_BLOCK_ARGMAX",
    "backends": [
     "cuda"
@@ -13900,7 +13231,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/kernels/cuda/verify_kernels.cu",
-     "line": 1031,
+     "line": 1023,
      "backend": "cuda",
      "fn": "env_tri"
     }
@@ -13933,7 +13264,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 5174,
+     "line": 4896,
      "backend": "cuda-hip",
      "fn": "env_tri"
     }
@@ -13966,7 +13297,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 5183,
+     "line": 4905,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -14088,7 +13419,7 @@
    "launch_sets": [
     {
      "file": "strata_control/setup_config.py",
-     "line": 446,
+     "line": 425,
      "value": "\"1\""
     }
    ],
@@ -14152,13 +13483,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/mtp.cpp",
-     "line": 1142,
+     "line": 1035,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 309,
+     "line": 305,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -14204,7 +13535,7 @@
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 923,
+     "line": 913,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -14250,7 +13581,7 @@
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 926,
+     "line": 916,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -14451,7 +13782,7 @@
     },
     {
      "file": "src/core/expert_source.cpp",
-     "line": 5420,
+     "line": 5417,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -14523,13 +13854,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/mtp.cpp",
-     "line": 1342,
+     "line": 1235,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 308,
+     "line": 304,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     },
@@ -15074,7 +14405,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 808,
+     "line": 766,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -15091,7 +14422,7 @@
    "launch_reads": [
     {
      "file": "setup.py",
-     "line": 7101
+     "line": 7066
     }
    ],
    "doc_mentions": [],
@@ -15297,13 +14628,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 477,
+     "line": 473,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 482,
+     "line": 478,
      "backend": "cuda",
      "fn": "env_tri"
     }
@@ -15336,7 +14667,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3389,
+     "line": 3120,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -15805,7 +15136,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 864,
+     "line": 854,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -15838,7 +15169,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 5164,
+     "line": 4851,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -15872,13 +15203,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 855,
+     "line": 845,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 5485,
+     "line": 5162,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -15894,7 +15225,7 @@
    "launch_sets": [
     {
      "file": "strata_control/speed_switches.py",
-     "line": 48,
+     "line": 47,
      "value": "\"old\""
     }
    ],
@@ -15987,7 +15318,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 1915,
+     "line": 1777,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -16020,7 +15351,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 1917,
+     "line": 1779,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -16121,7 +15452,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 637,
+     "line": 634,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -16154,7 +15485,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4962,
+     "line": 4598,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -16220,7 +15551,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 553,
+     "line": 550,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -16752,7 +16083,7 @@
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 610,
+     "line": 607,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -16798,7 +16129,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 1777,
+     "line": 1741,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -16831,7 +16162,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 1757,
+     "line": 1721,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -16864,7 +16195,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 576,
+     "line": 573,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -16897,7 +16228,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 1793,
+     "line": 1757,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -17002,7 +16333,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 5122,
+     "line": 4809,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -17042,7 +16373,7 @@
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 610,
+     "line": 607,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -17065,7 +16396,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3284,
+     "line": 3267,
      "value": "\"1\""
     }
    ],
@@ -17083,39 +16414,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_PF_PEER_COMPACT",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2830,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "58f852f100",
-   "first_date": "2026-10-02",
-   "since": "v0.1.40.1",
-   "last_commit": "b7760573ec",
-   "last_date": "2026-10-03",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_PF_PEER_CPU",
    "backends": [
     "cuda-hip"
@@ -17123,7 +16421,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 302,
+     "line": 299,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -17145,270 +16443,6 @@
    "status": "opt-in",
    "owner": "prefill",
    "note": "[reviewed] Release note: stays off; owner approved as opt-in. [rel212/BODY-FULL.md:175]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PF_PEER_F16",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2875,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "550159fc59",
-   "first_date": "2026-10-07",
-   "since": "v0.1.41",
-   "last_commit": "550159fc59",
-   "last_date": "2026-10-07",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PF_PEER_GATHER",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2878,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "da0024fed1",
-   "first_date": "2026-10-07",
-   "since": "v0.1.41",
-   "last_commit": "da0024fed1",
-   "last_date": "2026-10-07",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PF_PEER_HOST",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2776,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "81af1da0b1",
-   "first_date": "2026-10-07",
-   "since": "v0.1.41",
-   "last_commit": "81af1da0b1",
-   "last_date": "2026-10-07",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PF_PEER_OUT_PIPE",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2813,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "58f852f100",
-   "first_date": "2026-10-02",
-   "since": "v0.1.40.1",
-   "last_commit": "b7760573ec",
-   "last_date": "2026-10-03",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PF_PEER_RING",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2848,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "58f852f100",
-   "first_date": "2026-10-02",
-   "since": "v0.1.40.1",
-   "last_commit": "b7760573ec",
-   "last_date": "2026-10-03",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PF_PEER_STREAM",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2844,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "float",
-   "default_state": null,
-   "code_default": "0.35",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "58f852f100",
-   "first_date": "2026-10-02",
-   "since": "v0.1.40.1",
-   "last_commit": "b7760573ec",
-   "last_date": "2026-10-03",
-   "status": "default",
-   "owner": "prefill",
-   "note": "[auto] tunable with a built-in default 0.35 (src/prefill/prefill.cpp:2646)",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PF_PEER_SUMS",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2871,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "f4bfedc5ce",
-   "first_date": "2026-10-07",
-   "since": "v0.1.41",
-   "last_commit": "f4bfedc5ce",
-   "last_date": "2026-10-07",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PF_PEER_XSTREAM",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2798,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "59ea77e5b3",
-   "first_date": "2026-10-07",
-   "since": "v0.1.41",
-   "last_commit": "59ea77e5b3",
-   "last_date": "2026-10-07",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] not documented for users; code default not readable from the call",
    "retire_after": "",
    "retired_in": ""
   },
@@ -17453,7 +16487,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4190,
+     "line": 3826,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -17505,7 +16539,7 @@
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 548,
+     "line": 545,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -17609,7 +16643,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 1630,
+     "line": 1594,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -17675,7 +16709,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3144,
+     "line": 2887,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -17693,17 +16727,17 @@
    "launch_sets": [
     {
      "file": "strata_cli/launch/screens.py",
-     "line": 1387,
+     "line": 1336,
      "value": "1"
     },
     {
      "file": "strata_cli/launch/settings.py",
-     "line": 270,
+     "line": 267,
      "value": "1"
     },
     {
      "file": "strata_cli/launch/settings.py",
-     "line": 280,
+     "line": 277,
      "value": "1."
     }
    ],
@@ -17728,7 +16762,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3154,
+     "line": 2897,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -17868,7 +16902,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1197,
+     "line": 1049,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -17901,7 +16935,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1198,
+     "line": 1050,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -17934,13 +16968,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2463,
+     "line": 2317,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2515,
+     "line": 2352,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -17968,72 +17002,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_PIPELINE_AUTO",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/model.cpp",
-     "line": 1730,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "string",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "b03304d934",
-   "first_date": "2026-10-11",
-   "since": "v0.1.43",
-   "last_commit": "a6fd788567",
-   "last_date": "2026-10-29",
-   "status": "opt-in",
-   "owner": "program",
-   "note": "[auto] documented for users (docs/MULTI_GPU.md:183)",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PIPELINE_AUTO_MIN_STAGES",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/model.cpp",
-     "line": 1731,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "3",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "b03304d934",
-   "first_date": "2026-10-11",
-   "since": "v0.1.43",
-   "last_commit": "b03304d934",
-   "last_date": "2026-10-11",
-   "status": "default",
-   "owner": "program",
-   "note": "[auto] tunable with a built-in default 3 (src/program/generate.cpp:5681)",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_PLE_AUTO_MMAP",
    "backends": [
     "cuda-hip"
@@ -18041,7 +17009,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 1490,
+     "line": 1480,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18074,7 +17042,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 1440,
+     "line": 1430,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18107,19 +17075,19 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1513,
+     "line": 1363,
      "backend": "cuda-hip",
      "fn": "is_env_off"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1520,
+     "line": 1370,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 78,
+     "line": 75,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18142,7 +17110,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3288,
+     "line": 3271,
      "value": "\"1\""
     }
    ],
@@ -18200,7 +17168,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 192,
+     "line": 189,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18233,7 +17201,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 198,
+     "line": 195,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18305,7 +17273,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 1479,
+     "line": 1469,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18338,7 +17306,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 167,
+     "line": 161,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18547,7 +17515,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 469,
+     "line": 456,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18580,7 +17548,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 466,
+     "line": 463,
      "backend": "cuda-hip",
      "fn": "env_int"
     }
@@ -18614,13 +17582,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3726,
+     "line": 3453,
      "backend": "cuda",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 751,
+     "line": 709,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -18653,7 +17621,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4014,
+     "line": 3650,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18686,7 +17654,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4017,
+     "line": 3653,
      "backend": "cuda-hip",
      "fn": "env_tri"
     }
@@ -18719,13 +17687,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4863,
+     "line": 4555,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 283,
+     "line": 280,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18758,13 +17726,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 311,
+     "line": 308,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 314,
+     "line": 311,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18797,13 +17765,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6483,
+     "line": 6114,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 7635,
+     "line": 7193,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18836,13 +17804,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6496,
+     "line": 6127,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6815,
+     "line": 6438,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18875,7 +17843,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 5839,
+     "line": 5475,
      "backend": "cuda-hip",
      "fn": "env_tri"
     }
@@ -18908,7 +17876,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2628,
+     "line": 2585,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18941,7 +17909,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2640,
+     "line": 2597,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -18974,7 +17942,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4012,
+     "line": 3648,
      "backend": "cuda-hip",
      "fn": "env_tri"
     }
@@ -19007,7 +17975,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6715,
+     "line": 6340,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19040,7 +18008,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 5073,
+     "line": 4760,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19073,7 +18041,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6726,
+     "line": 6351,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19106,7 +18074,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6721,
+     "line": 6346,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19139,7 +18107,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6747,
+     "line": 6372,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19172,7 +18140,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6736,
+     "line": 6361,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19205,7 +18173,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6731,
+     "line": 6356,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19238,7 +18206,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 1647,
+     "line": 1611,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19326,7 +18294,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2992,
+     "line": 2716,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19359,7 +18327,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 418,
+     "line": 415,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19392,7 +18360,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4026,
+     "line": 3662,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19425,7 +18393,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4027,
+     "line": 3663,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19458,7 +18426,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 225,
+     "line": 222,
      "backend": "cuda-hip",
      "fn": "env_tri"
     }
@@ -19491,7 +18459,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 262,
+     "line": 259,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19524,13 +18492,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 3306,
+     "line": 2970,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 3347,
+     "line": 3011,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19564,19 +18532,19 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 1859,
+     "line": 1823,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 1873,
+     "line": 1837,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2033,
+     "line": 1997,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19609,13 +18577,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 227,
+     "line": 221,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 935,
+     "line": 893,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19681,13 +18649,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4745,
+     "line": 4381,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 7907,
+     "line": 7465,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -19808,39 +18776,6 @@
    "status": "research",
    "owner": "kernels/cuda",
    "note": "[auto] off unless set, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PW_WITH_BATCH",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/model.cpp",
-     "line": 1724,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "d17c52e7d0",
-   "first_date": "2026-10-31",
-   "since": "v0.2.10",
-   "last_commit": "d17c52e7d0",
-   "last_date": "2026-10-31",
-   "status": "opt-in",
-   "owner": "program",
-   "note": "[reviewed] Documented opt-in; advance but not default-on (RESULTS-NV2). [docs/DETAILS.md:1093]",
    "retire_after": "",
    "retired_in": ""
   },
@@ -20500,12 +19435,6 @@
      "line": 2973,
      "backend": "cuda-hip",
      "fn": "getenv"
-    },
-    {
-     "file": "src/models/qwen38/model.cpp",
-     "line": 2844,
-     "backend": "cuda-hip",
-     "fn": "getenv"
     }
    ],
    "parse": "flag",
@@ -20526,7 +19455,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3286,
+     "line": 3269,
      "value": "\"1\""
     }
    ],
@@ -20612,7 +19541,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3286,
+     "line": 3269,
      "value": "\"1\""
     }
    ],
@@ -20728,7 +19657,7 @@
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 283,
+     "line": 279,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -20768,7 +19697,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3288,
+     "line": 3271,
      "value": "\"1\""
     }
    ],
@@ -20794,13 +19723,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/mtp.cpp",
-     "line": 1034,
+     "line": 927,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 206,
+     "line": 202,
      "backend": "hip",
      "fn": "getenv"
     }
@@ -20901,7 +19830,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1640,
+     "line": 1490,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -20972,7 +19901,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4717,
+     "line": 4353,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -21005,13 +19934,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4718,
+     "line": 4354,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4719,
+     "line": 4355,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -21044,13 +19973,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4720,
+     "line": 4356,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4720,
+     "line": 4356,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -21083,7 +20012,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4729,
+     "line": 4365,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -21161,7 +20090,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 594,
+     "line": 591,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -21194,7 +20123,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 598,
+     "line": 595,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -21291,7 +20220,7 @@
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 314,
+     "line": 310,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -21344,13 +20273,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/mtp.cpp",
-     "line": 1235,
+     "line": 1128,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 2155,
+     "line": 2005,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -21528,7 +20457,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 677,
+     "line": 635,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -21628,13 +20557,13 @@
    "reads": [
     {
      "file": "src/core/remote_experts.cpp",
-     "line": 89,
+     "line": 88,
      "backend": "cuda",
      "fn": "getenv"
     },
     {
      "file": "src/core/remote_experts.cpp",
-     "line": 386,
+     "line": 381,
      "backend": "hip",
      "fn": "is_env_off"
     }
@@ -21667,7 +20596,7 @@
    "reads": [
     {
      "file": "src/core/remote_experts.cpp",
-     "line": 249,
+     "line": 248,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -21700,25 +20629,25 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2996,
+     "line": 2739,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 652,
+     "line": 610,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 679,
+     "line": 637,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "include/strata/models/qwen38/options.hpp",
-     "line": 393,
+     "line": 369,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -21734,7 +20663,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 7081,
+     "line": 7046,
      "value": "6"
     }
    ],
@@ -21759,13 +20688,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/options.cpp",
-     "line": 650,
+     "line": 608,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "include/strata/models/qwen38/options.hpp",
-     "line": 391,
+     "line": 367,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -21782,7 +20711,7 @@
    "launch_sets": [
     {
      "file": "strata_control/setup_config.py",
-     "line": 465,
+     "line": 444,
      "value": "\"0\""
     }
    ],
@@ -21807,7 +20736,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 408,
+     "line": 405,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -21857,7 +20786,7 @@
    "launch_sets": [
     {
      "file": "strata_control/setup_config.py",
-     "line": 462,
+     "line": 441,
      "value": "str(ROOT / \"tools\" / \"hip\")"
     }
    ],
@@ -22059,7 +20988,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 280,
+     "line": 276,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -22075,7 +21004,7 @@
    "launch_sets": [
     {
      "file": "strata_control/speed_switches.py",
-     "line": 44,
+     "line": 43,
      "value": "\"1.5\""
     }
    ],
@@ -22133,7 +21062,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 162,
+     "line": 158,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -22166,7 +21095,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 163,
+     "line": 159,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -22199,7 +21128,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1142,
+     "line": 994,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -22238,7 +21167,7 @@
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 5194,
+     "line": 4881,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -22259,7 +21188,7 @@
     },
     {
      "file": "setup.py",
-     "line": 3555,
+     "line": 3538,
      "value": "\"0\""
     }
    ],
@@ -22284,7 +21213,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 5080,
+     "line": 4767,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -22655,7 +21584,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 183,
+     "line": 179,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -22688,7 +21617,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 197,
+     "line": 193,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -22721,13 +21650,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4581,
+     "line": 4217,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 7895,
+     "line": 7453,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -22820,7 +21749,7 @@
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 8094,
+     "line": 7646,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -23016,7 +21945,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 4644,
+     "line": 4280,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -23130,7 +22059,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 2191,
+     "line": 2041,
      "backend": "cuda-hip",
      "fn": "is_env_off"
     }
@@ -23211,7 +22140,7 @@
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 345,
+     "line": 341,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -23251,14 +22180,14 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3288,
+     "line": 3271,
      "value": "\"1\""
     }
    ],
    "launch_reads": [],
    "doc_mentions": [
     "docs/ENGINE_NOTES.md:454",
-    "docs/MEMORY_MANAGER_PLAN.md:525"
+    "docs/MEMORY_MANAGER_PLAN.md:526"
    ],
    "first_commit": "200c35a8e9",
    "first_date": "2026-10-03",
@@ -23279,7 +22208,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 254,
+     "line": 250,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -23472,9 +22401,9 @@
    "launch_sets": [],
    "launch_reads": [],
    "doc_mentions": [],
-   "status": "",
-   "owner": "",
-   "note": "",
+   "status": "default",
+   "owner": "core",
+   "note": "[reviewed] on unless set to 0: the measured sm_60 default stack (src/core/nv_defaults.cpp:38); 0 turns the whole stack off",
    "retire_after": "",
    "retired_in": ""
   },
@@ -23667,9 +22596,9 @@
    "launch_sets": [],
    "launch_reads": [],
    "doc_mentions": [],
-   "status": "",
-   "owner": "",
-   "note": "",
+   "status": "default",
+   "owner": "core",
+   "note": "[reviewed] on unless set to 0: the measured sm_86 default stack (src/core/nv_defaults.cpp:23); 0 turns the whole stack off",
    "retire_after": "",
    "retired_in": ""
   },
@@ -23693,7 +22622,7 @@
     },
     {
      "file": "src/models/qwen38/kernels/cuda/verify_kernels.cu",
-     "line": 1199,
+     "line": 1191,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -23744,7 +22673,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 479,
+     "line": 473,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -23817,7 +22746,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 480,
+     "line": 474,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -23880,7 +22809,7 @@
    "doc_mentions": [
     "docs/ENGINE_NOTES.md:362",
     "docs/ENGINE_NOTES.md:618",
-    "docs/MEMORY_MANAGER_PLAN.md:637",
+    "docs/MEMORY_MANAGER_PLAN.md:639",
     "docs/UPSTREAM_PORTING.md:117"
    ],
    "first_commit": "6878105560",
@@ -24102,49 +23031,49 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 272,
+     "line": 266,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 1115,
+     "line": 1105,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2253,
+     "line": 2107,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3518,
+     "line": 3245,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3565,
+     "line": 3292,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3594,
+     "line": 3321,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4068,
+     "line": 3786,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4187,
+     "line": 3905,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24177,19 +23106,19 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2125,
+     "line": 1979,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2125,
+     "line": 1979,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2126,
+     "line": 1980,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24222,7 +23151,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 1116,
+     "line": 1106,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24255,7 +23184,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2099,
+     "line": 1953,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24288,13 +23217,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2109,
+     "line": 1963,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2109,
+     "line": 1963,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24327,13 +23256,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2128,
+     "line": 1982,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2128,
+     "line": 1982,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24366,7 +23295,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 376,
+     "line": 370,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24399,7 +23328,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2031,
+     "line": 1887,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24432,7 +23361,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2075,
+     "line": 1929,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24465,7 +23394,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 2100,
+     "line": 1954,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24498,7 +23427,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 575,
+     "line": 571,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24531,7 +23460,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 1416,
+     "line": 1406,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24564,7 +23493,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 1417,
+     "line": 1407,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24597,7 +23526,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2024,
+     "line": 1988,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24630,7 +23559,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 702,
+     "line": 699,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24663,7 +23592,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 243,
+     "line": 240,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24696,7 +23625,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2011,
+     "line": 1975,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24729,13 +23658,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 695,
+     "line": 692,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 1999,
+     "line": 1963,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24898,7 +23827,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6678,
+     "line": 6303,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24931,7 +23860,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 5206,
+     "line": 4893,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -24953,72 +23882,6 @@
    "status": "default",
    "owner": "program",
    "note": "[reviewed] Moves the cached-percent line of the default tail-skip rule. [phaseA-tests/review-1421.md:28]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_TAP_FILE",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/verify.cpp",
-     "line": 972,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "d1dec64362",
-   "first_date": "2026-10-21",
-   "since": "v0.2.3",
-   "last_commit": "f70368b996",
-   "last_date": "2026-11-02",
-   "status": "research",
-   "owner": "core",
-   "note": "[reviewed] \"the research dump\"; off, nothing captured. [code comment (DFlash2 taps)]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_TAP_LAYERS",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/models/qwen38/verify.cpp",
-     "line": 983,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "d1dec64362",
-   "first_date": "2026-10-21",
-   "since": "v0.2.3",
-   "last_commit": "7f97c35aca",
-   "last_date": "2026-10-21",
-   "status": "research",
-   "owner": "core",
-   "note": "[auto] not documented for users; code default not readable from the call",
    "retire_after": "",
    "retired_in": ""
   },
@@ -25063,13 +23926,13 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3831,
+     "line": 3558,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3831,
+     "line": 3558,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -25135,7 +23998,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 581,
+     "line": 577,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -25168,7 +24031,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 234,
+     "line": 231,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
@@ -25207,7 +24070,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4923,
+     "line": 4615,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -25423,7 +24286,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 568,
+     "line": 564,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -25965,25 +24828,25 @@
    "reads": [
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 5125,
+     "line": 4812,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 5138,
+     "line": 4825,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 3673,
+     "line": 3317,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 6419,
+     "line": 6050,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -26090,7 +24953,7 @@
    "launch_sets": [
     {
      "file": "setup.py",
-     "line": 3287,
+     "line": 3270,
      "value": "\"1\""
     }
    ],
@@ -26253,7 +25116,7 @@
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 3040,
+     "line": 2783,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -26286,7 +25149,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1267,
+     "line": 1119,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -26319,7 +25182,7 @@
    "reads": [
     {
      "file": "src/core/expert_source.cpp",
-     "line": 5646,
+     "line": 5643,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -26352,7 +25215,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 3299,
+     "line": 3066,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -26392,7 +25255,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 301,
+     "line": 297,
      "backend": "hip",
      "fn": "is_env_on"
     }
@@ -26431,7 +25294,7 @@
     },
     {
      "file": "src/models/qwen38/model.cpp",
-     "line": 4015,
+     "line": 3742,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -26464,7 +25327,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 103,
+     "line": 99,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -26503,13 +25366,13 @@
     },
     {
      "file": "src/core/expert_source.cpp",
-     "line": 6085,
+     "line": 6082,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1304,
+     "line": 1156,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -26542,7 +25405,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 365,
+     "line": 361,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -26577,25 +25440,25 @@
    "reads": [
     {
      "file": "src/models/qwen38/mtp.cpp",
-     "line": 986,
+     "line": 879,
      "backend": "cuda-hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 2790,
+     "line": 2557,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 2818,
+     "line": 2585,
      "backend": "hip",
      "fn": "getenv"
     },
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 2829,
+     "line": 2596,
      "backend": "cuda",
      "fn": "getenv"
     }
@@ -26628,7 +25491,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 1141,
+     "line": 993,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -26661,7 +25524,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 171,
+     "line": 167,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -26694,7 +25557,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/verify.cpp",
-     "line": 304,
+     "line": 300,
      "backend": "cuda-hip",
      "fn": "is_env_on"
     }
@@ -26966,7 +25829,7 @@
    "reads": [
     {
      "file": "src/models/qwen38/prefill/prefill.cpp",
-     "line": 2103,
+     "line": 2067,
      "backend": "cuda-hip",
      "fn": "getenv"
     }

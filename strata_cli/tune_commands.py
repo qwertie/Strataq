@@ -1,5 +1,5 @@
-"""`strata tune auto` (the real tuner) and `strata presets` (the saved results), for the Terminal and, through JSON output
-and a status file, for the desktop app. The same code and the same store serve both."""
+"""`strata tune auto` (the real tuner) and `strata presets` (the saved results), for a person at the Terminal and, through
+JSON output and a status file, for `strata launch`'s tuning step. The same code and the same store serve both."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def add_tune_auto(tune_sp: argparse._SubParsersAction) -> None:
     p.add_argument("--no-quiet-check", action="store_true", help="do not wait for other engines or a busy CPU")
     p.add_argument("--serve-dir", default=None, help="the folder that holds strata_server/ (default: this installation)")
     p.add_argument("--work-dir", default=None, help="where the run's configs and logs go (default: a temp folder)")
-    p.add_argument("--status-file", default=None, help="progress as JSON, rewritten at every step (for the desktop app)")
+    p.add_argument("--status-file", default=None, help="progress as JSON, rewritten at every step (`strata launch` follows it)")
     p.add_argument("--boot-timeout", type=float, default=900.0)
     p.add_argument("--output", choices=("human", "json"), default="human")
 

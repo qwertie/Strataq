@@ -1,5 +1,5 @@
 """packaging/make_model_release.py: the model-release plan is a dry run, case A leaves the engines alone, case B ships the engine of the new shape as its own
-component (the Strata engine, the Controls and the app are not rebuilt), and the steps that need the release key only print a placeholder.
+component (the Strata engine and the Controls are not rebuilt), and the steps that need the release key only print a placeholder.
 
     python -m unittest tests.terminal.test_make_model_release
 """
@@ -22,9 +22,7 @@ import qwen4_intake as Q  # noqa: E402
 PREV = {"strata-engine-0.1.57-linux-x86_64-cuda-cuda13.tar.gz": 720_000_000, "strata-engine-0.1.57-linux-x86_64-hip.tar.gz": 187_000_000,
         "strata-engine-0.1.57-windows-x86_64-cuda-cuda13.zip": 900_000_000,
         "strata-dsv41-0.1.57-linux-x86_64-cuda-cuda13.tar.gz": 445_000_000, "strata-control-0.1.57-linux-x86_64.tar.gz": 99_000_000,
-        "Strata-0.2.11-windows-x64-setup.exe": 80_000_000, "Strata-0.2.11-windows-x64-setup.exe.sig": 400,
-        "Strata-0.2.11-linux-x86_64.AppImage": 90_000_000,
-        "strata-feed.json": 9000, "strata-feed.json.sig": 200, "SHA256SUMS.txt": 5000, "latest.json": 1500, "install.sh": 9000}
+        "strata-feed.json": 9000, "strata-feed.json.sig": 200, "SHA256SUMS.txt": 5000, "install.sh": 9000}
 
 
 def make_prev(d: Path) -> Path:
@@ -66,7 +64,7 @@ class Plan(unittest.TestCase):
     def base(self, rep, *extra):
         return ["--intake", str(rep), "--id", "m1", "--app-version", "0.2.12", "--sequence", "122", "--prev-upload", str(self.prev), *extra]
 
-    def test_case_a_is_feed_and_app_only(self):
+    def test_case_a_is_feed_only(self):
         code, out, err = run(self.base(self.a, "--json", "--revision", "abc", "--hf-repo", "x/y"))
         self.assertEqual(code, 0, err)
         p = json.loads(out)
@@ -74,22 +72,12 @@ class Plan(unittest.TestCase):
         names = {c["name"] for c in p["changed"]}
         self.assertFalse(any(n.startswith(("strata-engine-", "strata-dsv41-", "strata-control-")) for n in names))
         self.assertTrue({"strata-feed.json", "strata-feed.json.sig", "SHA256SUMS.txt"} <= names)
-        # G12 of the Q4-P8 rehearsal: a feed model needs no app rebuild (the app lists it from the feed), so case A plans no app step
-        self.assertFalse(names & {"latest.json", "Strata-0.2.12-windows-x64-setup.exe"})
-        self.assertFalse(any("App text" in s["what"] for s in p["steps"]))
         kept = {k["name"] for k in p["kept"]}
-        self.assertTrue({n for n in PREV if n.startswith(("strata-engine-", "strata-dsv41-", "strata-control-", "Strata-"))} <= kept)
+        self.assertTrue({n for n in PREV if n.startswith(("strata-engine-", "strata-dsv41-", "strata-control-"))} <= kept)
         self.assertFalse(any("Build the Qwen engine" in s["what"] for s in p["steps"]))
         self.assertEqual(p["entry"]["family"], "qwen35moe")
         self.assertEqual(p["entry"]["hf"], {"repo": "x/y", "revision": "abc"})
         self.assertIs(p["entry"]["pictures"], False)               # no picture reader next to this set
-
-    def test_case_a_with_app_plans_the_app_steps_when_asked(self):
-        code, out, err = run(self.base(self.a, "--json", "--with-app"))
-        self.assertEqual(code, 0, err)
-        p = json.loads(out)
-        self.assertTrue({"latest.json", "Strata-0.2.12-windows-x64-setup.exe"} <= {c["name"] for c in p["changed"]})
-        self.assertTrue(any("App text" in s["what"] for s in p["steps"]))
 
     def test_the_plan_names_the_boxes_of_the_rehearsal(self):
         code, out, err = run(self.base(self.a, "--case", "B", "--engine-version", "0.1.58", "--shape", "q4_lite"))
@@ -111,8 +99,8 @@ class Plan(unittest.TestCase):
         self.assertFalse(any(n.startswith(("strata-engine-", "strata-control-", "strata-dsv41-")) for n in names), "the Strata engine and the Controls are not rebuilt")
         self.assertFalse(any("0.1.57" in n for n in names))
         kept = {k["name"] for k in p["kept"]}
-        self.assertTrue({n for n in PREV if n.startswith(("strata-engine-", "strata-dsv41-", "strata-control-", "Strata-"))} <= kept)
-        self.assertFalse(any("Controls: pack" in s["what"] or "App text" in s["what"] for s in p["steps"]))
+        self.assertTrue({n for n in PREV if n.startswith(("strata-engine-", "strata-dsv41-", "strata-control-"))} <= kept)
+        self.assertFalse(any("Controls: pack" in s["what"] for s in p["steps"]))
         self.assertTrue(any("--shape q4_lite" in c for s in p["steps"] for c in s["commands"]))
         self.assertTrue(any("--shapes <shape-entries>" in c for s in p["steps"] for c in s["commands"]))
         self.assertEqual(p["entry"]["family"], "qwen35moe", "the family changes only for a qwen4exp model")

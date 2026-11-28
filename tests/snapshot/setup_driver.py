@@ -14,6 +14,7 @@ import io
 import os
 import sys
 from argparse import Namespace
+from pathlib import Path
 from unittest import mock
 
 from .world import ROOT, World, context_for
@@ -27,7 +28,9 @@ class ProbeLib:
         self.WIN = m.os == "windows"
         self.CONTROL = False
         suffix = ".exe" if self.WIN else ""
-        self.EXE, self.VEXE = "strata" + suffix, "strata-vision" + suffix          # the simulated class decides, not the host the test runs on
+        #: setup's program-name globals, named as on the simulated class, not on the host the test runs on
+        self.programs = {name: Path(getattr(setup_module, name)).stem + suffix for name in ("Q38EXE", "Q36EXE", "DS41EXE", "VEXE", "HVEXE")}
+        self.VEXE = self.programs["VEXE"]
         self._over = {
             "gpu_compute_mode": lambda index: "Default",
             "gpu_drives_display": lambda g: False,
@@ -40,7 +43,7 @@ class ProbeLib:
             "setup_images": lambda a, gpu, hip, models_dir: None,
             "hipblaslt_table": lambda arch, lib_dirs, ver=None, extra_dirs=(): None,
             "vision_threads": lambda logical=None: 8,
-            "engine_exe": lambda eng, new=None: str(eng / self.EXE),      # the simulated engine has no new engine
+            "engine_exe": lambda eng, program=self.programs["Q38EXE"]: str(Path(eng) / (Path(program).stem + suffix)),
         }
 
     def __getattr__(self, name):
@@ -62,7 +65,7 @@ def _args(world: World, ctx: int) -> Namespace:
         family=s.family, model=s.model, context=ctx, rope_scaling=None, rope_scale=None, kv=None, vision=None, vision_tokens=None, images=None,
         experimental_speed_projection=None, port=None, gpu=None, gpus=None, gpu_roles=None, layer_split=None, no_remote_expert_opt=False, host=None,
         api_key=None, browser=None, data_dir=None, models_dir=str(world.models), gguf_dir=None, yes=True, no_start=True, draft_vocab=None, low_ram="auto",
-        resident_budget_gib=None, vram_reserve_mib=None, mtp=None, drafter=None, parallel=None, replicas=None, replica_profile=False, kv_streaming="auto",
+        resident_budget_gib=None, vram_reserve_mib=None, mtp=None, parallel=None, replicas=None, replica_profile=False, kv_streaming="auto",
         backend=None, cuda=None, _roles=None, setup=False, update=False, calibrate=False)
 
 
@@ -145,7 +148,7 @@ def drive_setup(world: World) -> dict:
     import setup
     notes = io.StringIO()
     lib = ProbeLib(setup, world)
-    with world.patched(), mock.patch.object(os, "cpu_count", lambda: 16), mock.patch.object(setup, "WIN", lib.WIN),             mock.patch.object(setup, "EXE", lib.EXE), mock.patch.object(setup, "VEXE", lib.VEXE):     # setup's own helpers read these globals: the class decides, not the host
+    with world.patched(), mock.patch.object(os, "cpu_count", lambda: 16), mock.patch.object(setup, "WIN", lib.WIN),             mock.patch.multiple(setup, **lib.programs):     # setup's own helpers read these globals: the class decides, not the host
         cfg, summary = (_dsv41 if world.mset.multi_file else _qwen)(setup, world, lib, notes)
         eng = engine_start(world, dict(cfg))
     return {"entry": "setup", "command": command, "inputs": summary, "config_file": cfg, "engine": eng,

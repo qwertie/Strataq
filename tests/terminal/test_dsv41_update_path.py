@@ -1,10 +1,10 @@
-"""An installed DeepSeek engine is updated by the explicit update (`strata update`, the app's "Update engine"), never by a start.
+"""An installed DeepSeek engine is updated by the explicit update (`strata update`), never by a start.
 
 * update_dsv41: the signed feed's newer package of the SAME kind is downloaded, checked, put next to the old one, started once, and only then every saved
   run config is pointed at it; older folders go, except one a running engine uses; nothing installed means nothing happens.
 * The start (strata_control/runtime.py) only repairs: a run config whose folder an update removed is pointed at the newest installed package, locally.
   It makes no request of any kind.
-* The check keeps what is newer (engine_component.cached_offers) for the app's one card; `strata launch`'s own upgrade is not touched here.
+* The check keeps what is newer (engine_component.cached_offers) for the update notice; `strata launch`'s own upgrade is not touched here.
 """
 from __future__ import annotations
 
@@ -137,24 +137,21 @@ class UpdatePath(_up.Upgrade):
         self.publish("0.1.49.1")
         ctx = self.ctx()
         with mock.patch.object(updater, "update_engine", return_value={"component": "engine", "status": "current", "changed": False}), \
-                mock.patch.object(updater, "decide_engine", return_value={"status": "current", "offered": None, "installed": None}), \
-                mock.patch.object(updater, "decide_app", return_value={"status": "not-in-feed", "offered": None}):
+                mock.patch.object(updater, "decide_engine", return_value={"status": "current", "offered": None, "installed": None}):
             out = updater.run_update(ctx, engine=True, control=False)
         names = [r["component"] for r in out["results"]]
         self.assertEqual(names, ["engine", "dsv41"], out)
         self.assertEqual(out["results"][1]["status"], "updated")
-        with mock.patch.object(updater, "decide_engine", return_value={"status": "current", "offered": None, "installed": None}), \
-                mock.patch.object(updater, "decide_app", return_value={"status": "not-in-feed", "offered": None}):
+        with mock.patch.object(updater, "decide_engine", return_value={"status": "current", "offered": None, "installed": None}):
             out = updater.run_update(ctx, engine=False, control=False)
         self.assertEqual(out["results"], [], "--no-engine leaves the DeepSeek engine alone too")
 
-    # ---- what the check keeps for the app's one card --------------------------------------------------------------------
-    def test_the_check_says_a_newer_deepseek_engine_is_there_and_the_app_can_read_it_without_the_network(self):
+    # ---- what the check keeps for the update notice ---------------------------------------------------------------------
+    def test_the_check_says_a_newer_deepseek_engine_is_there_and_the_notice_can_read_it_without_the_network(self):
         self.publish("0.1.49.1")
         ctx = self.ctx()
         with mock.patch.object(updater, "decide_engine", return_value={"status": "current", "offered": None, "installed": None}), \
-                mock.patch.object(updater, "decide_control", return_value={"status": "not-in-feed", "installed": None, "offered": None}), \
-                mock.patch.object(updater, "decide_app", return_value={"status": "not-in-feed", "offered": None}):
+                mock.patch.object(updater, "decide_control", return_value={"status": "not-in-feed", "installed": None, "offered": None}):
             report = updater.check(ctx)
         self.assertEqual((report["dsv41"]["status"], report["dsv41"]["installed"], report["dsv41"]["offered"]), ("available", "0.1.49", "0.1.49.1"))
         with mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("network")), mock.patch.object(socket, "create_connection", side_effect=AssertionError("network")):

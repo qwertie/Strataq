@@ -6,15 +6,16 @@ Three kinds of place hold a model's run config (`strata-<tag>.json`), looked at 
 * explicit   STRATA_INSTALL_DIR or an --install-dir argument (it is the only place looked at);
 * here       the Terminal's own folder, when it has run configs (a source checkout that ran setup);
 * remembered the folders earlier Strata installs wrote into the user's settings file (``installs``);
-* app        the desktop app's install folder, which the Terminal shares: ``<components>/../install`` (Windows
-             ``%LOCALAPPDATA%\\Strata\\install``, Linux and Mac ``$XDG_DATA_HOME/strata/install``, default ``~/.local/share/strata/install``).
-             The app's own settings file (``app-settings.json`` beside it) names its data folder and installs.
+* default    the install folder beside the components folder, where a new model is installed: ``<components>/../install``
+             (Windows ``%LOCALAPPDATA%\\Strata\\install``, Linux ``$XDG_DATA_HOME/strata/install``, default
+             ``~/.local/share/strata/install``).
 
-The desktop app itself (it sets STRATA_SETTINGS_FILE) never adopts an older command-line install, so for it only the explicit place, its
-own install folder and its own settings file count. Everything here is read-only: nothing is created, copied or moved.
+A process given a settings file of its own (STRATA_SETTINGS_FILE, as the tests do) never adopts a folder found
+elsewhere: no ``Documents/Strata`` and no sibling Strata folders. Everything here is read-only: nothing is created,
+copied or moved.
 
-The data folder (models, packs, mtp) is found the same way: the person's own setting first, then the app's data folder, then a
-``Documents/Strata`` folder that holds models, then the default beside the install. A model that is installed tells where it really is
+The data folder (models, packs, mtp) is found the same way: the person's own setting first, then a ``Documents/Strata``
+folder that holds models, then the default beside the install. A model that is installed tells where it really is
 (its run config names its files), which beats all of these.
 """
 
@@ -49,23 +50,19 @@ def components_dir(environ=None, *, windows: bool | None = None, home: Path | No
     return engine_component.components_dir(environ, windows=windows, home=home)
 
 
-def app_install_dir(environ=None, *, windows: bool | None = None, home: Path | None = None) -> Path:
-    """The install folder the desktop app uses and the Terminal shares (beside the components folder)."""
+def default_install_dir(environ=None, *, windows: bool | None = None, home: Path | None = None) -> Path:
+    """Gets the folder a new model's run config goes in when no other install has any (beside the components folder)."""
     return components_dir(environ, windows=windows, home=home).parent / "install"
 
 
-def app_settings_file(environ=None, *, windows: bool | None = None, home: Path | None = None) -> Path:
-    """The desktop app's own settings file (control-runtime.mjs: beside its components folder)."""
-    return components_dir(environ, windows=windows, home=home).parent / "app-settings.json"
-
-
-def in_app_mode(environ=None) -> bool:
-    """True inside the desktop app's own processes: they set STRATA_SETTINGS_FILE and never adopt an older install."""
+def has_own_settings_file(environ=None) -> bool:
+    """Tells whether STRATA_SETTINGS_FILE gives this process a settings file of its own; such a process never adopts a
+    folder found elsewhere (Documents/Strata, setup's sibling Strata folders)."""
     return bool((os.environ if environ is None else environ).get("STRATA_SETTINGS_FILE"))
 
 
 def documents_dirs(environ=None, *, windows: bool | None = None, home: Path | None = None) -> list[Path]:
-    """The person's Documents folder(s): where the desktop app keeps ``Strata`` by default (Windows may redirect Documents to OneDrive)."""
+    """The person's Documents folder(s), where a ``Strata`` folder may hold models (Windows may redirect Documents to OneDrive)."""
     environ = os.environ if environ is None else environ
     home = _home(home)
     out: list[Path] = []
@@ -124,7 +121,7 @@ def _installs_in(settings: dict) -> list[Path]:
 
 
 def own_settings_file(environ=None, *, windows: bool | None = None, home: Path | None = None) -> Path:
-    """The settings file this process uses: the app's (STRATA_SETTINGS_FILE), else the command-line Strata's (%APPDATA% / ~/.config)."""
+    """The settings file this process uses: STRATA_SETTINGS_FILE, else the per-user one (%APPDATA% / ~/.config)."""
     environ = os.environ if environ is None else environ
     if environ.get("STRATA_SETTINGS_FILE"):
         return Path(environ["STRATA_SETTINGS_FILE"])
@@ -158,7 +155,7 @@ def config_files(directory: Path) -> list[Path]:
 @dataclass
 class Place:
     path: Path
-    source: str                     # explicit | here | remembered | app
+    source: str                     # explicit | datadir | here | remembered | default
     configs: int = 0
 
 
@@ -178,9 +175,7 @@ def places(*, here: Path | None = None, explicit: str | os.PathLike | None = Non
         cands.append((Path(here), "here"))
     own = own_settings_file(environ, windows=windows, home=home)
     cands += [(p, "remembered") for p in _installs_in(_read_json(own))]
-    cands += [(app_install_dir(environ, windows=windows, home=home), "app")]
-    if not in_app_mode(environ):
-        cands += [(p, "app") for p in _installs_in(_read_json(app_settings_file(environ, windows=windows, home=home)))]
+    cands += [(default_install_dir(environ, windows=windows, home=home), "default")]
     out: list[Place] = []
     seen: set[str] = set()
     for path, source in cands:
@@ -199,95 +194,33 @@ def places(*, here: Path | None = None, explicit: str | os.PathLike | None = Non
 
 def find_install(*, here: Path | None = None, explicit: str | os.PathLike | None = None, environ=None, windows: bool | None = None,
                  home: Path | None = None) -> tuple[Path, str]:
-    """(the main install folder, how it was found). With no run config anywhere it is the app's folder, which is where a new model is
-    installed (``default``)."""
+    """(the main install folder, how it was found). With no run config anywhere it is `default_install_dir`."""
     found = places(here=here, explicit=explicit, environ=environ, windows=windows, home=home)
     if found:
         return found[0].path, found[0].source
     environ = os.environ if environ is None else environ
-    return app_install_dir(environ, windows=windows, home=home), "default"
+    return default_install_dir(environ, windows=windows, home=home), "default"
 
 
 # ----------------------------------------------------------------------------------------------- the data folder
-
-def _data_dir_entry(file: Path) -> tuple[str, float] | None:
-    """(the data folder a settings file names, when it was last changed): ``data_dir_at`` (seconds), else the file's own time."""
-    data = _read_json(file)
-    folder = data.get("data_dir")
-    if not isinstance(folder, str) or not folder:
-        return None
-    at = data.get("data_dir_at")
-    if isinstance(at, bool) or not isinstance(at, (int, float)) or at <= 0:
-        try:
-            at = file.stat().st_mtime
-        except OSError:
-            at = 0.0
-    return folder, float(at)
-
-
-def _same(a: str, b: str) -> bool:
-    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
-
-
-def _write_data_dir(file: Path, folder: str, at: float) -> bool:
-    """Merge the data folder and its time into a settings file (atomic). False when the disk refuses; never raises."""
-    try:
-        current = _read_json(file)
-        current["data_dir"], current["data_dir_at"] = folder, at
-        file.parent.mkdir(parents=True, exist_ok=True)
-        temp = file.with_name(f"{file.name}.{os.getpid()}.tmp")
-        temp.write_text(json.dumps(current, indent=1), encoding="utf-8")
-        os.replace(temp, file)
-        return True
-    except OSError:
-        return False
-
-
-def sync_data_dir(*, environ=None, windows: bool | None = None, home: Path | None = None) -> tuple[Path, str] | None:
-    """One models folder for the Terminal and the desktop app. The Terminal's settings file and the app's (``app-settings.json``) each name
-    a data folder; when they disagree the one changed last wins and the other file is updated. Nothing is moved. Returns (folder, source of
-    the winner) or None when neither names one. The app's own processes never call this (the app syncs from its host)."""
-    environ = os.environ if environ is None else environ
-    if in_app_mode(environ):
-        return None
-    mine_file = own_settings_file(environ, windows=windows, home=home)
-    app_file = app_settings_file(environ, windows=windows, home=home)
-    mine, app = _data_dir_entry(mine_file), _data_dir_entry(app_file)
-    if mine and app and not _same(mine[0], app[0]):
-        newer, older_file, source = (mine, app_file, "settings") if mine[1] >= app[1] else (app, mine_file, "app")
-        if source == "app" and not Path(app[0]).is_dir():          # a disk that is not connected is never adopted
-            return Path(mine[0]), "settings"
-        _write_data_dir(older_file, newer[0], newer[1])
-        return Path(newer[0]), source
-    if mine:
-        return Path(mine[0]), "settings"
-    return (Path(app[0]), "app") if app else None
-
 
 def data_dir_choices(*, environ=None, windows: bool | None = None, home: Path | None = None) -> list[tuple[Path, str]]:
     """Candidate data folders with their source, best first (not checked for existence)."""
     environ = os.environ if environ is None else environ
     out: list[tuple[Path, str]] = []
-    own = _data_dir_entry(own_settings_file(environ, windows=windows, home=home))
-    app = None if in_app_mode(environ) else _data_dir_entry(app_settings_file(environ, windows=windows, home=home))
-    entries = [(Path(e[0]), src, e[1]) for e, src in ((own, "settings"), (app, "app")) if e]
-    entries.sort(key=lambda x: -x[2])                              # the folder changed last first, whichever file it is in
-    out.extend((p, src) for p, src, _ in entries)
-    if not in_app_mode(environ):
+    own = _read_json(own_settings_file(environ, windows=windows, home=home)).get("data_dir")
+    if isinstance(own, str) and own:
+        out.append((Path(own), "settings"))
+    if not has_own_settings_file(environ):
         for d in documents_dirs(environ, windows=windows, home=home):
             out.append((d / "Strata", "documents"))
     return out
 
 
 def data_dir(default: Path, *, environ=None, windows: bool | None = None, home: Path | None = None) -> tuple[Path, str]:
-    """(the data folder, source). Of the Terminal's own setting and the app's folder the one changed last wins (the other file is brought up
-    to date); then a ``Documents/Strata`` that holds models; else `default`."""
-    sync_data_dir(environ=environ, windows=windows, home=home)
-    choices = data_dir_choices(environ=environ, windows=windows, home=home)
-    for path, source in choices:
+    """(the data folder, source): the person's own setting; then a ``Documents/Strata`` that holds models; else `default`."""
+    for path, source in data_dir_choices(environ=environ, windows=windows, home=home):
         if source == "settings":
-            return path, source
-        if source == "app" and path.is_dir():
             return path, source
         if source == "documents" and _holds_models(path):
             return path, source
@@ -387,10 +320,9 @@ def data_dir_of(fp: Footprint) -> Path | None:
 
 
 def remembered_data_dirs(*, environ=None, windows: bool | None = None, home: Path | None = None) -> list[Path]:
-    """The data folders the Terminal's settings and the desktop app name (best first), read only: for a look at what is prepared where setup would put new files.
-    Unlike ``data_dir`` this writes nothing (no settings sync)."""
+    """The data folder the person's settings name, if it exists, read only: for a look at what is prepared where setup would put new files."""
     try:
-        return [p for p, source in data_dir_choices(environ=environ, windows=windows, home=home) if source in ("settings", "app") and p.is_dir()]
+        return [p for p, source in data_dir_choices(environ=environ, windows=windows, home=home) if source == "settings" and p.is_dir()]
     except OSError:
         return []
 
@@ -411,7 +343,7 @@ def mtp_layer_in(*folders: "str | os.PathLike[str] | None") -> Path | None:
 
 def prepared_beside(gguf: Path, data_dirs: Iterable[str | os.PathLike[str] | None] = ()) -> dict:
     """What was already prepared for a model file that sits in ``<data>/Models/<tag>/`` (or ``<data>/models/<tag>/``): its pack, the draft
-    layer and the picture reader, found by the layout setup and the desktop app both use. Reads only; absent items are None.
+    layer and the picture reader, found by the layout setup uses. Reads only; absent items are None.
 
     ``data_dirs`` are the data folders the launch names besides that layout (``--data-dir``, the remembered one): setup writes the draft layer to
     ``<data-dir>/mtp/rt`` and the pack to ``<data-dir>/packs/<tag>``, and a model folder outside the data folder must not hide them (a second 5.2 GB fetch).

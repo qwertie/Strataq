@@ -1,4 +1,4 @@
-"""The keys shipped with a release build (strata_common/update_keys.json): the release feed key and the Tauri app key are there,
+"""The keys shipped with a release build (strata_common/update_keys.json): the release feed keys are there,
 the tester / local-test keys are not (they come with STRATA_UPDATE_TRUSTED_KEYS), and a feed is verified against them."""
 from __future__ import annotations
 
@@ -25,11 +25,6 @@ class ShippedKeys(unittest.TestCase):
         self.assertEqual(list(keys), [RELEASE_KEY_ID, FORK_KEY_ID])   # only release keys: no tester or local-test key in a release build
         for key_id in keys:
             self.assertEqual(signing.key_id_of(keys[key_id]), key_id)
-
-    def test_the_app_key_is_a_real_minisign_key(self):
-        shipped = json.loads((ROOT / "strata_common" / "update_keys.json").read_text(encoding="utf-8-sig"))["app_minisign_public"]
-        key_id, public = signing.minisign_public(shipped)         # parses as a real Ed25519 minisign key, not the placeholder
-        self.assertEqual(len(public), 32)
 
     def test_a_feed_signed_by_another_key_is_refused_and_a_tester_key_works_through_the_override(self):
         other = fx.make_key()

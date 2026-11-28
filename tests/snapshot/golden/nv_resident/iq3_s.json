@@ -26,7 +26,7 @@
     "engine_version": "0.2.12"
    },
    "config_file": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "args": [
      "--pack",
      "<ROOT>/data/packs/iq3_s",
@@ -73,7 +73,7 @@
     }
    },
    "engine": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "argv": [
      "--pack",
      "<ROOT>/data/packs/iq3_s",
@@ -87,8 +87,6 @@
      "auto",
      "--prefill",
      "auto",
-     "--spec",
-     "4",
      "--spec-min-p",
      "0.5",
      "--mtp",
@@ -97,17 +95,13 @@
      "131072",
      "--kv",
      "int8",
-     "--ple-io",
-     "ram",
-     "--kv-resident",
-     "32768",
      "--vision",
      "--vram-reserve-mib",
      "700"
     ],
     "env_set": {},
     "notes": [
-     "[strata] Drafting: MTP (the DFlash2 drafter isn't downloaded yet)"
+     "[strata] paged engine: leaving out unsupported settings: --spec 4 --ple-io ram --kv-resident 32768"
     ]
    },
    "setup_says": [
@@ -118,15 +112,6 @@
   "launch": {
    "entry": "launch",
    "command": "strata launch --model IQ3_S --yes --no-tui --context 131072",
-   "fetches": [
-    {
-     "call": "ensure_tuned",
-     "file": "qwen3.8-flash-next-dflash2.strata1.q4_0-selq4.pack",
-     "variant": "selq4",
-     "backend": "cuda",
-     "gb": 0.34
-    }
-   ],
    "setup_args": [
     "--yes",
     "--no-start",
@@ -140,13 +125,11 @@
     "gpu",
     "--experimental-speed-projection",
     "off",
-    "--drafter",
-    "dflash2",
     "--data-dir",
     "<ROOT>/data"
    ],
    "config_file": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "args": [
      "--pack",
      "<ROOT>/data/packs/iq3_s",
@@ -184,7 +167,7 @@
     "args_written": "=args"
    },
    "engine": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "argv": [
      "--pack",
      "<ROOT>/data/packs/iq3_s",
@@ -198,26 +181,18 @@
      "auto",
      "--prefill",
      "auto",
+     "--spec-min-p",
+     "0.5",
+     "--mtp",
+     "<ROOT>/data/mtp/rt",
      "--max-context",
      "131072",
      "--kv",
-     "int8",
-     "--draft",
-     "dflash2",
-     "--draft-model",
-     "<ROOT>/data/dflash2/qwen3.8-flash-next-dflash2.strata1.q4_0-selq4.pack",
-     "--draft-fallback",
-     "none",
-     "--mtp-draft-vocab",
-     "<ROOT>/data/mtp/rt/draft_vocab.bin",
-     "--spec",
-     "8",
-     "--draft-conf",
-     "0.55"
+     "int8"
     ],
     "env_set": {},
     "notes": [
-     "[strata] drafting: DFlash2 alone (--draft dflash2, --draft-conf 0.55)"
+     "[strata] paged engine: leaving out unsupported settings: --spec 4"
     ]
    }
   }

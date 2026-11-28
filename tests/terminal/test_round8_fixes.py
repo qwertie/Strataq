@@ -258,12 +258,12 @@ class InstallIsNotHijacked(unittest.TestCase):
     def test_an_earlier_install_outside_the_chosen_data_folder_is_named(self):
         with Home() as h:
             cat = mock.Mock()
-            cat.places = [mock.Mock(path=h.base / "old" / "Strata", source="app", configs=2)]
+            cat.places = [mock.Mock(path=h.base / "old" / "Strata", source="remembered", configs=2)]
             words = R.install_isolation_words(cat, str(h.base / "scratch"))
             self.assertEqual(len(words), 1)
             self.assertIn("earlier install", words[0])
             self.assertIn(str(h.base / "old" / "Strata"), words[0])
-            cat.places = [mock.Mock(path=h.base / "scratch" / "install", source="app", configs=1)]
+            cat.places = [mock.Mock(path=h.base / "scratch" / "install", source="default", configs=1)]
             self.assertEqual(R.install_isolation_words(cat, str(h.base / "scratch")), [])
             cat.places = [mock.Mock(path=h.base / "old", source="explicit", configs=1)]
             self.assertEqual(R.install_isolation_words(cat, str(h.base / "scratch")), [])
@@ -320,7 +320,7 @@ class UpdateCheckNamesTheChoice(unittest.TestCase):
                   "engine": {"status": "install", "installed": None, "download_bytes": 5 << 20,
                              "offered": {"version": "0.1.47", "platform": "linux-x86_64", "backend": "cuda", "variant": "cuda12"},
                              "reasons": ["0.1.47 linux-x86_64-cuda-cuda13 needs driver 580"], "note": None},
-                  "control": {"status": "current", "installed": "0.1.47", "offered": None}, "app": {"status": "not-in-feed"}}
+                  "control": {"status": "current", "installed": "0.1.47", "offered": None}}
         out = io.StringIO()
         with redirect_stdout(out):
             update_cmd._print_check(report)

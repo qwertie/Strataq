@@ -26,7 +26,7 @@
     "engine_version": "0.2.12"
    },
    "config_file": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "args": [
      "--pack",
      "<ROOT>/data/packs/ud_iq4_xs_v31",
@@ -62,7 +62,7 @@
     "backend": "hip"
    },
    "engine": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "argv": [
      "--pack",
      "<ROOT>/data/packs/ud_iq4_xs_v31",
@@ -74,8 +74,6 @@
      "auto",
      "--prefill",
      "auto",
-     "--spec",
-     "4",
      "--spec-min-p",
      "0.5",
      "--mtp",
@@ -83,14 +81,12 @@
      "--max-context",
      "131072",
      "--kv",
-     "int8",
-     "--ple-io",
-     "ram",
-     "--kv-resident",
-     "32768"
+     "int8"
     ],
     "env_set": {},
-    "notes": []
+    "notes": [
+     "[strata] paged engine: leaving out unsupported settings: --spec 4 --ple-io ram --kv-resident 32768"
+    ]
    },
    "setup_says": [
     "[!]  this engine has no picture reader: pictures off",
@@ -102,7 +98,6 @@
   "launch": {
    "entry": "launch",
    "command": "strata launch --model UD-IQ4_XS-v31 --yes --no-tui --context 131072",
-   "fetches": [],
    "setup_args": [
     "--yes",
     "--no-start",
@@ -118,7 +113,7 @@
     "<ROOT>/data"
    ],
    "config_file": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "args": [
      "--pack",
      "<ROOT>/data/packs/ud_iq4_xs_v31",
@@ -157,7 +152,7 @@
     "args_written": "=args"
    },
    "engine": {
-    "exe": "<ROOT>/engine/strata",
+    "exe": "<ROOT>/engine/strata-q38",
     "argv": [
      "--pack",
      "<ROOT>/data/packs/ud_iq4_xs_v31",
@@ -169,8 +164,6 @@
      "auto",
      "--prefill",
      "auto",
-     "--spec",
-     "4",
      "--spec-min-p",
      "0.5",
      "--mtp",
@@ -179,11 +172,13 @@
      "131072",
      "--kv",
      "int8",
-     "--resident-budget-gib",
-     "48"
+     "--ram-mib",
+     "49152"
     ],
     "env_set": {},
-    "notes": []
+    "notes": [
+     "[strata] paged engine: leaving out unsupported settings: --spec 4"
+    ]
    }
   }
  }
