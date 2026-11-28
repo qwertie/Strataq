@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 from strata_cli.launch import runner as R
-from strata_common import vram_fit
+from strata_common import engine_stop
 
 # the log of the 2 x 8 GB start that failed (HYBRID, srv118, 2 x RTX PRO 6000 held to 8 GB free by hogs, 128K): the engine's reason, then the picture reader's line
 SERVE_STOP = [
@@ -27,22 +27,22 @@ CACHE_STOP = [
 
 class TheEnginesReason(unittest.TestCase):
     def test_the_reason_is_the_engines_not_the_picture_readers(self):
-        self.assertEqual(vram_fit.engine_stop_reason(SERVE_STOP),
+        self.assertEqual(engine_stop.engine_stop_reason(SERVE_STOP),
                          "the GPU has too little free VRAM for the prompt path: turn images off (setup: --vision no), close other programs using the GPU, "
                          "use a shorter context, or read prompts in smaller chunks (--prefill 512)")
-        self.assertEqual(vram_fit.engine_stop_reason(CACHE_STOP), "layer split, CUDA1 expert cache: no room")
+        self.assertEqual(engine_stop.engine_stop_reason(CACHE_STOP), "layer split, CUDA1 expert cache: no room")
 
     def test_other_stops_and_the_walks_own_lines_are_not_a_memory_stop(self):
-        self.assertIsNone(vram_fit.engine_stop_reason(["strata generate: something else is wrong", "ggml_cuda_init: failed to initialize CUDA"]))
-        self.assertIsNone(vram_fit.engine_stop_reason([]))
-        self.assertIsNone(vram_fit.engine_stop_reason(None))
+        self.assertIsNone(engine_stop.engine_stop_reason(["strata generate: something else is wrong", "ggml_cuda_init: failed to initialize CUDA"]))
+        self.assertIsNone(engine_stop.engine_stop_reason([]))
+        self.assertIsNone(engine_stop.engine_stop_reason(None))
         walk = ["strata generate: short of GPU memory: CUDA1 has 2.53 GiB free and a layer split card needs about 9.1 GiB: each later card loads only the dense weights of its own layers",
                 "strata serve: CUDA1: 293 MiB of VRAM free with everything loaded - LOW: its window graphs are captured on first use"]
-        self.assertIsNone(vram_fit.engine_stop_reason(walk), "what the walk did and a LOW warning say nothing about why a start stopped")
+        self.assertIsNone(engine_stop.engine_stop_reason(walk), "what the walk did and a LOW warning say nothing about why a start stopped")
 
     def test_the_last_memory_line_wins(self):
         lines = ["strata generate: layer split, CUDA1 expert cache: no room", "strata serve: the GPU has too little free VRAM for the prompt path: x"]
-        self.assertTrue(vram_fit.engine_stop_reason(lines).startswith("the GPU has too little free VRAM"))
+        self.assertTrue(engine_stop.engine_stop_reason(lines).startswith("the GPU has too little free VRAM"))
 
 
 class TheLastLine(unittest.TestCase):

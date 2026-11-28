@@ -17,15 +17,15 @@ EXTRA_GB_BASE = 0.0
 EXTRA_GB_PER_TOKEN = 1.3e-6
 
 # Where it was run (phaseA-tests/maya-port/INT/RESULTS.md, PAR/RESULTS.md).  Anything else runs the same code and was not tried.
-MEASURED_ON = ("4 Radeon AI PRO R9700 (32 GB), 1 R9700 and 2 RTX A6000 (48 GB) and a DGX Spark, all on Linux")
-TESTED_BACKENDS = ("CUDA sm_86", "CUDA sm_121", "HIP gfx1201")
+MEASURED_ON = ("4 Radeon AI PRO R9700 (32 GB), 1 R9700 and 2 RTX A6000 (48 GB), all on Linux")
+TESTED_BACKENDS = ("CUDA sm_86", "HIP gfx1201")
 
 SPEED_LINES = (
     "Several long answers at once: 4 together wrote 73 tokens a second in all against 41 for one answer alone, each of the four at 21 "
     "(4 R9700); 2 together 53 against 37, each at 30 (4 R9700), and 52 against 38 on 2 RTX A6000 (each at 31). The median wait for the "
     "first word was 0.9 s instead of 8.0 s with 4 sessions (4 R9700).",
     "An agent load of 4 sessions reading files and answering 40 tokens: the whole load took 13% less time on 4 R9700 (55-56 s against 64-65 s) "
-    "and 11% less on 2 RTX A6000 (91 s against 102 s); a DGX Spark took 17-20% less (205-216 s against 256-261 s). One conversation alone ran as fast with the flag as without (a five-turn chat took "
+    "and 11% less on 2 RTX A6000 (91 s against 102 s). One conversation alone ran as fast with the flag as without (a five-turn chat took "
     "23.3-24.9 s against 23.4-24.4 s on 4 R9700, 34.9-35.9 s against 35.2-35.6 s on 2 RTX A6000).",
 )
 
@@ -68,10 +68,10 @@ def explain(n: int, context: int | None) -> list[str]:
             f"Measured on {MEASURED_ON}."]
 
 
-def warnings(n: int | None, *, cards: list[dict] | None, context: int | None = None, os_name: str | None = None, machine: str | None = None,
+def warnings(n: int | None, *, cards: list[dict] | None, context: int | None = None, os_name: str | None = None,
              vendor: str | None = None) -> list[tuple[str, str]]:
     """(what, what to do) for a pick that goes beyond what was run: a warning, never a refusal.  `cards` are the usable cards of the run;
-    `os_name` is sys.platform, `machine` sysinfo.machine().  Nothing for an unset or one-at-a-time pick."""
+    `os_name` is sys.platform.  Nothing for an unset or one-at-a-time pick."""
     out: list[tuple[str, str]] = []
     if n is None or int(n) <= 1:
         return out
@@ -80,14 +80,12 @@ def warnings(n: int | None, *, cards: list[dict] | None, context: int | None = N
         out.append((f"--parallel {n} is more than the engine runs at once; it will use {MAX_CONVERSATIONS}.",
                     f"Pick a number from 2 to {MAX_CONVERSATIONS}."))
     os_name = (os_name or "").lower()
-    machine = (machine or "").lower()
     windows = os_name.startswith("win")
     uma_gpu = any(c.get("uma") or c.get("integrated") for c in cards or [])
-    spark = os_name.startswith("linux") and machine in ("aarch64", "arm64")
     if windows:
         out.append(("--parallel was run on Linux only. The Windows engine builds with it; a Windows run has not been done.",
                     "If the engine stops at the start or an answer looks wrong, launch without --parallel."))
-    elif uma_gpu and not spark:
+    elif uma_gpu:
         out.append(("--parallel was not run on a Ryzen AI Max (shared memory) PC. Every extra conversation takes memory the experts and the system also use.",
                     "If the engine stops or slows down, launch without --parallel."))
     else:

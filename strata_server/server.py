@@ -5569,7 +5569,6 @@ def make_handler(svc: Service):
             # max_tokens (by the rest of the context when it is not sent), which is the only bound OpenAI and vLLM
             # put on it either.  A reply that is not streamed does hold every entry (its token, bytes and up to 20
             # alternatives) until it ends, so a long one holds a lot: streaming hands each entry out with its chunk.
-            engine_client.refuse_for_split(svc.engine, req)   # (before the batch-slot rule below: its message would say to run without --parallel)
             if engine_client.top_logprobs(req) is not None and batch_slots_on(svc.engine) and max_req != 1 \
                     and not (getattr(svc.engine, "info", None) or {}).get("request_queue"):
                 # --parallel/--batch: a slot's "BT <slot> <id>" lines carry no LP line, and the batched loop never
@@ -6383,49 +6382,11 @@ def sampling_defaults_from_config(cfg: dict) -> dict:
     return out
 
 
-SPLIT_KEYS = ("split_fallback", "split_engine_note")
-
-
-def start_engine_or_fallback(cfg: dict, exe: str, effort_end: list[str] | None, env: dict, lazy: bool, tok, *, offline: bool = False,
-                             batch_telemetry=None):
-    """Start the run config's engine. A config written for the all-cards split engine (strata_control/split_engine.py) carries the
-    normal layer-split config under "split_fallback": if that engine refuses or fails to come up, say so in one plain line and start the
-    normal one instead, so a start never fails because of the option. Any other config starts exactly as before."""
-    fb = cfg.get("split_fallback")
-    try:
-        return engine_client.StrataEngine(
-            exe, engine_client.engine_args(cfg, exe) + (effort_end or []), cwd=cfg.get("cwd"), log=cfg.get("log"), env=env,
-            lazy=lazy, retry_args=engine_client.mtp_retry_args(cfg, exe, effort_end),
-            retry_vram_args=engine_client.nodraft_retry_args(cfg, exe, effort_end))
-    except Exception as e:
-        if not isinstance(fb, dict) or not fb.get("exe"):
-            raise
-        msg = str(e).strip()
-        why = msg.splitlines()[0][:200] if msg else type(e).__name__
-        # the engine's own reason ("sfnx: failed: ..." in its log tail, which the exception carries) is what a person needs to read
-        own = next((ln.split("sfnx: failed: ", 1)[1].strip() for ln in reversed(msg.splitlines()) if "sfnx: failed: " in ln), "")
-        if own:
-            why = own[:300]
-        log = cfg.get("log")
-        if log:                                     # the normal engine writes the same log file: keep the split engine's
-            try:
-                os.replace(log, str(log) + ".split-engine")
-            except OSError:
-                pass
-        print(f"[strata] The all-cards split engine could not start ({why}). Starting the normal layer split instead.", flush=True)
-    cfg2 = {k: v for k, v in cfg.items() if k not in SPLIT_KEYS + ("exe", "args", "env", "layer_split", "replicas", "user_args", "drafting")}
-    cfg2.update(fb)
-    cfg2 = with_component_engine(cfg2)
-    exe2 = find_engine_exe(cfg2)
-    env2 = engine_client.child_env(cfg2, offline=offline)
-    configure_batch_telemetry_env(env2, cfg2, batch_telemetry)
-    effort2 = effort_end_args(cfg2, exe2, tok)
-    engine = engine_client.StrataEngine(
-        exe2, engine_client.engine_args(cfg2, exe2) + (effort2 or []), cwd=cfg2.get("cwd"), log=cfg2.get("log"), env=env2,
-        lazy=lazy, retry_args=engine_client.mtp_retry_args(cfg2, exe2, effort2),
-        retry_vram_args=engine_client.nodraft_retry_args(cfg2, exe2, effort2))
-    engine.info["split_fallback"] = True
-    return engine
+def start_engine(cfg: dict, exe: str, effort_end: list[str] | None, env: dict, lazy: bool) -> "engine_client.StrataEngine":
+    """Starts the run config's engine (one engine; start_replicas starts several)."""
+    return engine_client.StrataEngine(
+        exe, engine_client.engine_args(cfg) + (effort_end or []), cwd=cfg.get("cwd"), log=cfg.get("log"), env=env,
+        lazy=lazy, retry_vram_args=engine_client.nodraft_retry_args(cfg, effort_end))
 
 
 def start_replicas(cfg: dict, groups: list[list[int]], exe: str, effort_end: list[str], lazy: bool,
@@ -6450,14 +6411,13 @@ def start_replicas(cfg: dict, groups: list[list[int]], exe: str, effort_end: lis
             rc["args"] = list(rc["args"]) + ["--shared-expert-arena", arena]
         try:
             engines[i] = engine_client.StrataEngine(
-                exe, engine_client.engine_args(rc, exe) + effort_end, cwd=rc.get("cwd"), log=rc.get("log"),
+                exe, engine_client.engine_args(rc) + effort_end, cwd=rc.get("cwd"), log=rc.get("log"),
                 env=engine_client.child_env(rc, offline=offline), lazy=lazy, cpus=cpus[i] if cpus else None,
-                retry_args=engine_client.mtp_retry_args(rc, exe, effort_end),
-                retry_vram_args=engine_client.nodraft_retry_args(rc, exe, effort_end))
+                retry_vram_args=engine_client.nodraft_retry_args(rc, effort_end))
         except BaseException as e:        # noqa: BLE001
             errors.append((i, e))
     rc0 = rp.replica_cfg(cfg, 0, groups[0])
-    warn_budget_over_ram(engine_client.engine_args(rc0, announce=False) if "args" in rc0 else [])
+    warn_budget_over_ram(engine_client.engine_args(rc0) if "args" in rc0 else [])
     if os.environ.get("STRATA_REPLICA_START", "") == "serial":
         for i in range(n):
             one(i)
@@ -7058,7 +7018,7 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
                             env=vision_env(cfg, env), lazy=lazy)
         print("model unloaded; the first request loads it ..." if lazy else
               "loading the model (the first start takes a minute or two) ...", flush=True)
-        warn_budget_over_ram(engine_client.engine_args(cfg, announce=False) if "args" in cfg else [])      # #1080
+        warn_budget_over_ram(engine_client.engine_args(cfg) if "args" in cfg else [])      # #1080
         note = card_note(cfg, env)
         if note:
             print(note, flush=True)
@@ -7095,7 +7055,7 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
         if groups:
             engine = start_replicas(cfg, groups, exe, effort_end or [], lazy, offline=a.offline)
         else:
-            engine = start_engine_or_fallback(cfg, exe, effort_end, env, lazy, tok, offline=a.offline, batch_telemetry=a.batch_telemetry)
+            engine = start_engine(cfg, exe, effort_end, env, lazy)
         engine.silence_s = silence                      # an attribute of its own: restart() keeps it
         warn_tight_ram(engine.info.get("arena_mib"))
         note = desktop_vram_note(cfg.get("backend"), engine.info.get("vram_free_mib"), engine.spawn[1],

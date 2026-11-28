@@ -21,7 +21,7 @@ import sys
 import threading
 import time
 from strata_base import atomic as _atomic_mod
-from strata_common import cfg_paths, user_args, vram_fit
+from strata_common import cfg_paths, engine_stop
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -547,11 +547,9 @@ def derive_config(base: dict, s: S.LaunchSettings, *, bool_flags: frozenset[str]
         cfg["api_key"] = "none"                              # served without a key on purpose (the server warns once at start)
     else:
         cfg.pop("api_key", None)
-    chosen = None if s.family == "deepseek41" else s.drafting   # DeepSeek has its own DSpark and no MTP or DFlash2: a Drafting choice left from another model is not written
+    chosen = None if s.family == "deepseek41" else s.drafting   # DeepSeek has its own DSpark and no MTP: a Drafting choice left from another model is not written
     if chosen:                                               # strata_common/drafting.py: strata_server/server.py applies it at every start
         cfg["drafting"] = chosen
-    if s.split_engine:                                       # strata_control/split_engine.py: read by apply_split_engine; "off" survives every update
-        cfg["split_engine"] = s.split_engine
     cfg.setdefault("exe", "component:strata-engine")
     cfg["open_browser"] = False                              # strata launch never opens a browser by itself (only `--open` does, after the start)
     if isinstance(cfg.get("args"), list):
@@ -987,12 +985,10 @@ class Runner:
             args += ["--kv", s.kv]
         if fam in ("qwen", "coder"):
             args += ["--experimental-speed-projection", "off"]
-        resolved = self.resolved_drafting(fam)
+        resolved = modelstate.resolved_drafting(s.drafting)
         mtp_word = s.mtp if resolved != "off" else "off"
         if mtp_word in ("on", "off") and fam in modelstate.HELPER_FAMILIES:
             args += ["--mtp", mtp_word]                      # round 8, N3: "--mtp off" never reached setup, which then fetched the 5.2 GB draft layer
-        if resolved == "dflash2" and fam in modelstate.HELPER_FAMILIES and mtp_word != "off":
-            args += ["--drafter", "dflash2"]                 # one drafter per run: a new install fetches DFlash2's pack (below), not the MTP layer
         data = s.data_dir or self.existing_data_dir()
         if data:
             args += ["--data-dir", str(data)]
@@ -1102,7 +1098,7 @@ class Runner:
         if s.family and s.model and not s.model_path:
             path, desc = self.installed_state()
         return modelstate.assess(self.catalog, s.family, s.model, vision=s.vision, model_path=s.model_path, data_dir=s.data_dir,
-                                 config=path, desc=desc, mtp=s.mtp, drafting=self.resolved_drafting(s.family))
+                                 config=path, desc=desc, mtp=s.mtp, drafting=modelstate.resolved_drafting(s.drafting))
 
     def download_gb(self) -> float:
         """How much would be downloaded for this launch right now: 0 when everything is on disk (the model is installed with these choices
@@ -1389,11 +1385,6 @@ class Runner:
         if found is None:
             return False
         model, d, folder = found
-        from strata_control import dsv41_fit
-        if dsv41_fit.not_here(model):     # said before an engine or a download is touched
-            raise LaunchError(dsv41_fit.not_here(model),
-                              "Use the 2.00 or 2.25 files (--model ist-das-2.00bpw or --model ist-das-2.25bpw, or --model-path to those files). "
-                              "Nothing was downloaded or changed.", 2)
         if s.family and s.family != "deepseek41":
             raise LaunchError(f"These are DeepSeek-V4.1-Flash's files, not {s.family} {s.model}'s.",
                               "Leave --model out, or use --model " + model + ".", 2)
@@ -1460,143 +1451,6 @@ class Runner:
         s.model_path = models.import_target(s.model_path, plan)
         self.emit("model", f"These files are {fam} {model}.", None)
 
-    # ---- 3. config and profile
-    def resolved_drafting(self, family: str | None) -> str:
-        """modelstate.resolved_drafting for this launch: Auto where the all-cards split engine will take the start is the MTP (it runs the model's draft layer and
-        nothing else), so the plan and the fetch include the draft layer and not DFlash2's drafter.  A drafter the person chose is kept."""
-        from strata_common import drafting
-        r = modelstate.resolved_drafting(self.s.drafting, family)
-        if r == "dflash2" and drafting.normalize(self.s.drafting) == "auto" and self.split_expected():
-            return "mtp"
-        return r
-
-    def card_probe(self):
-        """The cards' facts for the split engine's rule: None (the engine's own probe, which counts each card's FREE memory), or, when a server of this launch's profile or on
-        its port is running, the same probe with the free memory left out: that server is stopped before the start and gives its memory back, so it is not "busy" memory."""
-        try:
-            mine = any(r["profile"] == self.profile or r["port"] == int(self.s.port) for r in self.serving_launches())
-        except Exception:                                    # noqa: BLE001 - a question asked early is never a reason to stop a launch
-            mine = False
-        if not mine:
-            return None
-        import dataclasses
-        from strata_control import split_engine as SE
-        return lambda indexes: [dataclasses.replace(c, free_mib=None) for c in SE.probe_cards(indexes)]
-
-    def split_expected(self, cfg: dict | None = None) -> bool:
-        """Would the all-cards split engine take this launch (strata_control/split_engine.expected: the rule apply_split_engine uses, asked before anything is on disk)."""
-        cached = getattr(self, "_split_expected", None)
-        if cached is not None:
-            return cached
-        got = False
-        try:
-            from strata_control import split_engine as SE
-            s = self.s
-            if s.family in modelstate.HELPER_FAMILIES and not self.multi_file():
-                base = dict(cfg or {})
-                if s.split_engine:
-                    base["split_engine"] = s.split_engine
-                base["drafting"] = s.drafting if s.drafting is not None else base.get("drafting")
-                native = None
-                if s.model_path:
-                    p = Path(s.model_path)
-                    shards = sorted(p.glob("*-00001-of-*.gguf")) or sorted(p.glob("*.gguf")) if p.is_dir() else [p]
-                    native = str(shards[0]) if shards else None
-                else:
-                    native = user_args.find_model_file(base.get("args"))
-                if native is None and s.family not in ("qwen", "unsloth"):
-                    got = False                              # no file to look at and no reason to assume a Flash-Next shape
-                else:
-                    cards = [int(g) for g in s.gpus] if s.gpus else None
-                    got = SE.expected(base, indexes=cards, native=native, context=int(s.context or SE.TESTED_CONTEXT),
-                                      kv=next((str(a2) for a1, a2 in zip(base.get("args") or [], (base.get("args") or [])[1:]) if a1 == "--kv"), None),
-                                      allow_untested=os.environ.get("STRATA_SPLIT_ALLOW_UNTESTED") == "1", probe=self.card_probe())
-        except Exception:                                    # noqa: BLE001 - a question asked early is never a reason to stop a launch
-            got = False
-        self._split_expected = got
-        return got
-
-    def drafting_inputs(self, cfg: dict) -> dict:
-        """What strata_common/drafting.py needs to decide for this launch: the choice, the card class, the model and the data folder."""
-        from strata_common import drafting
-        backend, archs = drafting.detect_hardware()
-        mode = self.s.drafting if self.s.drafting is not None else cfg.get("drafting")
-        args = cfg.get("args") or []
-        if cfg.get("mtp") is False and drafting.normalize(mode) == "auto":
-            mode = "off"                                     # the Draft layer switch is off and no drafter was chosen since
-        elif drafting.normalize(mode) == "auto" and self.split_expected(cfg):
-            mode = "mtp"                                     # the all-cards split engine runs the MTP draft layer: the plan and the fetch are for that, not for DFlash2
-        name = cfg.get("model_name")
-        if not name:                                         # not installed yet (a first launch, --plan): the name setup will write, so the plan names the drafter Auto will really fetch
-            try:
-                name = self.catalog.model_name_of(self.s.family, self.s.model)
-            except Exception:                                # noqa: BLE001 - an unreadable table is only the old, generic plan
-                name = None
-        return {"mode": mode, "klass": drafting.card_class(archs), "model_name": name, "family": self.s.family,
-                "data_dir": drafting.data_dir_of(args) or (Path(self.s.data_dir) if self.s.data_dir else None),
-                "backend": backend, "archs": archs, "mtp_here": drafting.mtp_ready(args) if cfg else None,
-                "blocked": drafting.blocked_by(args, split=bool(self.s.gpus and len(self.s.gpus) > 1), slots=int(self.s.parallel or 0), named=drafting.normalize(mode) == "dflash2", backend=backend)}
-
-    def drafting_signals(self, cfg: dict, want: dict) -> dict:
-        """The two signals drafting.tuned_applies reads besides the backend and the card: the arguments (--expert-cache and the others the confidence reads, with the person's own
-        options over them as the server merges them) and the memory of the ONE card this launch uses (None: several cards, a shared-memory chip, or not readable)."""
-        try:
-            from strata_common import drafting, user_args
-            args = [str(a) for a in cfg.get("args") or []]
-            if cfg.get("user_args"):
-                args = user_args.merge(args, cfg["user_args"])
-            run = {**cfg, "gpu": [int(g) for g in self.s.gpus] if self.s.gpus else cfg.get("gpu")}
-            return {"args": args, "vram_mib": drafting.card_vram_mib(run, want.get("backend"), want.get("archs"))}
-        except Exception:                                    # noqa: BLE001 - no signal means the tuned pack is not fetched
-            return {"args": [], "vram_mib": None}
-
-    def one_request_for_dflash2(self, config: Path) -> bool:
-        """DFlash2 chosen on purpose and the person gave no number of requests: one at a time, said once (drafting.wants_one_request)."""
-        try:
-            from strata_common import drafting
-            cfg = read_config(config)
-            want = self.drafting_inputs(cfg)
-            sig = self.drafting_signals(cfg, want)
-            if not drafting.wants_one_request(**want, **sig) or not drafting.drafter_ready(want["data_dir"], want["model_name"], want["backend"]):
-                return False                                 # (no drafter file after all, e.g. no internet: the MTP runs and the slots stay)
-        except Exception:                                    # noqa: BLE001 - a note is never a reason to stop a launch
-            return False
-        if not getattr(self, "_one_request_said", False):
-            self._one_request_said = True
-            self.notices.append(drafting.ONE_REQUEST_NOTE)
-        return True
-
-    def ensure_drafter(self, base_path: Path) -> None:
-        """Fetch the DFlash2 drafter when this launch will use it and it is not here yet. Never stops the launch: if it cannot be had, the model
-        starts with the MTP and the person is told (recommend, never force)."""
-        from strata_common import drafting
-        from strata_control import drafting_fetch
-        want: dict = {}
-        try:
-            cfg = read_config(base_path)
-            want = self.drafting_inputs(cfg)
-            sig = self.drafting_signals(cfg, want)
-            if want["data_dir"] is not None and drafting.needs_conversion(**want) and drafting.engine_has_selector_q4():
-                drafting_fetch.convert_selector(want["data_dir"])        # Load, not a start: the smaller selector (174 MiB), made here from the checked pack, no network
-            if want["data_dir"] is None or not (drafting.needs_pack(**want, **sig) or drafting.needs_tuned(**want, **sig)):
-                return
-            tuned = drafting.tuned_applies(want["backend"], want["model_name"], want["archs"], **sig)
-            self.emit("model", f"Downloading the DFlash2 drafter ({drafting.tuned_pack(drafting.tuned_variant(want['backend'], want['model_name'])).gb if tuned else drafting.DOWNLOAD_GB:g} GB, once)…", 0)
-
-            def show(step: str, done: int, total: int) -> None:
-                self.check_cancel()
-                self.emit("model", f"{step} {done / 1e9:.2f} of {total / 1e9:.2f} GB" if total > 1 and done < total else step,
-                          100.0 * done / total if total > 0 else None)
-            drafting_fetch.ensure_for(want["data_dir"], model_name=want["model_name"], backend=want["backend"], progress=show, cancel=self.cancel, throttle=True,
-                                    archs=want["archs"], **sig)
-        except Cancelled:
-            raise
-        except Exception as e:                               # noqa: BLE001 - the MTP still runs
-            then = "starts with the MTP instead" if want.get("mtp_here") is not False else "starts without a drafter"
-            text = f"{e} The model {then}." if isinstance(e, drafting_fetch.DraftingError) else \
-                f"The DFlash2 drafter could not be downloaded. The model {then}."
-            self.notices.append(text)
-            self.emit("model", text, None, level="warn")
 
     def check_saved_state_readable(self) -> None:
         """Before anything is written: a profile or run config of THIS launch that exists but cannot be read (permissions, a damaged profile) stops the
@@ -1648,7 +1502,6 @@ class Runner:
         self.say_remembered_cards(base)
         self.apply_four_card(cfg)
         self.use_own_dsv41_engine(cfg)
-        self.apply_split_engine(cfg)
         apply_experts(cfg, self.experts_flag(cfg.get("exe")))   # after the engine is settled: only a 0.1.50+ engine is given --experts
         wait = self.start_wait()
         if wait > 600 and not cfg.get("engine_ready_s"):     # the server's own wait for the engine (900 s) must not end before the start's
@@ -1660,47 +1513,6 @@ class Runner:
         self.config_path = out
         return out
 
-    def apply_split_engine(self, cfg: dict) -> None:
-        """The all-cards split engine (docs/SPLIT_ENGINE.md): by itself ("auto", the default) for a Qwen model on this PC's NVIDIA or AMD (gfx1201) cards that passes
-        strata_control/split_engine.py's rule, never when the run config says "split_engine": "off" (`--split-engine off`, STRATA_SPLIT_ENGINE=0).
-        In auto a "no" is silent and the config stays as it is; with "on" it gets one plain line. It never stops a launch."""
-        from strata_control import split_engine as SE
-        if cfg.get("arch") == "deepseek41" or SE.mode(cfg) == "off":
-            return
-        exe_for = SE.exe_finder(cfg)                         # strata-split-N beside the run config's engine (shared with the app's start)
-
-        # the split runs the model's own draft layer (--mtp) and refuses to start without it; the plan for Auto downloads DFlash2's drafter, not the draft layer, so
-        # a start whose draft-layer folder is not on disk stays on the layer split (Auto: silently, with DFlash2 as the plan said; "on": one line saying how to get it)
-        mtp_dir = next((str(cfg["args"][i + 1]) for i, a in enumerate(cfg.get("args") or []) if a == "--mtp" and i + 1 < len(cfg["args"])), None)
-        df2_split = str(cfg.get("drafting") or "").lower() == "dflash2" and SE.mode(cfg) == "on"     # DFlash2 chosen by name and the split engine asked for: its drafter is DFlash2's pack, the layer is not loaded
-        if mtp_dir and not df2_split and not self.draft_layer_present(mtp_dir):
-            if SE.mode(cfg) == "on":
-                text = ("The all-cards split engine needs the model's draft layer (the MTP), which is not downloaded. Add --drafting mtp to fetch it; "
-                        "using the normal layer split.")
-                self.notices.append(text)
-                self.emit("config", text, None, level="warn")
-            return
-        # `--parallel N` is the split's lane count (split_config reads cfg["parallel"]); a refusal puts the run config back as it was
-        lanes_added = bool(self.s.parallel) and not cfg.get("parallel")
-        if lanes_added:
-            cfg["parallel"] = int(self.s.parallel)
-        try:
-            decision = SE.apply_to_config(cfg, exe_for_cards=exe_for, allow_untested=os.environ.get("STRATA_SPLIT_ALLOW_UNTESTED") == "1", probe=self.card_probe())
-        except Exception as e:                               # noqa: BLE001 - never stop a launch over an option
-            if lanes_added:
-                cfg.pop("parallel", None)
-            if SE.mode(cfg) == "on":
-                text = f"The all-cards split engine was left out ({type(e).__name__}). Using the normal layer split."
-                self.notices.append(text)
-                self.emit("config", text, None, level="warn")
-            return
-        if lanes_added and not decision.use_split:
-            cfg.pop("parallel", None)
-        if decision.quiet:
-            return
-        line = decision.line + (" Turn it off with: strata launch --split-engine off." if decision.use_split else "")
-        self.notices.append(line)
-        self.emit("config", line, None)
 
     def say_remembered_cards(self, base: dict) -> None:
         """A launch that names no cards keeps the cards the person chose earlier (`--gpu 0` is remembered by the model's settings).  On a PC with more
@@ -1744,10 +1556,8 @@ class Runner:
         from strata_common import profiles
         name = self.profile
         parallel = self.s.parallel if self.s.parallel else (getattr(self, "four_card_parallel", None) or self.catalog_parallel())
-        if parallel and not self.s.parallel and self.one_request_for_dflash2(config):
-            parallel = None                                  # the slots Strata fills in by itself would keep the MTP: DFlash2 answers one request at a time
         if parallel and self.run_config_owns_slots(config):
-            parallel = None                                  # the all-cards split engine's run config carries its lanes (--batch N, from --parallel N or its default): a profile override would only collide with them
+            parallel = None                                  # a profile override would only collide with the run config's own slots (strata_common/engine_client.py parallel_flag_conflicts)
         sets = [f"host={acc.host_for(self.s.access)}", f"port={int(self.s.port)}"] + ([f"parallel={parallel}"] if parallel else [])
         try:
             current, _rev = profiles.load(name)
@@ -1773,7 +1583,7 @@ class Runner:
 
     @staticmethod
     def run_config_owns_slots(config: Path) -> bool:
-        """The run config already names its batch slots (--batch / --slots in its args): the all-cards split engine's does, always."""
+        """Tells whether the run config already names its batch slots (--batch / --slots in its args)."""
         try:
             args = [str(a) for a in read_config(config).get("args") or []]
         except Exception:                                    # noqa: BLE001 - a config that cannot be read is not a reason to stop a launch
@@ -2192,7 +2002,7 @@ class Runner:
             pass
 
     def report_drafting(self) -> None:
-        """Say which drafter runs when the engine fell back from the one that was asked for ("Drafting: MTP (DFlash2 didn't fit)"). Best effort."""
+        """Say why no drafter runs when the engine started without the one that was asked for ("Drafting: off (the cards were short of memory)"). Best effort."""
         try:
             import urllib.request
             headers = {"Authorization": f"Bearer {self.s.api_key}"} if self.s.api_key else {}
@@ -2200,28 +2010,11 @@ class Runner:
                 info = (json.loads(resp.read().decode("utf-8", "replace")).get("engine") or {})
         except Exception:                                    # noqa: BLE001 - the line is a convenience
             return
-        self.report_split_fallback(info)
         note = str(info.get("drafting_note") or "")
         if note:
             self.notices.append(note)
             self.emit("start", note, None)
 
-    def report_split_fallback(self, info: dict) -> None:
-        """The server started the normal layer split because the all-cards split engine would not come up (its metrics say split_fallback; serve/server.py
-        start_engine_or_fallback): the summary then says what runs, not the line written before the start ("Using the all-cards split engine on N cards")."""
-        if not info.get("split_fallback"):
-            return
-        why = ""
-        try:
-            log = read_config(self.config_path).get("log") if self.config_path else None
-            lines = Path(str(log) + ".split-engine").read_text(encoding="utf-8", errors="replace").splitlines() if log else []
-            why = next((ln.strip() for ln in reversed(lines) if ln.lstrip().startswith("sfnx:")), "")
-        except Exception:                                    # noqa: BLE001 - the reason is a convenience
-            why = ""
-        text = "The all-cards split engine could not start" + (f" ({why})" if why else "") + "; running the normal layer split."
-        self.notices[:] = [n for n in self.notices if not n.startswith("Using the all-cards split engine")]
-        self.notices.append(text)
-        self.emit("start", text, None, level="warn")
 
     # ---- 6. access
     def open_access(self) -> str | None:
@@ -2271,7 +2064,7 @@ class Runner:
                 data = Path(st.folder) if st.folder else (Path(s.data_dir) if s.data_dir else (self.existing_data_dir() or self.catalog.data_dir()))
                 # the data folder the model sits in, then --data-dir and the remembered folder: setup writes the draft layer to <data-dir>/mtp/rt even when the model folder is elsewhere
                 homes = [data, *[d for d in modelstate.data_places(self.catalog, Path(s.data_dir) if s.data_dir else None) if d != data]]
-                if modelstate.mtp_choice(s.mtp, self.resolved_drafting(s.family)) != "off" and "mtp" not in have and discovery.mtp_layer_in(*homes) is None:
+                if modelstate.mtp_choice(s.mtp, modelstate.resolved_drafting(s.drafting)) != "off" and "mtp" not in have and discovery.mtp_layer_in(*homes) is None:
                     parts.append({"kind": "mtp", "label": "the draft layer", "gb": MTP_FETCH_GB})
                 places = [d / sub for d in homes for sub in ("models", "Models")]
                 if s.model_path:                             # setup uses a reader that sits with the person's own files (setup.py --gguf-dir)
@@ -2282,17 +2075,6 @@ class Runner:
                     parts.append({"kind": "mmproj", "label": "the picture reader", "gb": MMPROJ_GB})
             except OSError:
                 pass
-        try:
-            from strata_common import drafting
-            _b, _cfg = self.installed_state()
-            want = self.drafting_inputs(_cfg or {})
-            want["data_dir"] = want["data_dir"] or self.existing_data_dir() or self.catalog.data_dir()
-            sig = self.drafting_signals(_cfg or {}, want)
-            if drafting.needs_pack(**want, **sig) or drafting.needs_tuned(**want, **sig):            # chosen DFlash2 (or Auto picking it) and the drafter (the tuned one, where the set has it) is not here: it is part of the download
-                parts.append({"kind": "dflash2", "label": "the DFlash2 drafter",
-                              "gb": drafting.tuned_pack(drafting.tuned_variant(want["backend"], want["model_name"])).gb if drafting.tuned_applies(want["backend"], want["model_name"], want["archs"], **sig) else drafting.DOWNLOAD_GB})
-        except Exception:                                    # noqa: BLE001 - the plan still shows the rest
-            pass
         gap = self.ready_pack_gap() if st.own_files else None
         if gap:
             # a ready-made pack (NVFP4) is taken from setup's own models folder, not from where the person's files are (round 8, N2: the plan
@@ -2331,7 +2113,7 @@ class Runner:
             text = ("Nothing to download: your model files are used where they are." if st.own_files
                     else "Nothing to download: the model is already on this computer.")
         else:
-            names = [f"{p['label']} ({p['gb']:.2f} GB)" if p["kind"] == "dflash2" and p["gb"] < 1 else f"{p['label']} ({p['gb']:.1f} GB)" for p in parts]       # (the tuned drafter is 0.34 / 0.52 GB: one decimal said 0.3 / 0.5)
+            names = [f"{p['label']} ({p['gb']:.1f} GB)" for p in parts]
             what = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
             text = f"About {gb:.1f} GB to download: {what}."
             if st.on_disk_gb >= 1:
@@ -2348,8 +2130,6 @@ class Runner:
                 text += " To skip the picture reader (the model then answers text only), add --vision off; or put its mmproj file next to your model files."
             if any(p["kind"] == "mtp" for p in parts):
                 text += " To skip the draft layer (a little slower, less memory), add --mtp off."
-            if any(p["kind"] == "dflash2" for p in parts):
-                text += " To skip the DFlash2 drafter, add --drafting mtp."
         if not engine and here:
             # B03: an engine IS installed, but this plan cannot use it (its signature cannot be checked here, or it is for another card): not "missing"
             text += (f" An engine ({', '.join(here[:3])}) is installed, but it did not pass Strata's check on this computer, so Strata looks for a working one "
@@ -2490,16 +2270,12 @@ class Runner:
         if self.multi_file():                                # DeepSeek drafts with its own DSpark drafter (the --dspark auto the config writes), not MTP
             return "Drafting: DSpark (used when it speeds up answers on this computer)"
         try:
-            base, cfg = self.installed_state()
-            want = self.drafting_inputs(cfg or {})
-            if self.split_expected(cfg) and drafting.normalize(want.get("mode")) == "mtp":
-                from strata_control.discovery import MTP_FETCH_GB
-                from strata_control import split_engine as SE
-                return SE.split_plan_line(MTP_FETCH_GB)
-            sig = self.drafting_signals(cfg or {}, want)
-            if drafting.needs_pack(**want, **sig) or drafting.needs_tuned(**want, **sig):            # the launch fetches the drafter first (ensure_drafter), so that is what will run
-                return "Drafting: DFlash2 (its drafter is downloaded first)"
-            return drafting.summary_line(drafting.decide(**want, **sig))
+            _base, cfg = self.installed_state()
+            cfg = cfg or {}
+            mode = self.s.drafting if self.s.drafting is not None else cfg.get("drafting")
+            if cfg.get("mtp") is False and drafting.normalize(mode) == "auto":
+                mode = "off"                                 # the Draft layer switch is off and no drafter was chosen since
+            return drafting.summary_line(drafting.decide(mode, drafting.mtp_ready(cfg.get("args") or []) if cfg else None))
         except Exception:                                    # noqa: BLE001
             return ""
 
@@ -2658,8 +2434,6 @@ class Runner:
             self.check_cancel()
             base = self.ensure_model()
             self.check_cancel()
-            self.ensure_drafter(base)
-            self.check_cancel()
             self.check_saved_state_readable()
             self.emit("config", "Writing this launch's settings…")
             cfg = self.build_config(base)
@@ -2788,7 +2562,7 @@ def explain_engine_exit(result: dict, config: Path | None, marks: dict | None = 
     lines = lines or [x.strip() for x in str(result.get("log_tail") or "").split(" | ") if x.strip()]
     # a card that ran out of memory: the engine's own line is the cause (the picture reader's "ggml_cuda_init: ... no CUDA-capable device", which it prints when the
     # cards are full and it runs on the processor, matched "failed" and used to be the last line shown)
-    vram_cause = vram_fit.engine_stop_reason(lines)
+    vram_cause = engine_stop.engine_stop_reason(lines)
     cause = vram_cause or next((x for x in reversed(lines) if CAUSE_LINE.search(x) and not x.lstrip().startswith(("strata generate: ", "strata serve: expert"))), None)
     cause = (cause or (lines[-1] if lines else "")).strip()
     cause = re.sub(r"^(\[strata\]\s*)?(\d{4}-\d\d-\d\d[ T][\d:.]+\s*)?", "", cause)[:240]

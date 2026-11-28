@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the self-contained Strata Terminal distribution for Windows x64, Linux x86_64, Linux aarch64 (the DGX Spark) or macOS arm64.
+"""Build the self-contained Strata Terminal distribution for Windows x64 or Linux x86_64.
 
 The requirement this exists for (checklist P04, and the owner's rule that starting or serving never fetches Python
 packages from the internet): a user installs the terminal without Desktop, and needs no development checkout, no
@@ -77,16 +77,6 @@ PYTHON_PINS = {
         "sha256": "5864001bf969db329fadc2b654c4878c6027d170c6bd77e28f88666260bcaf63",
         "python": "python/bin/python3", "archive": "tar.gz",
     },
-    "linux-aarch64": {
-        "file": f"cpython-{PYTHON_VERSION}+{PBS_RELEASE}-aarch64-unknown-linux-gnu-install_only.tar.gz",
-        "sha256": "b342ccfb577fda349d0237c98b24848234ca767c10f034628a5ff9fc858d662f",
-        "python": "python/bin/python3", "archive": "tar.gz",
-    },
-    "darwin-arm64": {
-        "file": f"cpython-{PYTHON_VERSION}+{PBS_RELEASE}-aarch64-apple-darwin-install_only.tar.gz",
-        "sha256": "83dcb04777c798bd95f3687acf9ae84b09860272ee6bdfb05be8bcf9447f75b8",
-        "python": "python/bin/python3", "archive": "tar.gz",
-    },
 }
 for _pin in PYTHON_PINS.values():
     _pin["url"] = PBS_BASE + _pin["file"].replace("+", "%2B")
@@ -111,7 +101,6 @@ PAYLOAD = (
 #: installation/preparation code out of the serving import graph.
 TOOLS_SUBSET = (
     "strata_tokenizer.py",
-    "dflash2_pack.py",     # the DFlash2 drafter: strata_control/drafting_fetch.py packs the download with it (numpy only)
 )
 
 #: What `strata launch` and the desktop app's installer need on top of the read-only terminal: the model catalog and GPU probe
@@ -142,10 +131,6 @@ def host_target() -> str:
         return "windows-x86_64"
     if sys.platform.startswith("linux") and machine in ("x86_64", "amd64"):
         return "linux-x86_64"
-    if sys.platform.startswith("linux") and machine in ("aarch64", "arm64"):
-        return "linux-aarch64"
-    if sys.platform == "darwin" and machine in ("arm64", "aarch64"):
-        return "darwin-arm64"
     raise SystemExit(f"no terminal target for {sys.platform}/{machine}")
 
 
@@ -309,10 +294,9 @@ def write_archive(root: Path, name: str, out_dir: Path, kind: str) -> Path:
 
 
 def build_commit(explicit: str | None = None) -> str | None:
-    """The full commit this archive is built from: --commit, the STRATA_COMMIT variable, STRATA_BUILD_COMMIT (a Docker build
-    copies the files without .git and without git), or `git rev-parse HEAD` of the source tree. None when none of them gives
-    40 hex digits (a tree copy without .git)."""
-    for candidate in (explicit, os.environ.get("STRATA_COMMIT"), os.environ.get("STRATA_BUILD_COMMIT")):
+    """The full commit this archive is built from: --commit, the STRATA_COMMIT variable, or `git rev-parse HEAD` of the source
+    tree. None when none of them gives 40 hex digits (a tree copy without .git)."""
+    for candidate in (explicit, os.environ.get("STRATA_COMMIT")):
         if candidate and re.fullmatch(r"[0-9a-fA-F]{40}", candidate.strip()):
             return candidate.strip().lower()
     try:
@@ -331,7 +315,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True, help="directory to write the archive into")
     ap.add_argument("--target", choices=sorted(PYTHON_PINS), default=None,
-                    help="windows-x86_64, linux-x86_64, linux-aarch64 or darwin-arm64 (default: this machine's)")
+                    help="windows-x86_64 or linux-x86_64 (default: this machine's)")
     ap.add_argument("--version", default=None, help="version label (default: read from the source)")
     ap.add_argument("--skip-deps", action="store_true",
                     help="skip the locked install (layout checks only; the result is NOT distributable)")
@@ -504,8 +488,7 @@ Put `bin/` on your PATH to get the `strata` command everywhere:
 """
     ram = ("    Task Manager > Performance > Memory > Available, or in PowerShell:\n"
            "    [math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1MB, 1)   # GB free" if win else
-           "    free -g" if not target.startswith("darwin") else
-           "    Activity Monitor > Memory, or:  vm_stat   (free + inactive pages x 16 KB)")
+           "    free -g")
     return f"""Strata Terminal {version} ({target})
 {'=' * (len(version) + len(target) + 18)}
 

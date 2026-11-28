@@ -46,9 +46,8 @@ def default_unsteady(ctx: "Context") -> bool:
 
 
 #: Flags that take no value (present = on, absent = off).
-BOOL_FLAGS = frozenset({"--kv-grow", "--no-host-worker", "--no-pool", "--mmap-experts",
-                        "--resident-experts", "--prompt-cache-tail", "--vram-elastic", "--split-skip-if-fits",
-                        "--resident-cpu-experts", "--no-hit-poke", "--expert-cache-per-layer", "--batch-mtp"})
+BOOL_FLAGS = frozenset({"--kv-grow", "--no-host-worker", "--mmap-experts", "--resident-experts", "--prompt-cache-tail",
+                        "--vram-elastic", "--batch-mtp"})
 
 #: DeepSeek mmap choices are words when merging saved configs; paged launch filters unsupported flags.
 DSV41_WORD_FLAGS = frozenset({"--mmap-experts"})

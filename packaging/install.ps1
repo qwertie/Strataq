@@ -31,9 +31,9 @@ $feed = $feed.TrimEnd('/')
 if (-not $feed) {
     Die 'this installer does not know where the Strata release folder is. Set $env:STRATA_FEED to its address and run it again, for example: $env:STRATA_FEED=''https://example.org/strata'''
 }
-if ([Environment]::OSVersion.Platform -ne 'Win32NT') { Die 'this is the Windows installer; on Linux or macOS use install.sh.' }
+if ([Environment]::OSVersion.Platform -ne 'Win32NT') { Die 'this is the Windows installer; on Linux use install.sh.' }
 $arch = $env:PROCESSOR_ARCHITEW6432; if (-not $arch) { $arch = $env:PROCESSOR_ARCHITECTURE }
-if ($arch -ne 'AMD64') { Die "this computer ($arch) is a Windows on ARM PC. Strata needs an NVIDIA or AMD graphics card and has no engine for ARM processors, so it could not run a model here. Run this installer on a Windows PC with an Intel or AMD processor (x64) and one of those cards." }
+if ($arch -ne 'AMD64') { Die "Strata does not support this computer's processor ($arch)." }
 $platform = 'windows-x86_64'
 $gpu = ''
 # a discrete card is named before a built-in one (a Ryzen's "AMD Radeon(TM) Graphics" is listed first on many PCs); this line is only for the person to read

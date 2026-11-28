@@ -50,7 +50,6 @@ TOOL_MODULES = {path.stem for path in (ROOT / "tools").glob("*.py")}
 KNOWN_UPWARD_LOADS = {
     "strata_cli/launch/catalog.py": "runs tools/strata_mcp.py's Strata object, the app's model list and fit code",
     "strata_control/calibration.py": "calls setup.py's hardware_key, runs tools/calibrate.py and strata_tokenizer.py",
-    "strata_control/drafting_fetch.py": "runs tools/dflash2_pack.py to pack the downloaded drafter",
     "strata_control/engine_update.py": "upstream's engine update: reads the Terminal's launch folder, access and settings (strata_cli/launch)",
     "strata_control/setup_config.py": "setup.py's run-config lines (moved by upstream): applies tools/calibrate.py's tuned settings",
     "strata_common/engine_component.py": "upstream's engines of model shapes: strata_control/shape_engine.py (it needs "

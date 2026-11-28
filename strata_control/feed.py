@@ -30,19 +30,16 @@ from dataclasses import dataclass, field
 
 from strata_common import signing
 from strata_base import transfer
-from strata_common.targets import BACKEND_MATRIX, host_platform
+from strata_common.targets import BACKEND_MATRIX
 from strata_control import shape_engine
 
 SCHEMA_VERSION = 1
 FEED_NAME = "strata-feed.json"
-#: The Linux ARM64 (DGX Spark) Terminal reads this file instead. A Control older than 0.1.53 refuses a feed that names a platform it does not know, so
-#: the linux-aarch64 entries cannot sit in strata-feed.json: that file stays as every released client can read it. Same format, same key.
-AARCH64_FEED_NAME = "strata-feed-linux-aarch64.json"
 SIGNATURE_SUFFIX = ".sig"
 FORMATS = ("tar.gz", "tar.xz", "zip")
-PLATFORMS = ("windows-x86_64", "linux-x86_64", "linux-aarch64", "macos-arm64", "macos-x86_64")
-#: Tauri's names for the same platforms (no desktop app is built for linux-aarch64: the entry only keeps the name parsable).
-TAURI_TARGETS = {"windows-x86_64": "windows-x86_64", "linux-x86_64": "linux-x86_64", "linux-aarch64": "linux-aarch64",
+PLATFORMS = ("windows-x86_64", "linux-x86_64", "macos-arm64", "macos-x86_64")
+#: Tauri's names for the same platforms.
+TAURI_TARGETS = {"windows-x86_64": "windows-x86_64", "linux-x86_64": "linux-x86_64",
                  "macos-arm64": "darwin-aarch64", "macos-x86_64": "darwin-x86_64"}
 _VERSION = re.compile(r"\d+\.\d+\.\d+(?:\.\d+)?")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -122,30 +119,6 @@ class EnginePackage:
                 "build_id": self.build_id, "size": self.size, "installed_bytes": self.installed_bytes,
                 "format": self.format, "url": self.url, "sha256": self.sha256, "manifest_sha256": self.manifest_sha256,
                 **({"shape": self.shape} if self.shape else {})}
-
-
-@dataclass(frozen=True)
-class DrafterPackage:
-    """A DFlash2 drafter file Strata hosts (feed member ``drafters``): one pinned file, not an archive. ``backends`` are the engine families it was measured on
-    (``cuda``, ``hip``); ``url`` is relative to the feed (flat release assets) or an https address; ``size`` and ``sha256`` are the file's. The code that fetches it
-    pins the same size and SHA-256 (strata_control/drafting.py), so the feed can move the file but never swap its bytes."""
-    name: str
-    version: str
-    url: str
-    size: int
-    sha256: str
-    backends: tuple[str, ...]
-    base: str = ""
-    licence: str = ""
-    notes: str = ""
-
-    @property
-    def label(self) -> str:
-        return f"drafter {self.name} {self.version}"
-
-    def to_dict(self) -> dict:
-        return {"name": self.name, "version": self.version, "url": self.url, "size": self.size, "sha256": self.sha256,
-                "backends": list(self.backends), "base": self.base, "licence": self.licence, "notes": self.notes}
 
 
 #: Families a ``models`` entry may name that this Control knows how to install (GGUF architectures the engine runs: ``strata --families``). A model of another family
@@ -288,8 +261,6 @@ class Feed:
     #: entries this Control does not know how to use (a platform, a backend or an archive format added after it was built): left out, one plain line each.
     #: A feed with such an entry is still a feed; only an entry of a kind this Control knows and that is malformed refuses the feed.
     skipped: tuple[str, ...] = ()
-    #: the DFlash2 drafter files (feed member ``drafters``, DrafterPackage): fetched by setup, `strata drafting fetch` and Load for a set that has one. Older Controls ignore the member.
-    drafters: tuple[DrafterPackage, ...] = ()
     #: the models Strata lists after the built-in ones (feed member ``models``, FeedModel). An entry that is malformed is left out of this tuple with one plain line in
     #: ``models_dropped`` (and the log); the rest of the feed, and the other models, work. Older Controls ignore the member.
     models: tuple[FeedModel, ...] = ()
@@ -389,24 +360,6 @@ def _control_package(item: dict, version: str, skipped: list | None = None) -> C
     return ControlPackage(version=version, platform=platform, url=_need(item, "url", str, where), format=fmt,
                           size=size, sha256=_hex(item.get("sha256"), where), installed_bytes=installed,
                           entry=str(item.get("entry") or "strata.py"))
-
-
-def _drafter_package(item: dict) -> DrafterPackage:
-    if not isinstance(item, dict):
-        raise FeedError("a drafter entry in the feed is not an object")
-    where = f"drafter entry {item.get('name')!r}"
-    name = _need(item, "name", str, where)
-    if "/" in name or "\\" in name or name.startswith("."):
-        raise FeedError(f"the feed's {where} has a name that is not a plain file name")
-    size = _need(item, "size", int, where)
-    if size <= 0:
-        raise FeedError(f"the feed's {where} declares a size that cannot be a real file")
-    backends = item.get("backends")
-    if not isinstance(backends, list) or not backends or not all(isinstance(b, str) and b for b in backends):
-        raise FeedError(f"the feed's {where} needs a list of backends")
-    return DrafterPackage(name=name, version=str(item.get("version") or ""), url=_need(item, "url", str, where), size=size,
-                          sha256=_hex(item.get("sha256"), where), backends=tuple(backends), base=str(item.get("base") or ""),
-                          licence=str(item.get("licence") or ""), notes=str(item.get("notes") or ""))
 
 
 def _model_text(item: dict, key: str, where: str, *, limit: int = 400, required: bool = True) -> str:
@@ -632,18 +585,10 @@ def parse(payload: bytes, *, source: str, key_id: str) -> Feed:
             if ident in seen:
                 raise FeedError(f"the feed lists the engine for {pkg.shape} {pkg.label} twice")
             seen.add(ident)
-    drafters = []
-    raw_drafters = data.get("drafters")
-    if raw_drafters is not None:
-        if not isinstance(raw_drafters, dict) or not isinstance(raw_drafters.get("packages"), list):
-            raise FeedError("the feed's drafters member lists no packages")
-        drafters = [_drafter_package(item) for item in raw_drafters["packages"]]
-        if len({d.name for d in drafters}) != len(drafters):
-            raise FeedError("the feed lists a drafter twice")
     models, models_dropped = _models_member(data.get("models"))
     return Feed(sequence=sequence, channel=channel, generated_at=generated, expires_at=expires, app=app,
                 control=tuple(control), engine=tuple(engine), source=source, key_id=key_id, raw=payload, dsv41=tuple(dsv41),
-                skipped=tuple(skipped), drafters=tuple(drafters), models=tuple(models), models_dropped=tuple(models_dropped), shape_engines=tuple(shapes))
+                skipped=tuple(skipped), models=tuple(models), models_dropped=tuple(models_dropped), shape_engines=tuple(shapes))
 
 
 def _expired_words(expires_at: str, now: dt.datetime, server_now: dt.datetime | None) -> str:
@@ -688,17 +633,6 @@ def verify_and_parse(payload: bytes, signature_bytes: bytes, *, source: str, tru
     return feed
 
 
-def feed_name(platform: str | None = None) -> str:
-    """The feed file this machine reads from a folder or a release address: ``strata-feed-linux-aarch64.json`` on a Linux ARM64 machine, else
-    ``strata-feed.json``. A source that names its file (``.../x.json``) is used as given, whatever the machine."""
-    if platform is None:
-        try:
-            platform = host_platform()
-        except Exception:                                             # noqa: BLE001 - an unknown OS reads the common feed
-            platform = None
-    return AARCH64_FEED_NAME if platform == "linux-aarch64" else FEED_NAME
-
-
 def fetch(source: str, trusted: dict[str, bytes], *, timeout: float = 30, **guards) -> Feed:
     """Read the feed and its signature from `source` (an https URL, a loopback http URL, a file URL or a folder/file path)."""
     if not trusted:
@@ -708,11 +642,9 @@ def fetch(source: str, trusted: dict[str, bytes], *, timeout: float = 30, **guar
     if transfer.kind_of(source) == "path":
         path = transfer._local_path(source)
         if path.is_dir():
-            location = str(path / feed_name())
-            if not (path / feed_name()).is_file() and (path / FEED_NAME).is_file():
-                location = str(path / FEED_NAME)                 # a local folder made for the common feed (a test feed, an offline copy)
+            location = str(path / FEED_NAME)
     elif transfer.kind_of(source) in ("http", "https") and not source.rsplit("/", 1)[-1].endswith(".json"):
-        location = source.rstrip("/") + "/" + feed_name()
+        location = source.rstrip("/") + "/" + FEED_NAME
     try:
         payload = transfer.read_small(location, timeout=timeout)
         signature = transfer.read_small(location + SIGNATURE_SUFFIX, timeout=timeout)

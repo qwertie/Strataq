@@ -8,7 +8,7 @@
 # requirements-build.txt, and the pinned llama.cpp in third_party/llama.cpp (python -c "import setup; setup.get_llama_cpp()").
 # The package lands in $OUT (default ./out-engine-<variant>). Nothing is uploaded.
 #
-# The cuda12 package is the one the feed and docs/DOCKER.md offer to Pascal and Volta cards, so it needs machine code for sm_60,
+# The cuda12 package is the one the feed offers to Pascal and Volta cards, so it needs machine code for sm_60,
 # sm_61 and sm_70 and the -DSTRATA_EXPERIMENTAL_SM60=ON build (#3503: the 0.2.1 package had sm_75 / 86 / 89 only, and a P100
 # container restarted in a loop with "this PC's GPU is sm_60"). packaging/package_engine.py refuses a cuda12 package without them.
 set -eu

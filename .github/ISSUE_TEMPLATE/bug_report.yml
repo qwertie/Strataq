@@ -34,7 +34,6 @@ body:
         - Desktop app (Windows or Linux)
         - Terminal (the `strata` command)
         - Source (START-HERE.bat, setup.sh or a build)
-        - Docker
         - Other
     validations:
       required: true

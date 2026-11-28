@@ -4,10 +4,9 @@ A record has the same shape for every entry point:
 
   entry            which one
   command          what the person (or the app) asked for, in words
-  fetches          what the drafter fetch was asked to download: file name, variant, backend (nothing is downloaded)
   setup_args       what the entry point hands to setup.py (Terminal launch only)
   config_file      the run config the entry point leaves on disk (normalized)
-  engine           {exe, argv, env_set, notes}: what serve/server.py would start: engine_args(cfg, exe) and the variables child_env(cfg) adds
+  engine           {exe, argv, env_set, notes}: what serve/server.py would start: engine_args(cfg) and the variables child_env(cfg) adds
 """
 
 from __future__ import annotations
@@ -44,7 +43,7 @@ def engine_start(world: World, cfg: dict) -> dict:
     baseline = dict(os.environ)
     notes = io.StringIO()
     with contextlib.redirect_stdout(notes):
-        argv = server.engine_args(dict(cfg), cfg["exe"])
+        argv = server.engine_args(dict(cfg))
         env = server.child_env(dict(cfg))
     env_set = {k: v for k, v in sorted(env.items()) if baseline.get(k) != v}
     return {"exe": cfg["exe"], "argv": [str(a) for a in argv], "env_set": env_set,
@@ -81,7 +80,7 @@ def drive_launch(world: World) -> dict:
     if code != 0 or runner is None or runner.config_path is None:
         return {"entry": "launch", "command": "strata " + " ".join(command), "failed": {"exit": code, "stderr": err[-400:], "stdout": out[-400:]}}
     cfg = json.loads(Path(runner.config_path).read_text(encoding="utf-8"))
-    return {"entry": "launch", "command": "strata " + " ".join(command), "fetches": list(world.fetches),
+    return {"entry": "launch", "command": "strata " + " ".join(command),
             "setup_args": seen.get("setup_args"), "config_file": cfg, "engine": engine_start(world, cfg)}
 
 

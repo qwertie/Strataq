@@ -19,7 +19,7 @@ The same command works on Windows, Linux and macOS; the golden files hold no pat
 
 ## What is simulated
 
-* **machine classes** (`matrix.py`): NVIDIA all-resident (RTX PRO 5000 72 GB), NVIDIA 12 GB streaming (RTX 3060), DGX Spark (linux-aarch64, GB10),
+* **machine classes** (`matrix.py`): NVIDIA all-resident (RTX PRO 5000 72 GB), NVIDIA 12 GB streaming (RTX 3060),
   Strix Halo Windows (gfx1151), Radeon R9700 (gfx1201, Linux).
   A class sets the engine family, the card architecture, the card memory, the platform and the hardware report the Terminal's catalog and the app's host read.
 * **model sets**: IQ3_S, UD-Q4_K_XL, UD-IQ4_XS-v31, DeepSeek (IST-DAS-2.00bpw).

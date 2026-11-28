@@ -46,7 +46,7 @@ WINDOWS_DRIVER = (
 # ---- Linux -----------------------------------------------------------------------------------------------------------------
 # Every distribution has these (glibc and the compiler runtime). Names are sonames or glob patterns.
 LINUX_OS = (
-    "linux-vdso.so.1", "ld-linux-x86-64.so.2", "ld-linux-aarch64.so.1", "libc.so.6", "libm.so.6", "libdl.so.2", "libpthread.so.0",
+    "linux-vdso.so.1", "ld-linux-x86-64.so.2", "libc.so.6", "libm.so.6", "libdl.so.2", "libpthread.so.0",
     "librt.so.1", "libutil.so.1", "libresolv.so.2", "libnss_*.so.*", "libgcc_s.so.1", "libstdc++.so.6", "libgomp.so.1",
     "libatomic.so.1", "libz.so.1", "libnuma.so.1", "libdrm.so.2", "libdrm_amdgpu.so.1", "libelf.so.1", "libtinfo.so.*",
     "libcrypt.so.1", "libffi.so.*", "libpci.so.3", "libudev.so.1", "libX11.so.6", "libxcb.so.1",

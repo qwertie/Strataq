@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import platform
 import shutil
 import subprocess
 import sys
@@ -23,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 import make_local_feed as mlf  # noqa: E402
 
 # the fixture Terminal is built for the machine the test runs on: install.sh picks its archive by uname
-PLAT = "linux-aarch64" if sys.platform.startswith("linux") and platform.machine().lower() in ("aarch64", "arm64") else "linux-x86_64"
+PLAT = "linux-x86_64"
 
 
 class Scripts(unittest.TestCase):
@@ -165,9 +164,6 @@ class Feed(unittest.TestCase):
             bad = work / "bad"                           # a Windows pack that is not a zip cannot be installed by install.ps1: left out of the manifest
             feed_tool.build_feed(bad, key=key, sequence=1, control_dir=self._windows_tar_pack(folder, work))
             self.assertFalse((bad / "install-manifest.txt").exists())
-            if PLAT == "linux-aarch64":                  # the Linux ARM64 Terminal reads its own feed file (same bytes here)
-                for suffix in ("", ".sig"):
-                    shutil.copy2(release / ("strata-feed.json" + suffix), release / ("strata-feed-linux-aarch64.json" + suffix))
             shutil.copy2(ROOT / "packaging" / "install.sh", release / "install.sh")                   # uploaded unchanged
             shutil.copy2(work / "keys" / "feed-key.pub.json", release / "test-trust.json")
             if os.name == "nt" or not (shutil.which("sh") and shutil.which("curl") and shutil.which("tar")):

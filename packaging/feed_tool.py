@@ -31,7 +31,6 @@ import argparse
 import datetime as dt
 import json
 import os
-import shutil
 import stat
 import sys
 import tarfile
@@ -191,20 +190,6 @@ def pack_control(folder: Path, out: Path, *, version: str, platform: str, fmt: s
     return entry
 
 
-def pack_drafter(pack: Path, out: Path, *, version: str, backends: list[str], url_prefix: str = "", base: str = "", licence: str = "", notes: str = "") -> dict:
-    """Copy a DFlash2 drafter file into `out` (a flat release asset, as it is hosted) and write its feed entry (`<name>.entry.json`). The file is not an archive: the
-    client checks its size and SHA-256 against the signed feed AND against the pin in strata_control/drafting.py."""
-    pack = Path(pack)
-    Path(out).mkdir(parents=True, exist_ok=True)
-    target = Path(out) / pack.name
-    if pack.resolve() != target.resolve():
-        shutil.copy2(pack, target)
-    entry = {"name": pack.name, "version": version, "url": f"{url_prefix}{pack.name}", "size": target.stat().st_size, "sha256": sha256_file(target),
-             "backends": list(backends), "base": base, "licence": licence, "notes": notes}
-    (Path(out) / (pack.name + ".entry.json")).write_text(json.dumps(entry, indent=1) + "\n", encoding="utf-8")
-    return entry
-
-
 def model_files(paths: list[Path], repo_dir: str = "") -> list[dict]:
     """The `files` pins of a models entry from the real files: name, exact size, SHA-256 (and `path` when they sit in a folder of the repository)."""
     out = []
@@ -218,7 +203,7 @@ def model_files(paths: list[Path], repo_dir: str = "") -> list[dict]:
 
 def build_feed(out: Path, *, key: dict, sequence: int, channel: str = "stable", engine_dir: Path | None = None,
                control_dir: Path | None = None, app_json: Path | None = None, expires_days: int | None = None,
-               now: dt.datetime | None = None, dsv41_dir: Path | None = None, drafters_dir: Path | None = None, models_dir: Path | None = None,
+               now: dt.datetime | None = None, dsv41_dir: Path | None = None, models_dir: Path | None = None,
                shapes_dir: Path | None = None) -> dict:
     now = now or dt.datetime.now(dt.timezone.utc)
     install_manifest = ""
@@ -239,9 +224,6 @@ def build_feed(out: Path, *, key: dict, sequence: int, channel: str = "stable", 
                 raise SystemExit(f"{p.name} names no shape: pack it from a package made with package_engine.py --shape")
             entries.append(item)
         document["shape_engines"] = {"packages": entries}
-    if drafters_dir:
-        document["drafters"] = {"packages": [json.loads(p.read_text(encoding="utf-8"))
-                                             for p in sorted(Path(drafters_dir).glob("*.entry.json"))]}
     if models_dir:                                # the model list (feed member models): every entry must be one Control will keep, or the build stops
         packages = []
         for p in sorted(Path(models_dir).glob("*.entry.json")):
@@ -355,14 +337,6 @@ def main(argv: list[str] | None = None) -> int:
     pe.add_argument("--format", choices=feedmod.FORMATS, default="tar.gz")
     pe.add_argument("--url-prefix", default="engine/", help='where the archive sits relative to the feed ("" for flat GitHub release assets)')
     pe.add_argument("--prefix", default="strata-engine", help="archive name prefix (strata-dsv41 for the DeepSeek engine packages)")
-    pd = sub.add_parser("pack-drafter", help="a DFlash2 drafter file as a feed entry (feed member drafters)")
-    pd.add_argument("pack", type=Path)
-    pd.add_argument("--out", type=Path, required=True)
-    pd.add_argument("--version", required=True)
-    pd.add_argument("--backends", required=True, help="comma-separated engine families it was measured on, e.g. cuda,hip")
-    pd.add_argument("--url-prefix", default="", help='"" for flat GitHub release assets')
-    pd.add_argument("--base", default="")
-    pd.add_argument("--licence", default="")
     pm = sub.add_parser("model-files", help="print the size and SHA-256 of model files as the `files` list of a feed models entry")
     pm.add_argument("files", type=Path, nargs="+")
     pm.add_argument("--repo-dir", default="", help="the folder of the Hugging Face repository the files sit in (becomes each file's path); default: the top")
@@ -382,7 +356,6 @@ def main(argv: list[str] | None = None) -> int:
     bf.add_argument("--dsv41", type=Path, help="folder of the DeepSeek engine packages' .entry.json files (feed member dsv41)")
     bf.add_argument("--shapes", type=Path, help="folder of the model-shape engines' .entry.json files (feed member shape_engines; pack-engine writes them for a package made with package_engine.py --shape)")
     bf.add_argument("--models", type=Path, help="folder of the models' <id>.entry.json files (feed member models: the model list setup and the screens show after the built-in ones)")
-    bf.add_argument("--drafters", type=Path, help="folder of the DFlash2 drafters' .entry.json files (feed member drafters; pack-drafter writes them)")
     bf.add_argument("--control", type=Path)
     bf.add_argument("--app-json", type=Path)
     bf.add_argument("--expires-days", type=int)
@@ -409,9 +382,6 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "pack-engine":
         entry = pack_engine(a.folder, a.out, a.format, url_prefix=a.url_prefix, prefix=a.prefix)
         print(json.dumps({k: entry[k] for k in ("version", "backend", "variant", "size", "sha256", "manifest_sha256")}, indent=1))
-    elif a.cmd == "pack-drafter":
-        entry = pack_drafter(a.pack, a.out, version=a.version, backends=[b for b in a.backends.split(",") if b], url_prefix=a.url_prefix, base=a.base, licence=a.licence)
-        print(json.dumps({k: entry[k] for k in ("name", "version", "size", "sha256", "backends")}, indent=1))
     elif a.cmd == "model-files":
         print(json.dumps(model_files(a.files, a.repo_dir), indent=1))
     elif a.cmd == "pack-control":
@@ -419,9 +389,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({k: entry[k] for k in ("version", "platform", "size", "sha256")}, indent=1))
     elif a.cmd == "build-feed":
         doc = build_feed(a.out, key=_load_key(a.key), sequence=a.sequence, channel=a.channel, engine_dir=a.engine,
-                         control_dir=a.control, app_json=a.app_json, expires_days=a.expires_days, dsv41_dir=a.dsv41, drafters_dir=a.drafters, models_dir=a.models, shapes_dir=a.shapes)
+                         control_dir=a.control, app_json=a.app_json, expires_days=a.expires_days, dsv41_dir=a.dsv41, models_dir=a.models, shapes_dir=a.shapes)
         print(f"wrote {a.out / feedmod.FEED_NAME} (+ .sig); engines {len((doc.get('engine') or {}).get('packages', []))}, "
-              f"deepseek engines {len((doc.get('dsv41') or {}).get('packages', []))}, shape engines {len((doc.get('shape_engines') or {}).get('packages', []))}, drafters {len((doc.get('drafters') or {}).get('packages', []))}, models {len((doc.get('models') or {}).get('packages', []))}, control {'yes' if 'control' in doc else 'no'}, app {'yes' if 'app' in doc else 'no'}")
+              f"deepseek engines {len((doc.get('dsv41') or {}).get('packages', []))}, shape engines {len((doc.get('shape_engines') or {}).get('packages', []))}, models {len((doc.get('models') or {}).get('packages', []))}, control {'yes' if 'control' in doc else 'no'}, app {'yes' if 'app' in doc else 'no'}")
     elif a.cmd == "set-app-platform":
         url = a.url or f"https://github.com/Niko1221/Strata/releases/latest/download/{a.archive.name}"
         entry = set_app_platform(a.app_json, target=a.target, archive=a.archive, signature_file=a.sig, url=url, version=a.version,

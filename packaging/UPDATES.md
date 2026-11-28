@@ -50,9 +50,6 @@ Comments are for this document only; actual feed files must be strict JSON.
     "manifest_sha256": "...",               // of the package's engine-component.json (it holds every file's hash)
     "installed_bytes": 840893419, "notes": ""}]},
   "dsv41": {"packages": []}                 // optional: the separate DeepSeek engine packages, same entry shape as "engine"
-  "drafters": {"packages": [{               // optional: DFlash2 drafter files Strata hosts (one pinned file each, not an archive)
-    "name": "qwen3.8-flash-next-dflash2.strata1.q4_0-selq4.pack", "version": "1", "url": "qwen3.8-flash-next-dflash2.strata1.q4_0-selq4.pack",
-    "size": 339694592, "sha256": "4df2e5ab...", "backends": ["cuda", "hip"], "base": "incoai/Qwen3.8-Flash-Next-DFlash2@a22a1744", "licence": "Apache-2.0"}]}
 }
 ```
 
@@ -101,15 +98,6 @@ available on this engine and never offered; a family this Control does not know 
 feed and its signature, checked again when read), so an offline PC still sees it; a newer feed without the member withdraws the list, an older (replayed) feed is ignored. `STRATA_FEED_MODELS=0`
 turns the whole thing off. Build it with `feed_tool.py model-files FILE... [--repo-dir Q4_K_M]` (sizes and hashes of the real files) and `build-feed --models FOLDER` (the folder holds the
 `<id>.entry.json` files; a malformed one stops the build); `verify-feed` lists the models and exits 3 if Control would drop one. Older Controls (0.2.11 and before) ignore the member.
-
-The `drafters` member lists the tuned DFlash2 drafter (`strata_control/drafting.py` TUNED_NAME: Strata's fine-tuned copy of incoai/Qwen3.8-Flash-Next-DFlash2, Apache-2.0,
-modified by Strata). Control fetches it for the sets and cards that have a measured tuned entry (`strata_common/drafting.py`) during setup, `strata launch` and
-`strata drafting fetch`: it reads this signed feed, takes the entry with the file name the tuned entry names that lists this engine's backend, and downloads `url` (resumable) into `<data>/dflash2/`. The size and SHA-256
-are pinned in the code too, so the feed can move the file but a feed that lists other bytes is ignored. No feed answer (offline, host down) or no such entry: nothing is said and the
-model keeps the MTP. Make the entry with `feed_tool.py pack-drafter PACK --out RELEASE/drafters --version 1 --backends cuda,hip [--url-prefix ""]` (copies the file flat and writes
-`<name>.entry.json`) and pass the folder to `build-feed --drafters RELEASE/drafters`; upload the pack beside the feed in the same release. Older Controls ignore the member.
-
-The member holds one entry: `qwen3.8-flash-next-dflash2.strata1.q4_0-selq4.pack` (339,694,592 bytes) with `--backends cuda,hip`.
 
 `url` is relative to the feed's own location (or an absolute `https://` address; a loopback `http://` is allowed so a local test
 feed works; a local feed folder may only name files inside itself).
@@ -212,7 +200,7 @@ All signing happens on the release PC, on the finished files.
     npx tauri signer sign -f <path to tauri-updater.key> <artifact>                                 # writes <artifact>.sig
     python packaging/feed_tool.py set-app-platform --app-json RELEASE/tauri-latest.json --target windows-x86_64 --version 0.2.13 --archive Strata-0.2.13-windows-x64-setup.exe --sig Strata-0.2.13-windows-x64-setup.exe.sig --notes "..."
     python packaging/feed_tool.py set-app-platform --app-json RELEASE/tauri-latest.json --target linux-x86_64   --version 0.2.13 --archive Strata-0.2.13-linux-x86_64.AppImage --sig Strata-0.2.13-linux-x86_64.AppImage.sig
-    python packaging/feed_tool.py build-feed --out RELEASE --sequence N --key <feed-key.json> --engine RELEASE/engine --control RELEASE/control --app-json RELEASE/tauri-latest.json [--dsv41 RELEASE/dsv41] [--shapes RELEASE/shapes] [--drafters RELEASE/drafters]
+    python packaging/feed_tool.py build-feed --out RELEASE --sequence N --key <feed-key.json> --engine RELEASE/engine --control RELEASE/control --app-json RELEASE/tauri-latest.json [--dsv41 RELEASE/dsv41] [--shapes RELEASE/shapes]
     python packaging/feed_tool.py verify-feed RELEASE --pub <feed-key.pub.json>
 
 `set-app-platform` checks each `.sig` against the public key in `tauri.conf.json` over the exact bytes, so a file signed with another key, or changed after
@@ -223,8 +211,8 @@ signing, stops the release.
 The fork's Terminal, setup and `strata update` read `https://github.com/qwertie/Strataq/releases/latest/download/`
 (`DEFAULT_FEED`, `PREBUILT_URL`, `install.sh` / `install.ps1`). Its feed is signed with the fork's key (key id `f8aabae844c8ba19`; the
 secret `feed-key.json` is in `C:\Users\qwert\strata-keys`, outside git, and must be backed up). `update_keys.json` trusts that key and
-upstream's `5d1bc23abbeffd0d`, so the fork's feed may list upstream's signed packages it does not rebuild (the drafter
-package) under their absolute upstream URLs. The desktop app is not part of the fork's release (no Tauri key): its links still go upstream.
+upstream's `5d1bc23abbeffd0d`, so the fork's feed may list upstream's signed packages it does not rebuild under their
+absolute upstream URLs. The desktop app is not part of the fork's release (no Tauri key): its links still go upstream.
 
 * **Versions.** The engine packages carry CMakeLists.txt's version (0.1.59.1 at the first release), which must be newer than upstream's
   (0.1.59), or `strata update` offers nothing to a PC that has upstream's engine. Control has its own `VERSION` file
@@ -251,10 +239,8 @@ package) under their absolute upstream URLs. The desktop app is not part of the 
 `build-feed` also writes `RELEASE/install-manifest.txt`, the file the one-line installers read: one line per Control package,
 `platform version url sha256 size`, taken from the `*.entry.json` files in `RELEASE/control`. The Control package is the Terminal that `install.sh` unpacks (it must hold `bin/strata`).
 `install.sh` unpacks with `tar -xzf` and `install.ps1` with `Expand-Archive`, so `windows-x86_64` must be packed with `--format zip` and the other platforms as `tar.gz`;
-`build-feed` leaves a pack in the wrong format out of the manifest and says so. Pack Control for every platform you want the one-line install to cover (`install.sh` knows `linux-x86_64`, `linux-aarch64` and `macos-arm64`, `install.ps1` `windows-x86_64`);
+`build-feed` leaves a pack in the wrong format out of the manifest and says so. Pack Control for every platform you want the one-line install to cover (`install.sh` knows `linux-x86_64`, `install.ps1` `windows-x86_64`);
 a platform with no line gets "this release has no Terminal for <platform>". Upload `install.sh` and `install.ps1` from `packaging/` unchanged: their built-in address is the release folder.
-
-**Linux ARM64 (DGX Spark) has its own feed file.** A Control up to 0.1.52 refuses a feed that names a platform it does not know (`the feed's control entry names an unknown platform`), so the `linux-aarch64` entries are not in `strata-feed.json`, which every released client reads. They are in `strata-feed-linux-aarch64.json` (+ `.sig`, same format, same key, its own `sequence`, aarch64 entries only), uploaded to the same release. A Linux ARM64 Terminal reads that file by default, from a folder or a release address (`strata_control.feed.feed_name()`); a source that names its own `.json` file is used as given. Until every client skips unknown platforms, each release must publish both files, and the aarch64 file's sequence must never go down.
 
 The feed is hosted as the files of a GitHub release of `Niko1221/Strata`. The built-in address is
 `https://github.com/Niko1221/Strata/releases/latest/download` (`strata_control/updater.py` `DEFAULT_FEED` adds `/strata-feed.json`; `install.sh`

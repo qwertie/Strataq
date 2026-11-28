@@ -21,13 +21,12 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-#: The engine stub: the strings drafting.engine_form / engine_reads_selector_q4 look for in the program file (a current engine carries them).
-ENGINE_STUB = (b"STRATA ENGINE STUB (config snapshot)\n--mtp-draft-vocab FILE (or --mtp DIR\n--draft-fallback\n"
-               b"--spec 2 or more and --mtp DIR (for DIR/draft_vocab.bin)\nselector codebooks: Q4_0 rows\n")
+#: The engine stub: a text file in place of the engine program (it is never started).
+ENGINE_STUB = b"STRATA ENGINE STUB (config snapshot)\n"
 
 #: Environment variables a developer or CI may have set that would leak into a start; the world starts from a clean list.
 CLEAR = ("STRATA_SETTINGS_FILE", "STRATA_CONNECTION_DIR", "CUDA_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "STRATA_API_KEY",
-         "STRATA_ENGINE_BACKEND", "STRATA_DFLASH2_TUNED_URL", "STRATA_UPDATE_FEED", "STRATA_NO_ACQUIRE", "STRATA_COMPONENTS_DIR")
+         "STRATA_ENGINE_BACKEND", "STRATA_UPDATE_FEED", "STRATA_NO_ACQUIRE", "STRATA_COMPONENTS_DIR")
 
 
 def context_for(machine: Machine, model_set: ModelSet) -> int:
@@ -65,7 +64,6 @@ class World:
             "TMPDIR": str(r / "tmp"), "TEMP": str(r / "tmp"), "TMP": str(r / "tmp"),
             "STRATA_SETTINGS_FILE": str(r / "settings.json"),
         }
-        self.fetches: list[dict] = []          # what the drafter fetch was asked for (see patches)
 
     # ------------------------------------------------------------------ files
     def build(self) -> "World":
@@ -122,10 +120,6 @@ class World:
                      "--spec-min-p", "0.5", "--mtp", str(self.mtp), "--max-context", str(ctx)]
             if ctx > 8192:
                 args += ["--kv", "int8"]
-            if m.key == "dgx_spark":
-                args += ["--mmap-experts"]
-                args[args.index("--prefill") + 1] = "auto:32768"
-                args += ["--mtp-q4", "all", "--mtp-hnorm", "stream"]
             if ctx >= 65536 and m.key == "nv_12gb_streaming":
                 args += ["--kv-resident", "32768"]
             if s.family == "unsloth":
@@ -153,19 +147,17 @@ class World:
         return hw
 
     def vram_mib(self) -> float | None:
-        """What the telemetry reader would answer for the ONE card (None for a shared-memory chip, as drafting.card_vram_mib does)."""
+        """What the telemetry reader would answer for the ONE card (None for a shared-memory chip)."""
         return self.machine.vram_mib or None
 
     @contextlib.contextmanager
     def patched(self):
         """The Python side of the machine class: engine family, cards, card memory, platform, environment.  Nothing else is replaced."""
-        from strata_common import drafting, engine_component
-        from strata_control import drafting_fetch
+        from strata_common import engine_component
         m = self.machine
         archs = list(m.archs)
         vram = self.vram_mib()
         saved_env = dict(os.environ)
-        fetches = self.fetches
 
         class Reader:
             def ok(self_):                                       # noqa: N805
@@ -174,53 +166,12 @@ class World:
             def read(self_):                                     # noqa: N805
                 return {"mem_total": int(vram * (1 << 20)) if vram else 0}
 
-        def exists(path) -> bool:
-            try:
-                p = Path(path)
-                return p.is_file() and p.stat().st_size > 0
-            except OSError:
-                return False
-
-        def fake_converted_ok(data_dir, *, size=None, sha256=None, name=None):
-            return bool(data_dir) and exists(Path(data_dir) / drafting.FOLDER / (name or drafting.CONVERTED_NAME))
-
-        def put(path: Path) -> Path:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b"snapshot drafter stand-in\n")
-            return path
-
-        def fake_ensure_tuned(data_dir, *, progress=None, cancel=None, url=None, size=None, sha256=None, name=None, feed=None, throttle=False, backend=None, variant=None):
-            pin = drafting.tuned_pack(variant)
-            fetches.append({"call": "ensure_tuned", "file": name or pin.name, "variant": variant or "selq4", "backend": backend, "gb": pin.gb})
-            return put(Path(data_dir) / drafting.FOLDER / (name or pin.name))
-
-        def fake_ensure(data_dir, *, progress=None, cancel=None, base_url=None, files=None):
-            fetches.append({"call": "ensure", "file": drafting.PACK_NAME, "gb": drafting.DOWNLOAD_GB})
-            put(drafting.target_path(data_dir))
-            (Path(data_dir) / drafting.FOLDER / drafting.VOCAB_NAME).write_bytes(b"v")
-            return drafting.target_path(data_dir)
-
-        def fake_convert(data_dir, **kw):
-            fetches.append({"call": "convert_selector"})
-            return put(drafting.converted_path(data_dir))
-
         with contextlib.ExitStack() as st:
             st.enter_context(mock.patch.dict(os.environ, self.env))
             for k in CLEAR:
                 if k not in self.env:
                     os.environ.pop(k, None)
             os.environ["PATH"] = str(self.engine_dir)           # nothing on PATH is probed; the engine is named by the config
-            st.enter_context(mock.patch.object(drafting, "ENGINE_SERVES_DFLASH2", True))
-            st.enter_context(mock.patch.object(drafting, "_HARDWARE", [(m.backend, archs)]))
-            st.enter_context(mock.patch.object(drafting, "converted_ok", fake_converted_ok))
-            st.enter_context(mock.patch.object(drafting, "_here", exists))
-            st.enter_context(mock.patch.object(drafting, "engine_has_selector_q4", lambda: True))
-            st.enter_context(mock.patch.object(drafting, "installed_engine_exe", lambda: self.exe))
-            st.enter_context(mock.patch.object(drafting, "card_vram_mib", lambda cfg, backend, archs=None: None if m.unified else vram))
-            st.enter_context(mock.patch.object(drafting_fetch, "ensure_tuned", fake_ensure_tuned))
-            st.enter_context(mock.patch.object(drafting_fetch, "ensure", fake_ensure))
-            st.enter_context(mock.patch.object(drafting_fetch, "convert_selector", fake_convert))
-            st.enter_context(mock.patch.object(drafting_fetch, "online", lambda *a, **k: True))
             st.enter_context(mock.patch.object(engine_component, "detect_backend", lambda: (m.backend, "snapshot")))
             st.enter_context(mock.patch.object(engine_component, "cuda_archs_present", lambda: archs if m.backend == "cuda" else []))
             st.enter_context(mock.patch.object(engine_component, "hip_archs_present", lambda: archs if m.backend == "hip" else []))
@@ -229,7 +180,6 @@ class World:
                 st.enter_context(mock.patch.object(telemetry, "gpu_reader", lambda *a, **k: Reader()))
             try:
                 from strata_common import engine_client as server
-                st.enter_context(mock.patch.object(server, "_CARD_CLASS", [drafting.card_class(archs)]))
                 st.enter_context(mock.patch.object(server, "gpu_vram_mib", lambda gl, hip=False: {} if m.unified or vram is None else {int((gl or [0])[0]): vram}))
             except ImportError:                                  # serve needs its packages: a world without them still plans
                 pass

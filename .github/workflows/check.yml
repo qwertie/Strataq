@@ -26,7 +26,6 @@ on:
       - strata_control/**
       - tools/**
       - packaging/**
-      - docker/**
       - apps/host/**
       - apps/desktop/**
   pull_request:
@@ -49,7 +48,6 @@ on:
       - strata_control/**
       - tools/**
       - packaging/**
-      - docker/**
       - apps/host/**
       - apps/desktop/**
   workflow_dispatch:

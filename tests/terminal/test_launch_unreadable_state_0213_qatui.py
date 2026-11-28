@@ -133,7 +133,7 @@ class NewKeySentenceIsTrue(unittest.TestCase):
             return base
         patches = [mock.patch.object(Runner, "check_own_files"), mock.patch.object(Runner, "check_serving", return_value=None),
                    mock.patch.object(Runner, "ensure_engine"), mock.patch.object(Runner, "ensure_model", return_value=base),
-                   mock.patch.object(Runner, "ensure_drafter"), mock.patch.object(Runner, "build_config", build),
+                   mock.patch.object(Runner, "build_config", build),
                    mock.patch.object(Runner, "ensure_profile", side_effect=fail_after_write or (lambda *a, **k: None)),
                    mock.patch.object(Runner, "tune", side_effect=RuntimeError("stop here")),
                    mock.patch.object(Runner, "check_saved_state_readable", side_effect=refuse or (lambda *a, **k: None))]

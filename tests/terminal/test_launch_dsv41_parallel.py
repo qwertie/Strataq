@@ -28,7 +28,7 @@ R9700 = {"name": "AMD Radeon AI PRO R9700", "vram_gb": 32.0, "usable": True, "ve
 HW_4X32 = {**HW_12, "ram_gb": 251.0, "disk_free_gb": 900.0, "engine_vendor": "amd", "gpus": [{**R9700, "index": i} for i in range(4)]}
 A6000 = {"name": "NVIDIA RTX A6000", "vram_gb": 48.0, "usable": True, "vendor": "nvidia"}
 HW_2XA6000 = {**HW_12, "ram_gb": 125.0, "disk_free_gb": 900.0, "engine_vendor": "nvidia", "gpus": [{**A6000, "index": i} for i in range(2)]}
-LINUX = ("linux", "x86_64")
+LINUX = "linux"
 
 
 def flat(text: str) -> str:
@@ -113,7 +113,7 @@ class AskedFor(Base):
         self.assertEqual(dsv41_parallel.clamp(12), 8)
         self.assertIsNone(dsv41_parallel.clamp(1))
         self.assertIsNone(dsv41_parallel.clamp(None))
-        w = dsv41_parallel.warnings(12, cards=[A6000], os_name="linux", machine="x86_64", vendor="nvidia")
+        w = dsv41_parallel.warnings(12, cards=[A6000], os_name="linux", vendor="nvidia")
         self.assertTrue(any("will use 8" in what for what, _ in w))
 
     def test_a_linux_run_on_the_cards_it_was_run_on_has_no_warning(self):
@@ -145,7 +145,7 @@ class AtLaunch(Base):
         self.assertNotIn("parallel", out.lower().replace("--parallel", "").replace("(parallel", ""))
 
     def test_a_risky_pick_is_said_and_the_launch_goes_on(self):
-        type(self).host = ("win32", "AMD64")
+        type(self).host = "win32"
         out = self._launch("--parallel", "2")
         self.assertIn("run on Linux only", out)
         self.assertIn("Strata is serving.", out)
@@ -153,7 +153,7 @@ class AtLaunch(Base):
 
 class RiskyPicksWarnNeverRefuse(Base):
     def test_windows_is_a_warning(self):
-        type(self).host = ("win32", "AMD64")
+        type(self).host = "win32"
         p = self.plan("--model", "ist-das-2.25bpw", "--parallel", "4")
         self.assertEqual(p["settings"]["parallel"], 4)               # the number stays: nothing was refused
         self.assertTrue(any("run on Linux only" in w for w in p["warnings"]), p["warnings"])
@@ -168,18 +168,13 @@ class RiskyPicksWarnNeverRefuse(Base):
 
     def test_an_unknown_amd_card_is_a_warning(self):
         w = dsv41_parallel.warnings(2, cards=[{"name": "AMD Radeon RX 7900 XTX", "vram_gb": 24.0, "vendor": "amd", "arch": "gfx1100"}],
-                                    os_name="linux", machine="x86_64", vendor="amd")
+                                    os_name="linux", vendor="amd")
         self.assertTrue(any("gfx1100" in what for what, _ in w))
 
     def test_a_shared_memory_pc_is_a_warning(self):
         w = dsv41_parallel.warnings(2, cards=[{"name": "AMD Radeon 8060S", "vram_gb": 96.0, "vendor": "amd", "uma": True}],
-                                    os_name="linux", machine="x86_64", vendor="amd")
+                                    os_name="linux", vendor="amd")
         self.assertTrue(any("shared memory" in what for what, _ in w))
-
-    def test_a_dgx_spark_has_no_shared_memory_warning(self):
-        w = dsv41_parallel.warnings(2, cards=[{"name": "NVIDIA GB10", "vram_gb": 120.0, "vendor": "nvidia", "uma": True}],
-                                    os_name="linux", machine="aarch64", vendor="nvidia")
-        self.assertEqual(w, [])
 
 
 class SavedAndRestarted(Base):

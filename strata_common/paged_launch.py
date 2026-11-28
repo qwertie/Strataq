@@ -10,10 +10,8 @@ QWEN36_ARCH = "qwen35moe"
 
 def is_paged_engine(cfg: dict) -> bool:
     """Tells whether a run config starts strata-q38 or strata-ds41: every family but Qwen3.6 (by its "arch" or by
-    strata-q36 named as the program), except the all-cards split engine (strata-split-N), whose run config names its
-    own program."""
-    name = get_engine_name(cfg)
-    return cfg.get("arch") != QWEN36_ARCH and name != "strata-q36" and not name.startswith("strata-split")
+    strata-q36 named as the program)."""
+    return cfg.get("arch") != QWEN36_ARCH and get_engine_name(cfg) != "strata-q36"
 
 
 def is_deepseek(cfg: dict) -> bool:
@@ -100,11 +98,8 @@ def translate_args(cfg: dict, args: list[str]) -> list[str]:
             out += ["--lookahead", "0"]
         if deepseek:
             out += ["--dspark", "none"]
-    ignored = ["batchMtp"] if cfg.get("batchMtp") else []
-    if cfg.get("drafting") == "dflash2":
-        ignored.append("drafting=dflash2")
-    if ignored:
-        print("[strata] paged engine: leaving out unsupported config settings: " + ", ".join(ignored), flush=True)
+    if cfg.get("batchMtp"):
+        print("[strata] paged engine: leaving out unsupported config settings: batchMtp", flush=True)
     if omitted:
         print("[strata] paged engine: leaving out unsupported settings: " + " ".join(omitted), flush=True)
     return out

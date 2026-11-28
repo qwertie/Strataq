@@ -7,7 +7,6 @@ import io
 import json
 import os
 import platform
-from strata_base import sysinfo
 import re
 import shutil
 import subprocess
@@ -44,17 +43,7 @@ def _location(raw: str, cfg: dict, config_path: Path) -> Path:
     return (Path(cwd) if isinstance(cwd, str) and cwd else config_path.parent) / value
 
 
-def _drafter_is_dflash2(cfg: dict) -> bool:
-    """Does this run config's drafting choice mean DFlash2 on this computer (Auto included)? Never raises."""
-    try:
-        from strata_common import drafting
-        backend, archs = drafting.detect_hardware()
-        return cfg.get("mtp") is not False and drafting.choice_of(cfg.get("drafting"), model_name=cfg.get("model_name"), backend=backend, archs=archs) == "dflash2"
-    except Exception:                                    # noqa: BLE001 - unknown means the MTP, which stays required
-        return False
-
-
-def _item(name: str, path: Path, kind: str, *, required: bool = True) -> dict:
+def _item(name: str, path: Path, kind: str) -> dict:
     try:
         if kind == "file":
             valid = path.is_file() and path.stat().st_size > 0
@@ -62,8 +51,7 @@ def _item(name: str, path: Path, kind: str, *, required: bool = True) -> dict:
             valid = path.is_dir()
     except OSError:
         valid = False
-    return {"name": name, "status": "ok" if valid else ("missing" if required else "optional_missing"),
-            "path": str(path), "kind": kind, "required": required}
+    return {"name": name, "status": "ok" if valid else "missing", "path": str(path), "kind": kind, "required": True}
 
 
 def _selected_indices(value: object) -> list[int] | None:
@@ -112,16 +100,15 @@ def _nvidia_cards() -> tuple[list[dict] | None, str | None]:
             if len(row) != 5 or len(cards) >= 64:
                 raise ValueError("invalid field count")
             index_raw, name, uuid, memory_raw, driver = [part.strip() for part in row]
-            unified = memory_raw == "[N/A]" and sysinfo.machine().lower() in ("aarch64", "arm64")   # a DGX Spark's GB10: no separate graphics memory
             if not (re.fullmatch(r"[0-9]{1,4}", index_raw)
-                    and (unified or re.fullmatch(r"[0-9]{1,9}", memory_raw))
-                    and 0 <= int(index_raw) <= 1023 and (unified or int(memory_raw) > 0)
+                    and re.fullmatch(r"[0-9]{1,9}", memory_raw)
+                    and 0 <= int(index_raw) <= 1023 and int(memory_raw) > 0
                     and 1 <= len(name) <= 128 and 1 <= len(uuid) <= 128
                     and 1 <= len(driver) <= 64
                     and all(part.isprintable() for part in (name, uuid, driver))):
                 raise ValueError("invalid card fields")
             cards.append({"index": int(index_raw), "name": name, "uuid": uuid,
-                          "memory_mib": None if unified else int(memory_raw), "driver_version": driver})
+                          "memory_mib": int(memory_raw), "driver_version": driver})
     except (csv.Error, ValueError):
         return None, "nvidia-smi returned an unrecognized card list"
     if not cards or len({card["index"] for card in cards}) != len(cards):
@@ -217,9 +204,7 @@ def inspect(config_path: Path | None, *, profile_id: str | None = None, live: bo
                 except ValueError:
                     pass
             kind = "file"
-        # The MTP layer is one of two drafters, never both: a model whose drafter is DFlash2 has no layer on disk, and the run config keeps `--mtp <folder>` for a
-        # later switch to the MTP. Its absence then does not make the model unusable (strata_control/drafting.py loads the drafter that is there).
-        components.append(_item(arg.lstrip("-"), _location(raw, cfg, config_path), kind, required=not (arg == "--mtp" and _drafter_is_dflash2(cfg))))
+        components.append(_item(arg.lstrip("-"), _location(raw, cfg, config_path), kind))
 
     vision = cfg.get("vision")
     if isinstance(vision, dict):
