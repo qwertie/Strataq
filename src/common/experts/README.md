@@ -35,9 +35,8 @@ What is here so far is the model-neutral host code, which needs no GPU:
 Still in `src/core/`: the GPU cache (`expert_cache`) and the expert sources with their prefetch and the adaptive tier's
 copies (`expert_source`, `foresight_swap.hpp`). They call the CUDA runtime directly (streams, events, page-locked and
 mapped host memory, the driver's virtual memory functions), which code in `src/common/` must not, and
-`src/base/gpu/runtime.hpp` does not offer those calls yet. Qwen3.6 and DeepSeek do not use this store: Qwen3.6 has its
-own hybrid slots in `src/models/qwen36/q36_engine.cu`, DeepSeek its own store in
-`src/models/deepseekv41/ds4_store.hpp`.
+`src/base/gpu/runtime.hpp` does not offer those calls yet. Qwen3.6 does not use this store: it has its own hybrid
+slots in `src/models/qwen36/q36_engine.cu`.
 
 The multi-GPU parts stay in `src/core/` too (B3): the peer tier (`peer_experts`) and the helper caches
 (`remote_experts`, `remote_expert_opt`). Besides calling the CUDA runtime directly, they use the shared S2 expert backend

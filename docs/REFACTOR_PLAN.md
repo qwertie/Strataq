@@ -54,6 +54,21 @@ session on an NVIDIA machine. Changes nobody can test come last.
 C1 (share the other 77 SYCL copies of `src/` files) and C2 (generate the SYCL kernels from the `.cu` sources) are moot:
 `sycl/` was deleted.
 
+### Phase D: DeepSeek V4.1 shaped like Qwen3.8
+
+The goal is that `strata-ds41` and `strata-q38` share names, interfaces and file layout, and the shape of the decode
+step, before more speed work. The math stays the same: the same kernels, the same order of sums, the same tokens.
+Each step is checked by greedy answers of both builds compared token for token (one start with DSpark off: 1, 2 and 4
+conversations, route prior 0 and 1000; one with DSpark drafting), and by decode speed in alternating starts.
+
+| Step | Work | Status |
+|---|---|---|
+| D-1 | Delete what `strata-dsv41` alone used from `ds4::Model`: its API, `--parallel`, the slots, its RAM store, the PCIe lane, the VRAM swaps, the lookahead, tensor-parallel sums | done: `ds4_model.cu` 16,139 → about 9,200 lines |
+| D-2 | Split `ds4_model.cu` by job (loading, prompt path, CPU lane, DSpark, window decode, paged entry points) behind a private header | |
+| D-3 | One place for DeepSeek's `DS4_*` settings; CUDA calls through `src/base/gpu` | |
+| D-4 | A shared per-card stage interface (`launch`, `poll`, `wait`) and a base class that both `PagedQwen` and `PagedDeepSeek` derive from | |
+| D-5 | A shared CPU-expert service | not planned: see the open issue below |
+
 ## Checks for every step
 
 | Check | Where | How |
@@ -125,6 +140,14 @@ Found during the work; each needs a decision or a later step.
   so +8 lines in all (`tools/loc_report.py`). Sharing more (the claim word, the park barrier, the stall wait) means
   one claim layout for both, which would change `ExpertPool`'s issue #29 protocol or `ds4::Pool`'s 32-bit job count,
   and the NUMA paths of both cannot be measured on a one-node PC. Not worth doing for the line count alone.
+- **The CPU lanes of Qwen3.8 and DeepSeek do the same job differently** (from reading the code, 2026-11-28). Qwen's
+  graph rings a doorbell, the host decides which experts the GPU computes and which the CPU does (`GpuPlanSink`),
+  the pool's jobs are compiled for Qwen3.8's shape (`src/common/kernels/cpu/expert.hpp`), and the GPU adds the
+  experts' rows up. DeepSeek's GPU decides (`plan_ptr`), a thread of its own computes the CPU's experts on `ds4::Pool`
+  and adds them up on the host, weighted per token, before the GPU waits for them (`wait_seq`). One shared service
+  would have to choose one place for the sum (the order of float adds, so the tokens), one plan, one thread model and
+  one mailbox. They already share the CPU row kernels. A row-job entry point that takes the model's shape at run time
+  (in `src/common/kernels/cpu`) is the first piece worth sharing, when one of the two changes anyway.
 - **DeepSeek's draft sampling is its own.** Since B2, DeepSeek's plain draw is the shared `sample_tokens` (the same
   tokens: 10,800 rows of random logits, and 136 sampled draws of the engine replayed from its logits, gave the same
   token from DeepSeek's old kernel and from each of the shared sampler's three paths, 2026-10-29, Strix Halo).

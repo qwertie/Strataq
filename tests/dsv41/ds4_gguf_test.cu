@@ -4,14 +4,13 @@
 // double-precision reference of random BF16 matrices and MXFP4 experts: the GEMVs (BF16 / MXFP4, 1..16 activations,
 // aligned or not), the token experts (gate / up / swiglu / down / combine, experts off the device, the CPU part, the
 // shared expert), a window's grouped experts (bit for bit the token path's), the prompt path's expert sets and the CPU
-// lane's rows; the PCIe lane's streamed experts (bit for bit the VRAM ones'); and the KV caches' packed rows
-// (ds4_kernels.cu) against the BF16 rows bit for bit.  Needs a GPU, no model.
-// ds4_gguf_test [n_embd n_ff] | --kv (the caches alone) | --lane (the PCIe lane alone) | --rows (--parallel's rows)
+// lane's rows; and the KV caches' packed rows (ds4_kernels.cu) against the BF16 rows bit for bit.  Needs a GPU, no
+// model.
+// ds4_gguf_test [n_embd n_ff] | --kv (the caches alone) | --rows (batched matrix-vector rows)
 #include "../../src/models/deepseekv41/ds4_gguf.cuh"
 #include "../../src/models/deepseekv41/ds4_gguf_cpu.hpp"
 #include "../../src/models/deepseekv41/ds4_iq.cuh"
 #include "../../src/models/deepseekv41/ds4_kernels.cuh"
-#include "../../src/models/deepseekv41/ds4_pcie.cuh"
 #include "../../src/models/deepseekv41/ds4_q6k.cuh"
 
 #include "ggml.h"   // (the low-bit types' reference values: ggml's own dequantize_row_*)
@@ -670,7 +669,7 @@ void test_mv_q(int type, cudaStream_t s) {
     }
 }
 
-// --parallel's multi step (maya-ds4 Model::step_multi): the rows of several conversations through one mv - each
+// The rows of several conversations through one mv: each
 // activation's outputs bit for bit its own mv alone, whatever its place among the others (every dense format, every
 // low-bit one; the decode's activation counts)
 void test_mv_rows(cudaStream_t s) {
@@ -1676,104 +1675,6 @@ void test_kv_pack(cudaStream_t s) {
 
 }  // namespace
 
-// ---------------------------------------------------------------- the decode path's PCIe lane (ds4_pcie.cuh)
-// A token's 6 experts, 3 of them streamed: off the plan at first (the CPU lane's, to the token path), their blobs in
-// pinned memory (as the host's readers leave them), pulled by stream_fetch into slots elsewhere once their ready flags
-// are set (after the kernel started: it waits for them) - or read where they lie (copy 0: an integrated GPU's way) -
-// taken into the plan, their gate / up in a second pass: the output bit for bit the one with all 6 in the plan from the
-// start (a streamed expert is a VRAM one to the sums); with none streamed, the first pass's alone
-// (blobs on the device, hblobs their bytes on the host)
-void test_lane(const char* name, const x3::ExpertLayout& lay, const uint8_t* blobs, const uint8_t* hblobs, size_t blob,
-               int D, int F, cudaStream_t s) {
-    namespace pc = strata::ds4::pcie;
-    const int k = 6;
-    const float lim = 10.0f;
-    std::vector<float> x(D), sh(D), w(8, 0.0f);
-    for (auto& v : x) v = frand();
-    for (auto& v : sh) v = frand(0.1f);
-    for (int i = 0; i < k; ++i) w[i] = 0.1f + 0.05f * (float) i;
-    float *dx = dev(x), *dsh = dev(sh), *dw = dev(w);
-    float* dh = dev(std::vector<float>((size_t) 8 * F));
-    float *da = dev(std::vector<float>(D)), *db = dev(std::vector<float>(D));
-    uint8_t *slots = nullptr, *pinned = nullptr;
-    CU(cudaMalloc(&slots, 8 * blob));
-    CU(cudaHostAlloc(&pinned, 8 * blob, cudaHostAllocMapped));
-    pc::Pull* pull = nullptr;
-    CU(cudaHostAlloc(&pull, sizeof(pc::Pull), cudaHostAllocMapped));
-    std::memset(pull, 0, sizeof(pc::Pull));
-    unsigned* dflag = dev(std::vector<unsigned>(pc::kPullFlags, 0u));
-    std::vector<unsigned long long> pa(8, 0ull);
-    for (int i = 0; i < k; ++i) pa[i] = (unsigned long long) (blobs + (size_t) i * blob);
-    unsigned long long *dpa = dev(pa), *dpb = nullptr, *dp2 = dev(std::vector<unsigned long long>(8, 0ull));
-    x3::MoeArgs ma;
-    ma.plan_w = dw;
-    ma.lay = lay;
-    ma.k = k;
-    ma.n_embd = D;
-    ma.n_ff = F;
-    ma.limit = lim;
-    ma.plan_ptr = dpa;   // all six in the plan
-    gg::moe_gate_up(ma, dx, dh, s);
-    gg::moe_down(ma, dh, dsh, da, s);
-    CU(cudaStreamSynchronize(s));
-    const std::vector<float> ya = host(da, D);
-    pc::Mats mt;   // (each matrix with the padding after it: within the blob)
-    for (int r = 0; r < 3; ++r) {
-        mt.off[r] = lay.trellis[r];
-        mt.bytes[r] = (r < 2 ? lay.trellis[r + 1] : blob) - lay.trellis[r];
-    }
-    unsigned seq = 100;
-    for (const int copy : {1, 0})
-        for (const unsigned mask : {0x1Au, 0u}) {   // picks 1, 3, 4 streamed; none
-            ++seq;
-            std::vector<unsigned long long> pb = pa;
-            for (int i = 0; i < 8; ++i) {
-                pull->src[i] = 0ull;
-                pull->bad[i] = 0u;
-                for (int r = 0; r < 4; ++r) pull->ready[i][r] = 0u;
-                if (i < k && ((mask >> i) & 1u)) {
-                    pull->src[i] = (unsigned long long) (pinned + (size_t) i * blob);
-                    pb[i] = 0ull;
-                }
-            }
-            dpb = dev(pb);
-            x3::MoeArgs mb = ma;
-            mb.plan_ptr = dpb;
-            gg::moe_gate_up(mb, dx, dh, s);
-            pc::stream_fetch(pull, seq, dflag, slots, blob, mt, copy != 0, dpb, dp2, k, 4, s);
-            x3::MoeArgs m2 = ma;
-            m2.plan_ptr = dp2;
-            gg::moe_gate_up(m2, dx, dh, s);
-            gg::moe_down(mb, dh, dsh, db, s);
-            // the host's side, after the device started waiting: the pull's seq, then each expert's matrices read and
-            // flagged one by one
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-            *(volatile unsigned*) &pull->seq = seq;
-            for (int i = 0; i < k; ++i)
-                if ((mask >> i) & 1u)
-                    for (int r = 0; r < 3; ++r) {
-                        std::memcpy(pinned + (size_t) i * blob + mt.off[r], hblobs + (size_t) i * blob + mt.off[r],
-                                    mt.bytes[r]);
-                        std::atomic_thread_fence(std::memory_order_release);
-                        *(volatile unsigned*) &pull->ready[i][r] = seq;
-                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    }
-            CU(cudaStreamSynchronize(s));
-            const std::vector<float> yb = host(db, D);
-            const bool same = std::memcmp(ya.data(), yb.data(), (size_t) D * 4) == 0;
-            const bool done = *(volatile unsigned*) &pull->done == seq;   // (the pull's end, as the host sees it)
-            if (!same || !done) ++g_fail;
-            char what[96];
-            std::snprintf(what, sizeof what, "lane: %s, %s streamed%s", name, mask ? "3 of 6" : "none",
-                          copy ? "" : " (read in place)");
-            std::printf("%-44s %s%s\n", what, same ? "ok    bit for bit all in VRAM" : "FAIL  differs from all in VRAM",
-                        done ? "" : " - FAIL: the pull's end not seen");
-            cudaFree(dpb);
-        }
-    cudaFree(dx), cudaFree(dsh), cudaFree(dw), cudaFree(dh), cudaFree(da), cudaFree(db), cudaFree(slots), cudaFree(dpa);
-    cudaFree(dp2), cudaFree(dflag);
-    cudaFreeHost(pinned), cudaFreeHost(pull);
-}
 // The low-bit experts' activations as the CPU lane rounds them (act_q8k: ggml's Q8_K, the GPU's unless DS4_IQ_Q8K=0):
 // the int8 values and scales byte for byte the CPU lane's (iq_cpu_quant to Q8_K), ties and an all-zero block among
 // them; then each low-bit pair's expert on the GPU (as this process's DS4_IQ_Q8K has it) against the CPU lane's
@@ -1857,18 +1758,6 @@ void test_q8k(cudaStream_t s) {
         cudaFree(dpp), cudaFree(dw), cudaFree(dxs), cudaFree(dh), cudaFree(dsh), cudaFree(dout), cudaFree(Q.dev);
     }
 }
-void test_lanes(cudaStream_t s) {   // MXFP4 and every low-bit pair
-    Experts M = make_experts(512, 256, 6);
-    test_lane("MXFP4", M.lay, M.dev, M.host.data(), M.blob, 512, 256, s);
-    cudaFree(M.dev);
-    for (const auto& pr : kQPairs) {
-        QExperts Q = make_q(512, 256, 6, pr.first, pr.second);
-        char nm[64];
-        std::snprintf(nm, sizeof nm, "%s/%s", tn(pr.first), tn(pr.second));
-        test_lane(nm, Q.lay, Q.dev, Q.host.data(), Q.blob, 512, 256, s);
-        cudaFree(Q.dev);
-    }
-}
 
 // ---------------------------------------------------------------- Engram rows in Q6_K
 __global__ void q6k_rows_kernel(const uint8_t* rows, int hd, float* out) {   // (engram_dequant's Q6_K branch)
@@ -1921,12 +1810,7 @@ int main(int argc, char** argv) {
         std::printf("%s (%d failed)\n", g_fail ? "FAILED" : "ALL OK", g_fail);
         return g_fail ? 1 : 0;
     }
-    if (argc >= 2 && std::strcmp(argv[1], "--lane") == 0) {   // the PCIe lane's streamed experts alone
-        test_lanes(s);
-        std::printf("%s (%d failed)\n", g_fail ? "FAILED" : "ALL OK", g_fail);
-        return g_fail ? 1 : 0;
-    }
-    if (argc >= 2 && std::strcmp(argv[1], "--rows") == 0) {   // --parallel's multi step: each row's mv alone
+    if (argc >= 2 && std::strcmp(argv[1], "--rows") == 0) {   // each row's mv alone
         test_mv_rows(s);
         std::printf("%s (%d failed)\n", g_fail ? "FAILED" : "ALL OK", g_fail);
         return g_fail ? 1 : 0;
@@ -1945,7 +1829,6 @@ int main(int argc, char** argv) {
         test_mv_q(t, s);
     test_mv_rows(s);
     for (const auto& pr : kQPairs) test_experts_q(512, 256, pr.first, pr.second, s);
-    test_lanes(s);
     if (argc >= 3) {
         test_experts(std::atoi(argv[1]), std::atoi(argv[2]), s);
         for (int i : {0, 4}) test_experts_q(std::atoi(argv[1]), std::atoi(argv[2]), kQPairs[i].first, kQPairs[i].second, s);

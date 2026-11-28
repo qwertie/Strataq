@@ -1,5 +1,5 @@
 // src/models/deepseekv41/ds4_options.cpp - the model's own command-line options (ds4_model.hpp: read_option), which
-// strata-dsv41 and strata-ds41 both read, and the drafts' confidence cut both make.
+// strata-ds41 reads, and the drafts' confidence cut.
 #include "ds4_model.hpp"
 #include "strata/common/spec/confidence.hpp"
 
@@ -33,11 +33,8 @@ bool read_option(const std::string& a, const std::function<std::string(const cha
     else if (a == "--cpu-threads") o.cpu_threads = std::atoi(val("--cpu-threads").c_str());
     else if (a == "--expert-profile") o.profile = val("--expert-profile");
     else if (a == "--profile-readonly") o.profile_readonly = true;   // (read the placement, never write the counts back)
-    else if (a == "--ssd-cache") o.ssd_cache_gb = std::atof(val("--ssd-cache").c_str());
-    else if (a == "--ssd-policy") {
-        const std::string v = val("--ssd-policy");
-        o.ssd_policy = v == "lfu" ? 1 : v == "lfulru" ? 2 : 0;
-    }
+    else if (a == "--ssd-cache" || a == "--ssd-policy")
+        val(a.c_str());   // (accepted and ignored: the caller's pools hold the experts)
     else if (a == "--no-expert-cache") o.expert_cache = false;
     else if (a == "--dspark") {
         const std::string v = val("--dspark");
