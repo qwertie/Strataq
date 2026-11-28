@@ -1,10 +1,9 @@
 """The model catalog, the computer's figures and the fit words for `strata launch`.
 
-There is ONE catalog: strata_common/catalog.py's MODELS / FAMILIES / CONTEXTS, which the desktop app reads through
-tools/strata_mcp.py (`Strata.model_table`, `Strata.hardware`, `Strata.recommend`; the app page's own fit arithmetic is
-apps/host/src/lib/native-fit.ts `fitOn`). This module loads that same strata_mcp.py from the installer folder and ports `fitOn` line
-by line; it holds no table of its own. Without the installer files (a Terminal bundle made before launch existed) it says so in
-words instead of guessing.
+There is ONE catalog: strata_common/catalog.py's MODELS / FAMILIES / CONTEXTS, which tools/strata_mcp.py serves
+(`Strata.model_table`, `Strata.hardware`, `Strata.recommend`). This module loads that strata_mcp.py from the installer
+folder and adds the fit arithmetic (`fit_on`); it holds no table of its own. Without the installer files (a Terminal
+bundle made before launch existed) it says so in words instead of guessing.
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ def _round1(n: float) -> float:
 
 
 def fit_on(v: dict, ram_gb: float | None, vram_gb: float | None) -> dict[str, Any]:
-    """native-fit.ts `fitOn`: where the weights go on this computer. Returns memoryGb, vramUseGb, ramUseGb, spillGb, known."""
+    """Works out where the weights go on this computer. Returns memoryGb, vramUseGb, ramUseGb, spillGb, known."""
     memory = gpu_fit.memory_needed(v)
     f = gpu_fit.fit(memory, ram_gb, vram_gb)
     return {"memoryGb": memory, "vramUseGb": f["vram_use_gb"], "ramUseGb": f["ram_use_gb"], "spillGb": f["spill_gb"],

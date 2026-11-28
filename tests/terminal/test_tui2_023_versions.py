@@ -36,16 +36,6 @@ class VersionBump(unittest.TestCase):
         self.assertEqual(strata_cli.version(), "0.1.150")
         self.assertEqual(first("CMakeLists.txt", r"^project\(strata VERSION ([0-9.]+) "), "0.1.59.1")
 
-    def test_every_place_the_app_version_lives_says_0_2_3(self):
-        self.assertEqual(first("apps/desktop/src-tauri/Cargo.toml", r'^version = "([^"]+)"'), "0.2.13")
-        lock = (ROOT / "apps/desktop/src-tauri/Cargo.lock").read_text(encoding="utf-8")
-        self.assertRegex(lock, r'name = "strata-desktop"\r?\nversion = "0.2.13"')
-        self.assertEqual(json.loads((ROOT / "apps/desktop/package.json").read_text(encoding="utf-8"))["version"], "0.2.13")
-        host = json.loads((ROOT / "apps/host/package.json").read_text(encoding="utf-8"))
-        self.assertEqual(host["version"], "0.2.13")
-        locked = json.loads((ROOT / "apps/host/package-lock.json").read_text(encoding="utf-8"))
-        self.assertEqual((locked["version"], locked["packages"][""]["version"]), ("0.2.13", "0.2.13"))
-
     def test_the_documents_that_state_the_current_version_agree(self):
         self.assertIn("Version 0.2.13, engine 0.1.59.1.", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
 

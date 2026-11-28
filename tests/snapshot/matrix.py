@@ -23,7 +23,7 @@ class Machine:
     vendor: str                   # nvidia | amd
     vram_gb: float                # the card's own memory (0 for a unified-memory chip)
     ram_gb: float
-    arch_field: object = None     # the "arch" of the report's card (the app reads an integer for NVIDIA, "gfx..." for AMD)
+    arch_field: object = None     # the "arch" of the report's card (an integer for NVIDIA, "gfx..." for AMD)
     unified: bool = False
     cards: int = 1
 
@@ -70,13 +70,11 @@ MODEL_SETS: tuple[ModelSet, ...] = (
 )
 
 #: setup is listed so the table has its row; see driver.drive_setup for why it is not driven today.
-ENTRY_POINTS = ("setup", "launch", "app_plain", "app_models")
+ENTRY_POINTS = ("setup", "launch")
 
 ENTRY_TITLES = {
     "setup": "strata setup / setup.py config generation",
     "launch": "strata launch (Terminal)",
-    "app_plain": "the app's plain Load (no Drafting choice)",
-    "app_models": "the app's Models-screen Load (Drafting: Auto)",
 }
 
 

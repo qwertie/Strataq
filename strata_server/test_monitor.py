@@ -444,7 +444,7 @@ class Monitor(unittest.TestCase):
             self.assertIn(f'id="{el}"', html)
             self.assertIn(f'"{el}"', js)
         self.assertIn('"v1/memory"', js)
-        self.assertIn('import("./memory-panel.js")', js)  # shared with the desktop app (apps/host, MemoryPanel.tsx)
+        self.assertIn('import("./memory-panel.js")', js)
         self.assertIn('href="web/memory-panel.css"', html)
         for name, text in (("memory-panel.js", "export function drawMemoryPanel"), ("memory-panel.css", ".mem-bar ")):
             code, body = self.request("/web/" + name)

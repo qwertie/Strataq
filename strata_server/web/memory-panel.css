@@ -1,5 +1,5 @@
-/* strata_server/web/memory-panel.css - the Memory panel's styles (memory-panel.js), for the web page and the desktop
-   app alike: both define the design kit's --st-* tokens. */
+/* strata_server/web/memory-panel.css - the Memory panel's styles (memory-panel.js), for the web page, which defines the
+   design kit's --st-* tokens. */
 .mem-bars { display: flex; flex-direction: column; gap: var(--st-s-4); }
 .mem-head { display: flex; justify-content: space-between; gap: var(--st-s-2); margin-bottom: 4px;
             font-size: var(--st-fs-sm); font-weight: var(--st-fw-medium); font-variant-numeric: tabular-nums; }

@@ -2,8 +2,8 @@
 // The Monitor tab rebuilds PR #22's dashboard idea (code-martin) on the server's own /metrics.
 "use strict";
 
-// model-heading.js and vram-reading.js are ES modules that the desktop app imports too.  This file stays a classic
-// script because the page's other scripts (chats-ui.js) use its globals, so start() loads them before the first poll.
+// model-heading.js and vram-reading.js are ES modules.  This file stays a classic script because the page's other
+// scripts (chats-ui.js) use its globals, so start() loads them before the first poll.
 let getModelHeading, getVramReading;
 
 const $ = (id) => document.getElementById(id);
@@ -943,7 +943,7 @@ function renderMcp() {
 }
 
 // ------------------------------------------------------------------ Memory (GET / POST /v1/memory)
-// The Memory panel (memory-panel.js, shared with the desktop app), refreshed every third Monitor tick; its changes go
+// The Memory panel (memory-panel.js), refreshed every third Monitor tick; its changes go
 // to POST /v1/memory.
 let memoryReading = null;
 async function loadMemory() {

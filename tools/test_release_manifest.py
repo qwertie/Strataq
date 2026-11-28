@@ -13,14 +13,6 @@ class ReleaseManifest(unittest.TestCase):
         problems = rm.check(rm.load())
         self.assertEqual(problems, [], "\n".join(problems))
 
-    def test_old_installer_names_are_found_and_rewritten(self):
-        m = rm.load()
-        old = "run `Strata-0.2.9-windows-x64-setup.exe` or Strata-0.2.9-linux-x86_64.AppImage.sig"
-        self.assertEqual(len(rm.INSTALLER_RE.findall(old)), 2)
-        fixed = rm.INSTALLER_RE.sub(lambda x: x.group(0).replace(x.group(1), m["product_version"], 1), old)
-        self.assertNotIn("0.2.9", fixed)
-        self.assertIn("Strata-%s-linux-x86_64.AppImage.sig" % m["product_version"], fixed)
-
     def test_version_lines_are_rewritten_and_a_second_pass_changes_nothing(self):
         m = rm.load()
         page, regex, keys = [r for r in rm.LINES if r[0] == "AGENTS.md"][0]
@@ -36,7 +28,6 @@ class ReleaseManifest(unittest.TestCase):
         m.pop("terminal_version", None)                             # the Terminal then has to say the product version
         problems = "\n".join(rm.check(m))
         self.assertIn("strata_cli/__init__.py says", problems)
-        self.assertIn("asset list has no Strata-0.2.99-windows-x64-setup.exe", problems)
 
     def test_separate_control_and_engine_versions_are_checked(self):
         """Checks independent Terminal, Control and engine release numbers."""
@@ -52,11 +43,6 @@ class ReleaseManifest(unittest.TestCase):
         wrong = copy.deepcopy(m)
         del wrong["terminal_version"]                               # no terminal_version: the Terminal must say the product version
         self.assertIn("strata_cli/__init__.py says 0.2.50", "\n".join(rm.check(wrong)))
-
-    def test_installer_names_in_the_manifest_asset_list(self):
-        m = rm.load()
-        for name in rm.expand(m):
-            self.assertIn(name, m["assets"])
 
 
 if __name__ == "__main__":

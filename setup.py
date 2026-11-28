@@ -93,9 +93,9 @@ from strata_common.catalog import (  # noqa: F401 - tools/ and the tests read th
     UNSLOTH_V31_IQ4_XS, UNSLOTH_V31_REVISION, UNSLOTH_V31_SHARDS, dsv41_also, hf, hf_endpoint, pick_dsv41_layout)
 
 ROOT = Path(__file__).resolve().parent
-# The desktop app runs this installer under Strata Control (its bundled Python, STRATA_CONTROL_INSTALL=1). The source
-# (tools/, data/, strata_server/) stays in ROOT, inside the app; everything the install writes (run configs, logs, third_party,
-# the data folder beside it) goes to home(), a per-user folder (STRATA_INSTALL_DIR). In that mode it installs no Python
+# `strata launch` runs this installer under Strata Control (its bundled Python, STRATA_CONTROL_INSTALL=1). The source
+# (tools/, data/, strata_server/) stays in ROOT, inside the Control bundle; everything the install writes (run configs,
+# logs, third_party, the data folder beside it) goes to home(), a per-user folder (STRATA_INSTALL_DIR). In that mode it installs no Python
 # package and no engine and compiles nothing: it downloads the model files, prepares them with the bundled tools and
 # writes a run config whose engine is "component:strata-engine". Outside that mode home() is ROOT and nothing changes.
 CONTROL = os.environ.get("STRATA_CONTROL_INSTALL") == "1"
@@ -6357,7 +6357,7 @@ def find_in(roots: list, rel: str):
 
 def mmproj_beside(gguf_dir, name: str, size: int | None = None):
     """The picture file a person's own GGUF folder (--gguf-dir, "Use a local GGUF") already has: in the folder itself, or in the folder above it and that
-    folder's models/ (a Strata data folder's layout: models/<size>/ shards, models/<picture file>; pictures.places() looks there too).  The two outer places are
+    folder's models/ (a Strata data folder's layout: models/<size>/ shards, models/<picture file>).  The two outer places are
     taken only at the pinned size (`size`), so a half-copied file is fetched again and not used.  None when there is none."""
     if not gguf_dir:
         return None

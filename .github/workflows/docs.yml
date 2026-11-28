@@ -22,8 +22,6 @@ on:
       - tools/settings_register.py
       - strata_cli/__init__.py
       - CMakeLists.txt
-      - apps/host/package.json
-      - apps/desktop/package.json
   pull_request:
     paths:
       - .github/workflows/docs.yml
@@ -39,8 +37,6 @@ on:
       - tools/settings_register.py
       - strata_cli/__init__.py
       - CMakeLists.txt
-      - apps/host/package.json
-      - apps/desktop/package.json
 
 permissions:
   contents: read

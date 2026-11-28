@@ -16,7 +16,6 @@ from tests.terminal import update_fixture as fx
 ROOT = Path(__file__).resolve().parents[2]
 RELEASE_KEY_ID = "5d1bc23abbeffd0d"
 FORK_KEY_ID = "f8aabae844c8ba19"      # qwertie/Strataq's feed key (packaging/UPDATES.md, "This fork's release")
-TAURI_CONF = ROOT / "apps" / "desktop" / "src-tauri" / "tauri.conf.json"
 
 
 class ShippedKeys(unittest.TestCase):
@@ -27,13 +26,10 @@ class ShippedKeys(unittest.TestCase):
         for key_id in keys:
             self.assertEqual(signing.key_id_of(keys[key_id]), key_id)
 
-    def test_the_app_key_is_the_one_in_the_tauri_config(self):
+    def test_the_app_key_is_a_real_minisign_key(self):
         shipped = json.loads((ROOT / "strata_common" / "update_keys.json").read_text(encoding="utf-8-sig"))["app_minisign_public"]
-        conf = json.loads(TAURI_CONF.read_text(encoding="utf-8-sig"))["plugins"]["updater"]["pubkey"]
-        self.assertEqual(shipped, conf)
         key_id, public = signing.minisign_public(shipped)         # parses as a real Ed25519 minisign key, not the placeholder
         self.assertEqual(len(public), 32)
-        self.assertEqual(signing.app_public_key if False else shipped, conf)
 
     def test_a_feed_signed_by_another_key_is_refused_and_a_tester_key_works_through_the_override(self):
         other = fx.make_key()

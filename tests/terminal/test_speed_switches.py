@@ -1,23 +1,17 @@
 """The 0.2.7 speed features and their switches: the contract names, the defaults (Faster long prompts OFF, the other two ON), where each applies, and how the Terminal carries them.
 
-The app (apps/host/server/native-settings.mjs SPEED_SWITCHES) and Control (strata_control/speed_switches.py) say the same thing; the last test reads the
-app's table with node and fails when the two differ.  `strata launch` shows the environment entries as rows of its Advanced table and writes them into
+Control (strata_control/speed_switches.py) owns them.  `strata launch` shows the environment entries as rows of its Advanced table and writes them into
 the run config's "env" (`--set STRATA_KVA=1` turns Faster long prompts on); a default launch has none of them.
 """
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
 import unittest
-from pathlib import Path
 
 from strata_cli.launch import params as P
 from strata_cli.launch import settings as S
 from strata_cli.launch.runner import derive_config
 from strata_control import speed_switches as W
-
-ROOT = Path(__file__).resolve().parents[2]
 
 ENV = {      # what each switch writes outside its default
     "faster_long_prompts": {"STRATA_KVA": "1"},
@@ -25,7 +19,7 @@ ENV = {      # what each switch writes outside its default
     "faster_radeon_9000": {"STRATA_PCIE_FRAC_DEFAULT": "old"},
     "deepseek_speedups": {"STRATA_DEFAULTS": "026", "DS4_FAST_ATTN": "0", "DS4_ATTN_SLAB": "0", "DS4_COPY_PIN": "0", "DS4_COPY_HUGETLB": "0",
                           "DS4_STORE_SPARE": "0", "DS4_STORE_PUT": "0"},
-    "qwen_defaults_026": {"STRATA_DEFAULTS": "026"},         # the Terminal's troubleshooting switch: not in the app
+    "qwen_defaults_026": {"STRATA_DEFAULTS": "026"},         # the Terminal's troubleshooting switch
 }
 DEFAULT = {"faster_long_prompts": "off", "faster_12gb_nvidia": "off", "faster_radeon_9000": "on", "deepseek_speedups": "on", "qwen_defaults_026": "off"}
 SIX = ("DS4_FAST_ATTN", "DS4_ATTN_SLAB", "DS4_COPY_PIN", "DS4_COPY_HUGETLB", "DS4_STORE_SPARE", "DS4_STORE_PUT")
@@ -43,8 +37,8 @@ DEEPSEEK = {"arch": "deepseek41", "exe": "C:/s/engine-dsv41/0.1.52-win/strata-ds
 
 
 def ids(cfg, gpus, backend=None):
-    """The switches the app would show (the Terminal-only one is tested apart)."""
-    return [s.id for s in W.applicable(cfg, gpus, backend) if not s.terminal_only]
+    """Gets the ids of the speed switches that apply (the troubleshooting switch is tested apart)."""
+    return [s.id for s in W.applicable(cfg, gpus, backend) if not s.troubleshooting]
 
 
 class Contract(unittest.TestCase):
@@ -56,7 +50,7 @@ class Contract(unittest.TestCase):
 
     def test_an_effect_text_says_what_the_feature_does_in_plain_words(self):
         for s in W.SWITCHES:
-            if not s.terminal_only:
+            if not s.troubleshooting:
                 self.assertRegex(s.effect, r"Off by default" if s.default == "off" else r"[Tt]urn off", s.id)
             self.assertNotRegex(s.effect, r"STRATA_|DS4_|--|env", s.id)
         self.assertEqual(W.SWITCHES[0].effect, "Reads very long prompts faster by approximating part of the work. Off by default: answers about long documents can miss or mix up details.")
@@ -130,11 +124,10 @@ class Contract(unittest.TestCase):
         self.assertEqual(W.set_switch(old, "deepseek_speedups", True), env)
         self.assertTrue(W.is_on({"STRATA_DEFAULTS": "026"}, "deepseek_speedups"), "the master switch alone is not the whole switch: a hand-edited file is left alone")
 
-    def test_the_terminal_only_switch_is_for_qwen_and_never_in_the_app(self):
+    def test_the_troubleshooting_switch_is_for_qwen(self):
         sw = W.BY_ID["qwen_defaults_026"]
-        self.assertTrue(sw.terminal_only)
+        self.assertTrue(sw.troubleshooting)
         self.assertEqual(dict(sw.env), {"STRATA_DEFAULTS": "026"})
-        self.assertNotIn("qwen_defaults_026", [s.id for s in W.app_switches()])
         for cfg, gpus in ((QWEN, [RTX]), (QWEN36, [RTX]), ({**QWEN, "backend": "sycl"}, []), ({**QWEN, "backend": "cpu"}, [])):
             self.assertIn("qwen_defaults_026", [s.id for s in W.applicable(cfg, gpus)])
         self.assertNotIn("qwen_defaults_026", [s.id for s in W.applicable(DEEPSEEK, [RTX])], "DeepSeek's master switch is in its speed-ups switch")
@@ -241,22 +234,6 @@ class Terminal(unittest.TestCase):
         text = W.env_words("DS4_COPY_PIN")
         self.assertIn("all 7 speed-up rows go together", text)
         self.assertIn("all 7 speed-up rows go together", W.env_words("STRATA_DEFAULTS", W.BY_ID["deepseek_speedups"]))
-
-
-class SameAsTheApp(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("node"), "node is not installed")
-    def test_the_apps_table_has_the_same_names_and_words(self):
-        script = ("import {SPEED_SWITCHES} from './apps/host/server/native-settings.mjs';"
-                  "console.log(JSON.stringify(SPEED_SWITCHES.map(s=>({id:s.id,label:s.label,hint:s.hint,default:s.default,env:s.env,legacy:s.legacy??{}}))))")
-        out = subprocess.run(["node", "--input-type=module", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=60, check=True).stdout
-        app = json.loads(out)
-        self.assertEqual([a["id"] for a in app], [s.id for s in W.app_switches()], "the Terminal-only switch is not in the app's table")
-        for a, s in zip(app, W.app_switches()):
-            self.assertEqual(a["label"], s.label)
-            self.assertEqual(a["hint"], s.effect, s.id)
-            self.assertEqual(a["env"], dict(s.env), s.id)
-            self.assertEqual(a["default"], s.default, s.id)
-            self.assertEqual(a["legacy"], dict(s.legacy), s.id)
 
 
 if __name__ == "__main__":

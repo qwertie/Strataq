@@ -5,11 +5,8 @@
     python tools/release_manifest.py --write     write the manifest's versions into the current pages
 
 What it covers (standard library only, no network):
-  * the manifest against the code: app/Terminal version (strata_cli/__init__.py, apps/host and apps/desktop package
-    files, Cargo.toml) and Control version (VERSION) and engine version (the CMake project version);
-  * the two installer file names in the manifest's asset list;
-  * every installer file name (Strata-<version>-windows-x64-setup.exe, ...-linux-x86_64.AppImage)
-    in a current page: the version must be the manifest's, and the file must be in the release's asset list;
+  * the manifest against the code: Terminal version (strata_cli/__init__.py), Control version (VERSION) and engine
+    version (the CMake project version);
   * the version lines of the pages listed in LINES below.
 Release notes, measurement logs and history/ keep the versions they were written with; tools/doc_pages.py says which
 pages are archived.  To bump a release: change the version sources, edit docs/data/release.json, run --write, run --check.
@@ -25,10 +22,6 @@ import doc_pages  # noqa: E402
 
 ROOT = doc_pages.ROOT
 MANIFEST = os.path.join(ROOT, "docs", "data", "release.json")
-
-INSTALLER_NAMES = ("Strata-{v}-windows-x64-setup.exe", "Strata-{v}-linux-x86_64.AppImage")
-# Any installer-looking file name in a current page.  Group 1 is the version.
-INSTALLER_RE = re.compile(r"Strata-(\d+\.\d+(?:\.\d+)*)-(?:windows-x64-setup\.exe|linux-x86_64\.AppImage)")
 
 V = r"(\d+\.\d+(?:\.\d+)*)"
 # (page, regex, manifest keys): the regex has one group per key, each holding a version.  A rule that matches nothing is
@@ -78,17 +71,10 @@ def code_versions():
     return {
         # the Terminal says the product version, or (a Control-only hotfix such as 0.2.13.1) the manifest's optional terminal_version
         "strata_cli/__init__.py": (first("strata_cli/__init__.py", r'^PRODUCT_VERSION = "([^"]+)"'), "terminal_version"),
-        "apps/host/package.json": (json.loads(read("apps/host/package.json")).get("version"), "product_version"),
-        "apps/desktop/package.json": (json.loads(read("apps/desktop/package.json")).get("version"), "product_version"),
-        "apps/desktop/src-tauri/Cargo.toml": (first("apps/desktop/src-tauri/Cargo.toml", r'^version = "([^"]+)"'), "product_version"),
         "CMakeLists.txt (engine)": (cmake, "engine_version"),
         "VERSION (Control)": (read("VERSION").strip() if os.path.isfile(os.path.join(ROOT, "VERSION")) else cmake,
                               "control_version"),
     }
-
-
-def expand(manifest):
-    return [n.format(v=manifest["product_version"]) for n in INSTALLER_NAMES]
 
 
 def rewrite(text, regex, keys, manifest):
@@ -110,7 +96,7 @@ def write(manifest):
     changed = []
     for rel_path in doc_pages.current_pages():
         text = read(rel_path)
-        new = INSTALLER_RE.sub(lambda m: m.group(0).replace(m.group(1), manifest["product_version"], 1), text)
+        new = text
         for page, regex, keys in LINES:
             if page == rel_path:
                 new = rewrite(new, regex, keys, manifest)
@@ -123,7 +109,7 @@ def write(manifest):
 
 def check(manifest):
     problems = []
-    for key in ("tag", "product_version", "control_version", "engine_version", "assets"):
+    for key in ("tag", "product_version", "control_version", "engine_version"):
         if key not in manifest:
             problems.append("docs/data/release.json has no %r" % key)
     if problems:
@@ -139,20 +125,6 @@ def check(manifest):
                 problems.append("%s says %s, docs/data/release.json %s is %s (control_version %s)" % (where, found, key, want, manifest["control_version"]))
         elif found != want:
             problems.append("%s says %s, docs/data/release.json %s is %s" % (where, found, key, want))
-    assets = set(manifest["assets"])
-    for name in expand(manifest):
-        if name not in assets:
-            problems.append("docs/data/release.json: the asset list has no %s" % name)
-    for rel_path in doc_pages.current_pages():
-        text = read(rel_path)
-        for m in INSTALLER_RE.finditer(text):
-            line = text.count("\n", 0, m.start()) + 1
-            if m.group(1) != manifest["product_version"]:
-                problems.append("%s:%d names %s, the release is %s" % (rel_path, line, m.group(0), manifest["product_version"]))
-            else:
-                tail = re.match(r"[A-Za-z0-9_.-]*", text[m.start():]).group(0).rstrip(".")
-                if tail not in assets:
-                    problems.append("%s:%d names %s, which is not in the release's asset list" % (rel_path, line, tail))
     for page, regex, keys in LINES:
         text = read(page)
         matches = list(re.finditer(regex, text, re.M))

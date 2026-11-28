@@ -81,17 +81,7 @@ class World:
         (self.data / "mtp" / "mtp-q2_0.gguf").write_bytes(b"m")
         (self.root / "settings.json").write_text(json.dumps({"data_dir": str(self.data), "installs": [str(self.install)]}), encoding="utf-8")
         self.config_path.write_text(json.dumps(self.base_config(), indent=1), encoding="utf-8")
-        (self.root / "world-info.json").write_text(json.dumps(self.info(), indent=1), encoding="utf-8")
         return self
-
-    def info(self) -> dict:
-        """What the app driver (Node) needs to know about this world; written next to it so the two sides read the same facts."""
-        m = self.machine
-        platform = {"windows": "windows-x86_64", "linux": f"linux-{m.machine}"}[m.os]
-        family = "deepseek41" if self.mset.multi_file else self.mset.family
-        return {"tag": self.tag, "family": family, "title": family, "modelName": self.mset.model_name, "model": self.mset.model, "sizeId": self.tag,
-                "configPath": str(self.config_path), "hardware": self.hardware_report(), "backend": m.backend, "platform": platform, "exe": str(self.exe),
-                "context": context_for(m, self.mset)}
 
     def close(self) -> None:
         if self._tmp is not None:
@@ -100,8 +90,8 @@ class World:
     # ------------------------------------------------------------------ the stand-in for setup.py's output
     def base_config(self) -> dict:
         """What setup.py writes for this class and set, rebuilt from setup.py's own rules (the qwen block around line 10975-11200 and dsv41 around 9498).
-        It is a STAND-IN: setup.py itself cannot be driven without a model download, an engine and a GPU probe (see RESULTS-STEP0.md), so the entry points
-        that start from a saved model all start from this same file.  Differences between entry points are therefore never caused by it."""
+        It is a STAND-IN: setup.py itself cannot be driven without a model download, an engine and a GPU probe (see RESULTS-STEP0.md), so the launch
+        entry point starts from this file."""
         m, s = self.machine, self.mset
         ctx = context_for(m, s)
         if s.multi_file:
@@ -140,7 +130,7 @@ class World:
 
     # ------------------------------------------------------------------ what the probes answer
     def hardware_report(self) -> dict:
-        """The hardware report the Terminal's catalog and the app's host read (the shape tests/terminal/launch_support.py and the host tests use)."""
+        """The hardware report the Terminal's catalog reads (the shape tests/terminal/launch_support.py uses)."""
         m = self.machine
         card = {"index": 0, "name": m.card, "vendor": m.vendor, "vram_gb": m.vram_gb, "usable": True}
         if m.arch_field is not None:

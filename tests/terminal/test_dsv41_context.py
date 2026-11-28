@@ -1,10 +1,10 @@
-"""DeepSeek-V4.1-Flash's context sizes, 8K up to 1M (Project Maya #442 by @needmorevram): the choices, the pack's own limit, the refusal of a size the
-model cannot address, the words past 256K, and that setup, the Terminal and the app say the same.  Nothing is downloaded or started."""
+"""DeepSeek-V4.1-Flash's context sizes, 8K up to 1M (Project Maya #442 by @needmorevram): the choices, the pack's own limit,
+the refusal of a size the model cannot address, the words past 256K, and that setup and the Terminal say the same.  Nothing
+is downloaded or started."""
 from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -57,7 +57,7 @@ class Choices(unittest.TestCase):
         self.assertEqual(C.choices(C.read_limit(full)), list(C.CHOICES))
         self.assertEqual(C.choices(C.read_limit(small)), [8192, 32768, 65536, 131072, 262144])
         self.assertEqual(C.choices(None), list(C.CHOICES), "setup and the Terminal know the model: up to 1M without a pack")
-        self.assertEqual(C.choices(None, unknown_cap=C.TESTED), [8192, 32768, 65536, 131072, 262144], "the app: up to 256K without a pack")
+        self.assertEqual(C.choices(None, unknown_cap=C.TESTED), [8192, 32768, 65536, 131072, 262144], "up to 256K without a pack")
         self.assertEqual(C.problem(524288, C.read_limit(small)).split(" is ")[0], "512K")
         self.assertEqual(C.problem(262144, C.read_limit(small)), "")
         cfg = {"args": ["--pack", str(small), "--max-context", "8192"]}
@@ -116,17 +116,13 @@ class Terminal(unittest.TestCase):
         self.assertEqual([n.level for n in S.check_context(S.LaunchSettings(context=524288), deepseek=True, pack_limit=262144)], ["error"])
 
 
-class SetupAndApp(unittest.TestCase):
+class SetupAndTerminal(unittest.TestCase):
     def test_the_default_is_128k_everywhere_unless_the_person_chooses(self):
-        """Owner, 2026-11-01: 128K on every card and for DeepSeek too. setup writes it, the Terminal recommends it, the app starts a new DeepSeek version at it
-        and shows an installed one at the context it was prepared with when someone chose it (a saved 8K without the app's marker is the old default)."""
+        """Owner, 2026-11-01: 128K on every card and for DeepSeek too. setup writes it and the Terminal recommends it."""
         import setup
         self.assertEqual(setup.DSV41_CONTEXT, 131072)
         with Home(), mock.patch.object(Catalog, "hardware", lambda self, fresh=False: dict(HW_4X32)):
             self.assertEqual(catalog(HW_4X32).max_context("deepseek41", "UD-Q8_K_XL"), 131072)
-        screen = (ROOT / "apps" / "host" / "src" / "components" / "NativeModels.tsx").read_text(encoding="utf-8")
-        self.assertRegex(screen, r"setContext\(defaultContext\(contextList\)\)")
-        self.assertRegex(screen, r"openingContext\(installed\.context, contextList, installed\.contextChosen === true, selectedSize\.multi_file \? \[OLD_DEEPSEEK_CONTEXT\] : undefined\)")
 
     def test_setup_stops_before_any_download_and_checks_the_pack_again(self):
         source = (ROOT / "setup.py").read_text(encoding="utf-8")
@@ -145,17 +141,6 @@ class SetupAndApp(unittest.TestCase):
         self.assertNotRegex(options, r"max_context\s*=\s*std::(min|clamp)")
         model = (ROOT / "src" / "models" / "deepseekv41" / "ds4_model.cu").read_text(encoding="utf-8", errors="replace")
         self.assertNotRegex(model, r"max_context\s*=\s*std::(min|clamp)")
-
-    @unittest.skipUnless(shutil.which("node"), "node is not installed")
-    def test_the_app_says_the_same(self):
-        script = ("import {CONTEXT_CHOICES,TESTED_CONTEXT,NATIVE_CONTEXT,UNTESTED_NOTE} from './apps/host/src/lib/deepseek-context.ts';"
-                  "console.log(JSON.stringify({CONTEXT_CHOICES,TESTED_CONTEXT,NATIVE_CONTEXT,UNTESTED_NOTE}))")
-        out = subprocess.run(["node", "--input-type=module", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=60)
-        if out.returncode != 0:
-            self.skipTest("this node cannot load TypeScript: " + out.stderr[-200:])
-        app = json.loads(out.stdout)
-        self.assertEqual(app["CONTEXT_CHOICES"], list(C.CHOICES))
-        self.assertEqual((app["TESTED_CONTEXT"], app["NATIVE_CONTEXT"], app["UNTESTED_NOTE"]), (C.TESTED, C.NATIVE, C.NOTE))
 
 
 if __name__ == "__main__":

@@ -292,8 +292,8 @@ class CudaSpill(unittest.TestCase):
 
 
 class Reserve3750(unittest.TestCase):
-    """#3750: 256K context + Q4 KV on a small card.  The app's reserve for a card of 16 GB or less is 1536 MiB (apps/host native-resources.mjs), no longer a fifth of the
-    card (3256 on the reporter's RX 9070 XT).  The fit arithmetic prices the expert cache that is left, and it is positive at 12 GiB with the app's reserve on both
+    """#3750: 256K context + Q4 KV on a small card with a reserve of 1536 MiB instead of a fifth of the card (3256 on the
+    reporter's RX 9070 XT).  The fit arithmetic prices the expert cache that is left, and it is positive at 12 GiB with that reserve on both
     discrete backends; the old 3256 left the CUDA engine's measured base at its threshold (a start on the edge, which the reporter's 83 GB model fell over)."""
 
     M = "Qwen3.8-Flash-Next-IQ3_S"
@@ -301,7 +301,7 @@ class Reserve3750(unittest.TestCase):
     def slack(self, gb, reserve, vendor, kv_resident=0, ctx=262144):
         return V.slack_mib(self.M, gb, ctx, "q4_0", reserve, "auto", vendor, 0, kv_resident, "mtp")
 
-    def test_a_12_gib_card_at_256k_q4_has_a_positive_cache_with_the_apps_reserve(self):
+    def test_a_12_gib_card_at_256k_q4_has_a_positive_cache_with_the_1536_mib_reserve(self):
         for vendor in ("cuda", "hip"):
             s = self.slack(12.0, 1536, vendor)
             self.assertGreater(s, V.needed_mib(self.M, 0, vendor, "mtp") + 1000, (vendor, s))

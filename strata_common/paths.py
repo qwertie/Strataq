@@ -1,7 +1,7 @@
-"""Per-user state locations, one rule for the terminal and the host.
+"""Per-user state locations, one rule for every part of Strata.
 
 POSIX keeps $XDG_STATE_HOME (default ~/.local/state) under ``strata/``. Windows has no such place: state goes to
-``%LOCALAPPDATA%\\Strata``. The Node host (apps/host/server/platform-paths.mjs) resolves the same folders.
+``%LOCALAPPDATA%\\Strata``.
 """
 
 from __future__ import annotations

@@ -35,10 +35,10 @@ REGISTER = ROOT / "data" / "settings-register.json"
 SETTINGS_PAGE = "docs/SETTINGS.md"
 
 ENGINE_DIRS = ("src", "include")
-LAUNCH_PATHS = ("strata_control", "strata_cli", "setup.py", "apps/host/server", "serve")
+LAUNCH_PATHS = ("strata_control", "strata_cli", "setup.py", "serve")
 DOC_PATHS = ("docs", "README.md", "AGENTS.md")
-LAUNCH_EXT = (".py", ".mjs", ".js", ".cjs", ".ts")
-SKIP_PARTS = ("node_modules", "/tests/", "/test/", "__pycache__")
+LAUNCH_EXT = (".py",)
+SKIP_PARTS = ("/tests/", "/test/", "__pycache__")
 
 STATUSES = ("default", "rollback", "opt-in", "research", "retire-candidate", "unsure", "retired")
 HAND_FIELDS = ("status", "owner", "note", "retire_after", "retired_in")

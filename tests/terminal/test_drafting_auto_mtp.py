@@ -5,7 +5,6 @@ Only Auto changes. DFlash2 chosen by name still starts DFlash2; gfx1151, other A
 
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,7 +12,6 @@ from unittest import mock
 
 from strata_common import drafting
 
-ROOT = Path(__file__).resolve().parents[2]
 IQ3S = "qwen3.8-flash-next-iq3_s"
 Q4 = "qwen3.8-flash-next-unsloth-ud-q4_k_xl"
 V31 = "qwen3.8-flash-next-unsloth-ud-iq4_xs-v31"
@@ -99,8 +97,6 @@ class Gfx1201(Base):
         self.assertEqual(drafting.LINE_AUTO_MTP, "DFlash2 is off by default on this graphics card for now; choose it in Drafting to use it.")
         for word in ("recommend", "best", "better", "should", "avoid"):
             self.assertNotIn(word, drafting.LINE_AUTO_MTP.lower())
-        en = json.loads((ROOT / "apps" / "host" / "src" / "locales" / "df2-en.json").read_text(encoding="utf-8"))
-        self.assertEqual(en["df22"], drafting.LINE_AUTO_MTP)
 
     def test_it_is_one_entry_and_removing_it_puts_auto_back(self):
         self.assertEqual(list(drafting.AUTO_MTP), [("hip", "gfx1201")])

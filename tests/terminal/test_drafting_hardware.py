@@ -331,17 +331,6 @@ class TheTerminalStep(unittest.TestCase):
             DraftingScreen.commit(fake)
             self.assertEqual(fake.ctx.settings.drafting, saved, (key, in_file))
 
-    def test_the_words_are_the_apps_words(self):
-        folder = ROOT / "apps" / "host" / "src" / "locales"
-        en = json.loads((folder / "df2-en.json").read_text(encoding="utf-8"))
-        self.assertEqual((en["df03"], en["df04"], en["df05"]), (drafting.LINE_TESTED, drafting.LINE_SLOWER, drafting.LINE_UNTESTED))
-        self.assertEqual(en["df06"], drafting.mtp_line(drafting.NOT_THIS_CARD))
-        self.assertEqual(en["df07"], "There is no internet connection, so the DFlash2 drafter can't be downloaded now.")
-        self.assertEqual(en["df09"], drafting.ONE_REQUEST_NOTE)
-        self.assertEqual(en["df10"], drafting.line("off", drafting.NONE_HERE))
-        self.assertEqual(en["df11"], drafting.line("dflash2", drafting.NO_MTP))
-        self.assertEqual(en["df12"].replace("{0}", "1.2"), "Choosing DFlash2 downloads its drafter: about 1.2 GB, once.")
-
 
 if __name__ == "__main__":
     unittest.main()
