@@ -9,7 +9,7 @@
 //   1. an even split: a card too short for a copy of the whole 3.5 GiB dense set (IQ3_S, trim_needed()) has the split chosen before anything loads, from what each
 //      card has free, so every layer gets the same cache bytes on every card (every card loads only the dense weights of its own layers in any split).
 //   2. the KV window down (32768 -> 20480 -> 8192 -> 4096 cells a layer; the rest streams from RAM), when no placement can start the prompt path.
-//   3. the drafter dropped on the card that holds it (draft layer or DFlash2's pack and buffers): decode is slower, the start works.
+//   3. the drafter dropped on the card that holds it (the draft layer): decode is slower, the start works.
 //   4. the loan keeps 16 slots, and the prompt path's own small buffers (256..1024-token chunks), instead of 128 and 1024..8192.
 //   5. the output head in pinned host memory, on the card that holds it.
 //   6. fewer cards: a card with too little free memory to hold a share is left out of the split; one card left is the single-card start (with its own walk).
@@ -32,7 +32,7 @@ struct Model {
     int64_t dense_mib = 0;      ///< the whole dense set a card loads without the trim (pack arena + native projections)
     int64_t session_mib = 0;    ///< the session of one card's layers at the asked context and KV window
     int64_t head_mib = 0;       ///< the output head (the last stage only)
-    int64_t drafter_mib = 0;    ///< the draft layer or DFlash2 (the stage that carries it only)
+    int64_t drafter_mib = 0;    ///< the draft layer (the stage that carries it only)
     int64_t slot_mib = 3;       ///< the largest expert blob, rounded up
     int64_t reserve_mib = 796;  ///< what the plan keeps free on a later stage (700 + the verify windows)
 };

@@ -1,7 +1,7 @@
 // include/strata/common/kernels/window_limits.hpp - how many rows one verify / batch window can hold.
 //
 // Until 0.2.7 a window held at most 8 rows.  The CUDA and HIP engines now hold up to 16 (four pipelined groups of 16
-// slots = 64 slots on a four-card split: docs/BATCHING.md), so every compile-time maximum that follows the window
+// slots = 64 slots on a four-card split), so every compile-time maximum that follows the window
 // (the verifier's per-row arrays, the expert pool's per-token tables, the resident plan's one-thread-per-entry block)
 // is derived from ONE number.  It is a macro so that a build that does not set it (the CPU-only
 // programs) gets the default, 8.  The CUDA / HIP CMake sets STRATA_VERIFY_MAX_T from the cache variable

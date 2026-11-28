@@ -3682,7 +3682,7 @@ constexpr IlRows kIlRowsShared[] = {   // sm_86 + sm_120, and the fallback for e
 };
 // Per-architecture tables (P10).  A card whose compute capability (major * 10 + minor) is listed here uses its own table;
 // every other sm_80+ card uses kIlRowsShared.  sm_89 (Ada) has an opt-in table (kIlRows_89, below; STRATA_MMVQ_IL_89=1).  To add one, run
-// `mmvq_il_parity --bench --emit-table` on the card (docs/MMVQ_IL_TABLE.md), paste the printed block as a
+// `mmvq_il_parity --bench --emit-table` on the card, paste the printed block as a
 // `constexpr IlRows kIlRows_<cc>[]` and add {<cc>, kIlRows_<cc>, sizeof(kIlRows_<cc>) / sizeof(IlRows)} below.  Each choice
 // is bitwise the same output, so a table is only speed.  Without a rebuild: STRATA_MMVQ_IL_ROWS (see il_env_rows).
 // Volta (sm_70): read off mmvq_il_parity --bench on a V100-SXM2-32GB (two runs, mean), the same rule - per cell the

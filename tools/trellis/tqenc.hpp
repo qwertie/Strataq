@@ -5,7 +5,7 @@
 // The decoders it must match are src/common/kernels/cpu/tq_states.hpp / tq_cpu.cpp (tools/trellis/tqenc_test.cpp checks
 // bit for bit against them, and the scalar / AVX2 / AVX-512 kernels against the encoder's own reconstruction).
 //
-// THE FORMAT (see tq_states.hpp, include/strata/common/kernels/cpu/tq_cpu.hpp, docs/GYRO.md):
+// THE FORMAT (see tq_states.hpp, include/strata/common/kernels/cpu/tq_cpu.hpp):
 //   block = 128 weights = {fp16 d (little endian); qs[4*K]}, 32 steps t of 4 weights (weights 4t..4t+3).
 //   State of step t: 15 bits.  weights = d * codebook(state); the state's hash x = state * 0x9e3779b1 picks two
 //   points lut[x >> 21] and lut[(x >> 10) & 2047] (fp16 pairs) = four values.  The decoder works on the int16 table

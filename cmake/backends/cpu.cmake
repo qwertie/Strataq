@@ -51,7 +51,7 @@ if(STRATA_BUILD_TESTS)
   add_executable(gfx12_extra_test src/core/gfx12_extra_test.cpp src/core/arch_defaults.cpp)   # gfx12 extra defaults and their off switches
   target_include_directories(gfx12_extra_test PRIVATE include)
   add_test(NAME gfx12_extra_test COMMAND gfx12_extra_test)
-  add_executable(nv_defaults_test src/core/nv_defaults_test.cpp src/core/nv_defaults.cpp)   # the sm_121 (GB10) table and its two off switches
+  add_executable(nv_defaults_test src/core/nv_defaults_test.cpp src/core/nv_defaults.cpp)   # the sm_86 / sm_60 tables and the NVIDIA prompt defaults
   target_include_directories(nv_defaults_test PRIVATE include)
   add_test(NAME nv_defaults_test COMMAND nv_defaults_test)
   add_executable(kva_test src/models/qwen38/prefill/kva_test.cpp)   # KVA: the switch, the automatic tail, the reasons a read is turned away

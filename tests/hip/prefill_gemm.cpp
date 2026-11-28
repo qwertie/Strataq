@@ -1,7 +1,7 @@
 // BF16/F16 prefill through the actual engine GEMM path against a CPU reference.
 //
 // Each shape runs twice: on the engine's GEMM as every card runs it (FP32 out), and with Gemm::set_f16_io(true), the
-// gfx103x prompt path's FP16-out GEMM widened in place in Y's own rows (bench/results/2026-10-04-rdna2-fp16-prompt).
+// gfx103x prompt path's FP16-out GEMM widened in place in Y's own rows.
 // The second mode is forced here on any HIP card, so the path is covered wherever the test runs.
 #include <hip/hip_runtime.h>
 #include <hip/hip_bfloat16.h>

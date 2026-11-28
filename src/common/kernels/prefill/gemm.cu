@@ -108,7 +108,7 @@ __global__ void widen_rows_f16(float* __restrict__ Y, int64_t n, int64_t ldy, in
         __syncthreads();
     }
 }
-// BF16 weight rows -> FP16, saturated (bench/results/2026-10-04-rdna2-fp16-prompt: none leaves FP16's range)
+// BF16 weight rows -> FP16, saturated (none leaves FP16's range)
 __global__ void bf16_to_f16_rows(const uint16_t* __restrict__ s, __half* __restrict__ d, int64_t n) {
     for (int64_t i = blockIdx.x * (int64_t) blockDim.x + threadIdx.x; i < n; i += (int64_t) gridDim.x * blockDim.x) {
         const float f = __uint_as_float((uint32_t) s[i] << 16);
@@ -621,7 +621,7 @@ bool prompt_f16() {
                          dev, p.gcnArchName[0] ? " " : "", p.gcnArchName, "\n");
     else if (e == nullptr && std::strncmp(p.gcnArchName, "gfx103", 6) == 0)
         std::fprintf(stderr, "strata prefill: HIP device %d %s - tip: STRATA_HIP_PROMPT_F16=1 reads long prompts about 2x faster here "
-                             "(FP16 prompt GEMMs, rocBLAS is tuned only for FP16 on gfx103x; the numbers differ slightly, see docs/AMD_HIP.md)%s",
+                             "(FP16 prompt GEMMs, rocBLAS is tuned only for FP16 on gfx103x; the numbers differ slightly)%s",
                      dev, p.gcnArchName, "\n");
     cached[dev].store(on ? 2 : 1, std::memory_order_relaxed);
     return on;
@@ -879,7 +879,7 @@ constexpr int64_t kXSliceElems = 16ll << 20;   // 32 MiB of FP16 activations per
 
 #if defined(STRATA_EXPERIMENTAL_SM60)
 // ---- Pascal, opt-in (STRATA_DENSE_F32=1): the dense projections' FP16-operand GEMMs as cublasSgemm ----------------
-// Measured on a Tesla P40 (sm_61) with cuBLAS 12.4.5.8 (bench/results/2026-10-12-p40-sm61-kernels).  For FP16
+// Measured on a Tesla P40 (sm_61) with cuBLAS 12.4.5.8.  For FP16
 // operands with FP32 sums cuBLAS has two Maxwell kernels there, maxwell_sgemm_fp16_64x64 and _32x128, and picks the
 // slow one for most chunk sizes: the 10240 x 2560 qkv projection runs at 7.6 TFLOPS for T 7030-7040 and at 4.3 from
 // T 7041 (49 -> 85 ms), and at 4.3-4.6 for two thirds of the T between 256 and 8192; the 12288-row query projection

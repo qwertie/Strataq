@@ -54,7 +54,7 @@ bool hc_q8_env() {
         if (v != nullptr && v[0] != '\0' && std::strcmp(v, "auto") != 0) return false;
 #if defined(STRATA_USE_HIP)
         {   // Strix Halo (gfx1151): on by default (decode +9.5%, json/code/tool/chat/agent +7.9..+10.7%); the answers differ in
-            // near-tie tokens by about the size of the engine's own CPU-vs-GPU expert rounding (docs/AMD_HIP.md);
+            // near-tie tokens by about the size of the engine's own CPU-vs-GPU expert rounding;
             // STRATA_HC_Q8=0 keeps the bf16 read
             int dev1151 = 0;
             cudaDeviceProp p1151;

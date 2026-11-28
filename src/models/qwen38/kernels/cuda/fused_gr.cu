@@ -3335,7 +3335,7 @@ __device__ __forceinline__ T shfl_xor_persist(T v, int mask) {
     return __shfl_xor_sync(0xffffffffu, v, mask);
 #endif
 }
-// Measured on gfx1030 (bench/results/2026-10-12-hc-persist-gfx1030): the gain over the three-kernel read is (1) the down
+// Measured on gfx1030: the gain over the three-kernel read is (1) the down
 // projection split by column slices over all 80 blocks (the default read runs 41 blocks staging the activations through
 // LDS) and (2) one launch with two grid barriers instead of three launches and the gaps between them.  Prefetching the
 // up weights (into registers or by touching them into L2 / Infinity Cache) and the epilogue inputs measured no gain on

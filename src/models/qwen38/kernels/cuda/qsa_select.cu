@@ -1086,7 +1086,7 @@ __global__ void __launch_bounds__(SCORE_WARPS * 32) block_scores_slots_kernel(Sc
                             QsaScoreRows{});
 }
 
-// QSAROWS (docs/QSAROWS.md, STRATA_QSA_ROWS=1): block_scores_multi_kernel's work for NQ <= 4 queries with less issue
+// QSAROWS (STRATA_QSA_ROWS=1): block_scores_multi_kernel's work for NQ <= 4 queries with less issue
 // pressure per (block, query).  nsys of a 131k decode window (RTX 2080 Ti + RTX 3060): the multi kernel costs ~20 us more a
 // call for every row of the window on both cards - per (block, query) it reads the four query slices from shared memory
 // (4 x LDS.128) and reduces each head's lane products with its own five shuffles (20 a block and query), and those two

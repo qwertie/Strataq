@@ -327,8 +327,8 @@ int Model::load() {
     // The helper-GPU caches are allowed beside the resident RAM mode too: their experts are left out of the RAM copy
     // like a stage's (below), the helpers' refills read through the source (the RAM copy when it holds the bytes),
     // and the two adaptive tiers already keep each other's experts out (helper_holds in the primary's candidates).
-    // Measured on RX 6800 + RX 6600, Windows (docs/SECOND_GPU.md).
-    // the helper-GPU expert caches (--expert-cache-remote, docs/SECOND_GPU.md): CUDA1..3 on one GPU; with a layer
+    // Measured on RX 6800 + RX 6600, Windows.
+    // the helper-GPU expert caches (--expert-cache-remote): CUDA1..3 on one GPU; with a layer
     // split, the visible GPUs no stage runs on, in order
     int remote_dev[3] = {1, 2, 3};
     if (primary_device != 0) {
@@ -672,7 +672,7 @@ int Model::load() {
         std::fprintf(stderr, "strata generate: this CPU (%s) does not support AVX2 with FMA and F16C, which this engine's "
                              "CPU expert kernels need; Strata runs on Intel Haswell (2013), AMD Zen (2017) or newer. "
                              "Older CPUs are EXPERIMENTAL and slow: setup compiles an engine for them on this PC "
-                             "(STRATA_ISA_FLOOR, see \"Older CPUs\" in docs/INSTALL.md)\n",
+                             "(STRATA_ISA_FLOOR)\n",
                      strata::kernels::cpu::cpu_name().c_str());
         return 2;
     }
@@ -1805,7 +1805,7 @@ int Model::load() {
     // CUDA0's pairs in `profile` below).  Empty without --expert-profile-save.
     if (!o.expert_profile_save.empty()) profile_loaded = profile;
     // ---- layer split across GPUs: "auto" places the split points by a cost model of one decode window, measured on
-    // the 5080 + 3090 rig (bench/results/2026-09-29-layer-split):
+    // the 5080 + 3090 rig:
     //   - every layer costs its GPU a time inversely proportional to SMs x clock (0.33 ms on an RTX 5080, 0.50 on a
     //     3090: the per-layer round trip and kernels, not the bytes - both cards have ~950 GB/s);
     //   - an expert no cache holds costs ~190 ms per unit of routed mass: the CPU pool in decode and the PCIe stream
@@ -2468,7 +2468,7 @@ int Model::load() {
             o.batch = fit;
             resolve_groups_auto();   // (the slots that fit may not be the ones asked for)
             if (o.batch_groups > 1 && o.batch % o.batch_groups != 0) o.batch_groups = 1;
-            // the sessions' VRAM is the expert cache's: say what it costs (docs/BATCHING.md has the measured trade)
+            // the sessions' VRAM is the expert cache's: say what it costs
             std::fprintf(stderr, "strata generate: --batch %d: the slot sessions take %.2f GiB of VRAM on CUDA0 that the "
                                  "expert cache would otherwise hold\n", o.batch,
                          (double) bytes0 * o.batch / 1073741824.0);
@@ -2839,7 +2839,7 @@ int Model::load() {
                 const char* st = std::getenv("STRATA_IO_PF_STAGE");
                 if (st != nullptr && std::atoi(st) != 0)
                     std::fprintf(stderr, "strata generate: note: STRATA_IO_PF_STAGE=1 (staging) measured faster only on a 32 GB-class "
-                                         "box (+25%% on an RTX 3060, 32 GB); it was slower at 16 GB and on an iGPU (docs/DETAILS.md, file tier I/O)\n");
+                                         "box (+25%% on an RTX 3060, 32 GB); it was slower at 16 GB and on an iGPU\n");
 #if defined(STRATA_USE_HIP)
                 int igpu_dev = 0;
                 cudaDeviceProp igpu_p{};
@@ -3031,16 +3031,14 @@ int Model::load() {
         // A rate under ~0.2 GiB/s is not the hardware.  Task Scheduler / service contexts throttle this
         // read+fill about 24x (measured 0.05 vs 1.42 GiB/s for the same binary, args and cache state; the
         // scheduler's defaults - Below normal priority and a least-privilege token - were the only
-        // difference between the runs).  Say so instead of letting the user blame the disk; see
-        // docs/DETAILS.md, "Running it at startup (Task Scheduler)".
+        // difference between the runs).  Say so instead of letting the user blame the disk.
 #ifdef _WIN32   // a Windows launch context; elsewhere a load this slow is the disk
         if (arena_src.load_gib_per_second() > 0.0 && arena_src.load_gib_per_second() < 0.2) {
             std::fprintf(stderr,
                          "strata generate: hint: ~24x below what this hardware streams from a normal "
                          "launch. If Strata is started by Task Scheduler or a service, register the task "
                          "with Priority 4 (Normal) and 'Run with highest privileges' - the scheduler's "
-                         "defaults (Below normal + a least-privilege token) throttle the load. See "
-                         "docs/DETAILS.md ('Running it at startup').\n");
+                         "defaults (Below normal + a least-privilege token) throttle the load.\n");
         }
 #endif
         srcp = &arena_src;
@@ -3625,12 +3623,11 @@ int Model::load() {
         // token 0). That fault was fixed long since (native_expert_parity, expert_parity, the grouped kernels'
         // tests), and the warning outlived it (issue #23). What remains is rounding: a GPU expert and the CPU's
         // compute the same quantized expert with different float order, so a near-tie can flip. Measured teacher-
-        // forced on 2,557 tokens (bench/results/2026-09-27-cache-parity): 95-98% same top-1, and perplexity equal
+        // forced on 2,557 tokens: 95-98% same top-1, and perplexity equal
         // (on - off = -0.005 +- 0.005 nats). Neither output is more correct than the other.
         std::fprintf(stderr,
                      "strata generate: the GPU computes the experts in the cache; it rounds differently from the CPU,\n"
-                     "                 so a reply can differ slightly from a run without the cache (same quality:\n"
-                     "                 bench/results/2026-09-27-cache-parity).\n");
+                     "                 so a reply can differ slightly from a run without the cache (same quality).\n");
         if (o.expert_cache_per_layer) {
             int64_t lo = 0, hi = 0;
             xcache.layer_slot_range(0, lo, hi);
@@ -4872,7 +4869,7 @@ void set_tail_skip_default(const Model& m, int64_t gpu_experts, const char* who)
     const bool all_experts_resident = n_experts > 0 && gpu_experts >= n_experts;
     // STRATA_ROUTE_TAIL_SKIP: ON BY DEFAULT on CUDA builds (owner decision, 0.1.42) and on HIP gfx1200/gfx1201
     // (0.1.43): a missed expert that every token of a verify window routes at rank 7 or lower is neither copied nor
-    // computed (answers differ slightly from 0.1.41, KL ~0.003-0.006; docs/DETAILS.md).  =0 restores 0.1.41's bytes.
+    // computed (answers differ slightly from 0.1.41, KL ~0.003-0.006).  =0 restores 0.1.41's bytes.
     // Nothing to do, so no default and no line, when every expert is in VRAM; off with --batch slots (a window then
     // mixes requests, and one request's skip would depend on another's tokens) and, as in the dispatch, with a peer
     // or helper GPU.  A layer split is fine: each stage skips by itself.  The paged engine's windows mix its

@@ -70,7 +70,7 @@ void gdn_recurrence(float* state, const float* h, const float* gate, const float
 /// The kernels behind gdn_recurrence, for the parity test: 0 = the column-split kernels + the norm kernel (or the
 /// one-block-per-head kernel under STRATA_GDN_REC_HEADS), 1 = four lanes per column (no barrier per token) + the grid-stride norm, 2 = the
 /// one-block-per-head kernel (its fused norm rounds differently).  0 and 1 give the same bits.  On HIP, 0 and 1 run the opt-in
-/// chunked WMMA recurrence instead (gfx11, STRATA_GDN_CHUNKED=1, 64 tokens and more: other bits, see docs/AMD_HIP.md).
+/// chunked WMMA recurrence instead (gfx11, STRATA_GDN_CHUNKED=1, 64 tokens and more: other bits).
 void gdn_recurrence_variant(int variant, float* state, const float* h, const float* gate, const float* beta,
                             const float* z, const float* gamma, float eps, float* y, uint16_t* y16, int64_t T,
                             void* stream, int64_t ld16 = 0);

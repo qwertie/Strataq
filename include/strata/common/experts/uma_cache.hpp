@@ -1,7 +1,7 @@
 // include/strata/common/experts/uma_cache.hpp - sizing the GPU expert cache on a device whose memory IS the system RAM.
 //
 // On a Strix Halo (or any APU) "free VRAM" is the GPU-addressable pool: the BIOS carve-out plus the GTT, up to nearly all of the RAM when
-// the kernel was told ttm.pages_limit (docs/STRIX_HALO.md recommends 112 GiB of a 128 GiB box).  The expert arena (every expert, in RAM) is
+// the kernel was told ttm.pages_limit (for example 112 GiB of a 128 GiB box).  The expert arena (every expert, in RAM) is
 // already counted in what the OS has used, but the cache copies experts INTO that same RAM, so a cache sized from the pool alone can ask for
 // more bytes than the OS has left - the OOM killer then takes the engine, or the desktop.  The auto cache is therefore sized from
 // min(what the GPU says is free, the RAM the OS says is available - a reserve for the desktop).  Only the AUTO size: --expert-cache N is

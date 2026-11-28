@@ -1,6 +1,6 @@
 // tools/hip/tune_rocblas.cpp - a rocBLAS tuning table for the prompt path's FP16-out GEMMs (gfx103x, prompt_f16()).
 //
-// On RDNA2 the prompt path's dense products run as rocBLAS FP16 in -> FP16 out (docs/AMD_HIP.md, "RDNA2").  rocBLAS
+// On RDNA2 the prompt path's dense products run as rocBLAS FP16 in -> FP16 out.  rocBLAS
 // picks its kernel from a table by shape, and for some shapes that pick is far from the best kernel the library has:
 // on an RX 6900 XT, N=10240 K=2560 (the GDN input projection) below T=1152 tokens runs at 5 TFLOPS where the best of
 // rocBLAS's own 237 solutions for the same shape runs at 32 (E270, 2026-10-05).  This tool enumerates the library's

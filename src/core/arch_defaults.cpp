@@ -90,7 +90,7 @@ std::vector<std::pair<std::string, std::string>> arch_default_env(const char* gc
     };
     // 0.2.7: Windows gfx1151 leaves the shared-expert fork off (the HIP default).  Interleaved A/B on a Strix Halo Windows PC (Qwen
     // IQ3_S, engine 0.1.51, 9 chat answers each, 4K prompt): decode 43.9 / 43.6 / 43.2 tok/s with it, 48.3 / 46.0 / 46.6 without
-    // (+6.9% median), prompts unchanged, the token ids identical either way (docs/STRIX_HALO_WINDOWS.md).  Linux gfx1151 keeps the
+    // (+6.9% median), prompts unchanged, the token ids identical either way.  Linux gfx1151 keeps the
     // fork on until it is measured there.  STRATA_SH_STREAM=1 turns it back on; STRATA_DEFAULTS=026 keeps v0.2.6's table.
     if (windows && !defaults026) {
         for (auto it = t.begin(); it != t.end(); ++it) {

@@ -15,7 +15,7 @@
 //   linear    a fitted low-rank projector (STRATA_KVA_PROJECTOR=<file>; not implemented in this step).
 //
 // 0.2.7: the read is OFF unless STRATA_KVA=1 is set (the quality runs found lost records and invented rows in long
-// extraction and agent tasks, docs/KVA.md).  Unset, nothing here runs and the engine is 0.2.6's.  Switched on, it applies
+// extraction and agent tasks).  Unset, nothing here runs and the engine is 0.2.6's.  Switched on, it applies
 // to a cold prompt of STRATA_KVA_MIN_PROMPT tokens or more on one CUDA/HIP device, approximating only the layers from
 // 36 on, with a 2048-token exact tail (the configuration the 0.2.7 quality runs found cleanest; STRATA_KVA_SPLIT and
 // STRATA_KVA_SUFFIX override).  Everything is read from the environment once per process.

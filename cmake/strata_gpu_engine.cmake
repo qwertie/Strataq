@@ -172,7 +172,7 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
     add_test(NAME qsa_two_pass_parity COMMAND qsa_two_pass_parity)
     set_tests_properties(qsa_two_pass_parity PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "STRATA_SELECT_TWO_PASS=1")
   endif()
-  # QSAROWS (docs/QSAROWS.md): what the T rows of a verification window cost in a QSA layer's decode kernels at a long
+  # QSAROWS: what the T rows of a verification window cost in a QSA layer's decode kernels at a long
   # context (block scores, top-k, attention over each row's selection, indexer append), row by row; GPU, synthetic, no
   # model.  Not in the default build: `cmake --build <dir> --target qsa_rows_bench`.
   if(STRATA_ENABLE_CUDA)
@@ -959,7 +959,7 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
     set_tests_properties(gdn_rec_parity_selftest_frag PROPERTIES SKIP_RETURN_CODE 77)
     # the production-linked GDN parity / benchmark harness (no kernel copies: it calls gdn_gates, gdn_conv and
     # gdn_recurrence of strata_prefill through the GdnProbe of include/strata/models/qwen38/prefill/gdn_probe.hpp, against an FP64
-    # oracle from tests/gdn/gdn_fixture.hpp).  Usage: docs/GDN_CONTRACT.md.  The smoke test is small and CPU-cheap.
+    # oracle from tests/gdn/gdn_fixture.hpp).  The smoke test is small and CPU-cheap.
     execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short=9 HEAD OUTPUT_VARIABLE _gdn_sha
                     OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
     if(NOT _gdn_sha)

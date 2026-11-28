@@ -16,8 +16,8 @@
 //
 // The tables take effect only through the existing loader (src/prefill/rocblas_tuning.hpp), which refuses a table whose architecture
 // or full rocBLAS version string differs from the running library's; with the switch off the community tables are not loaded either.
-// The table that shipped before (gfx1030 / 5.6.0.8d1ae90e) is not part of this switch.  The contributors' numbers are theirs, in
-// docs/AMD_HIP.md; we have no gfx1010 or gfx1030 card and have not reproduced them.
+// The table that shipped before (gfx1030 / 5.6.0.8d1ae90e) is not part of this switch.  The contributors' numbers are theirs;
+// we have no gfx1010 or gfx1030 card and have not reproduced them.
 #pragma once
 
 #include <cstdlib>

@@ -1,5 +1,5 @@
 // src/common/kernels/expdec_bench.cpp - the VRAM experts of a decode verify window: the default grouped kernels against
-// EXPDEC (STRATA_EXPDEC=1, docs/EXPERTDEC.md), bit for bit and in microseconds, per card, per T, per format pair.
+// EXPDEC (STRATA_EXPDEC=1), bit for bit and in microseconds, per card, per T, per format pair.
 //
 //     build/expdec_bench [reps = 300] [device = -1 (all)] [groups = 20] [pairs = all] [choices = def,dec,dec:r2,dec:b4,dec:r2:b4] [shape = real]
 //

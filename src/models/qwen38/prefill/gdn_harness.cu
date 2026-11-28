@@ -5,7 +5,7 @@
 // forced, the path that actually ran and the reason a wanted path did not run are read back after every call, and a
 // forced path that is not eligible launches nothing and is reported INELIGIBLE (it is never timed as a fallback).
 // Fixtures and the FP64 oracle are tests/gdn/gdn_fixture.hpp (shared with the other backends' harnesses).
-// Usage and output format: Desktop\30thOctober\results\gdn\HARNESS.md and docs/GDN_CONTRACT.md.
+// Usage and output format: Desktop\30thOctober\results\gdn\HARNESS.md.
 #include "gdn_fixture.hpp"
 #include "strata/models/qwen38/prefill/gdn_probe.hpp"
 #include "strata/models/qwen38/prefill/kernels.hpp"

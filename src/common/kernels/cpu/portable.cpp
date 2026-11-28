@@ -1,4 +1,4 @@
-// src/common/kernels/cpu/portable.cpp - the CPU kernel symbols on a non-x86 build (aarch64: DGX Spark / GB10, Grace).
+// src/common/kernels/cpu/portable.cpp - the CPU kernel symbols on a non-x86 build (aarch64).
 //
 // Replaces expert.cpp, q2_avx2.cpp, iq_avx2.cpp, iq_avx512.cpp, kq_avx2.cpp and kq_avx1.cpp, which are AVX-only.
 // What a native (GGUF) pack needs from this file is the activation quantizer (expert.cpp's scalar loop, bitwise

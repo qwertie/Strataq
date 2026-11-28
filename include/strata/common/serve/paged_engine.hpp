@@ -77,7 +77,7 @@ constexpr double kRefillBudgetMs = 10.0;
 constexpr uint64_t kChunkBytes = 256ull << 20;
 /// The GPU memory in MiB the pools leave unallocated on each GPU for other programs when --vram-reserve-mib is
 /// absent. Prompt buffers come from the pools; PagedModel::get_gpu_keep covers model buffers outside them.
-/// One pool chunk; measured only on the Strix Halo (docs/DETAILS.md).
+/// One pool chunk; measured only on the Strix Halo (docs/ENGINE_NOTES.md).
 constexpr int64_t kDefaultVramReserveMib = 256;
 /// The smallest prompt chunk the engine lends buffers for, and the step between the chunks it tries
 /// (lend_prompt_buffers in paged_engine.cpp).

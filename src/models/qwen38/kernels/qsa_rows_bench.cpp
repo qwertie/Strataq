@@ -1,4 +1,4 @@
-// src/models/qwen38/kernels/qsa_rows_bench.cpp - QSAROWS (docs/QSAROWS.md): what the T rows of a verification window
+// src/models/qwen38/kernels/qsa_rows_bench.cpp - QSAROWS: what the T rows of a verification window
 // cost in a QSA layer's decode kernels at a long context, row by row.  GPU, synthetic data at the real geometry (24
 // query heads x 256, 2 KV heads, indexer 4 x 128, blocks of 4 cells, top-k 2048), INT8 pools, no model.
 //
@@ -13,7 +13,7 @@
 //   dense    qsa_decode_attn_batch over a 32768-cell window per row: the drafter's shape, which the hypothesis's
 //            "~240 us a query" comes from (the drafter runs it with ONE query per step: capture_round's record_rest)
 //
-// --rows: block_scores_rows_kernel (STRATA_QSA_ROWS=1, docs/QSAROWS.md) against the multi kernel, scores and ids bit for
+// --rows: block_scores_rows_kernel (STRATA_QSA_ROWS=1) against the multi kernel, scores and ids bit for
 // bit, and its microseconds beside the reference's.
 //
 //   qsa_rows_bench [--device N] [--iters 100] [--ctx 131072] [--max-context 262144] [--rows] [--no-dense]

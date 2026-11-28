@@ -562,7 +562,7 @@ private:
     /// Host elapsed times within the current decode step; GPU waits are included in their caller's time.
     double draft_ms_ = 0, verify_ms_ = 0, commit_ms_ = 0, pages_ms_ = 0;
     /// Since the last report: the decode steps that routed on the CPU's side (not every expert on the GPU), their
-    /// rows, and the experts they routed to, each counted once a step (docs/DETAILS.md, rows and guesses)
+    /// rows, and the experts they routed to, each counted once a step (docs/ENGINE_NOTES.md, rows per step)
     int64_t routed_steps_ = 0, routed_rows_ = 0, routed_experts_ = 0;
     /// Totals since the engine started, which the STATS lines report (send_live_stats reads them from its thread).
     /// Counters are individually atomic; a sample can straddle a step's updates.

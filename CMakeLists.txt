@@ -56,7 +56,7 @@ function(strata_utf8_manifest target)
   endif()
 endfunction()
 
-# The AVX kernels exist for x86 only.  On aarch64 (DGX Spark / GB10) portable.cpp stands in for them and
+# The AVX kernels exist for x86 only.  On aarch64 portable.cpp stands in for them and
 # native experts run on ggml-cpu's NEON dot products.
 if(NOT CMAKE_SYSTEM_PROCESSOR OR CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64|x64|X64|i[3-6]86|x86|X86)$")   # an unset processor stays the x86 build, as before
   set(STRATA_CPU_X86 ON)
@@ -97,7 +97,7 @@ if(NOT STRATA_AMD_COMMUNITY_TUNING)
   add_compile_definitions(STRATA_AMD_COMMUNITY_DOT_OFF=1)
 endif()
 # The rows one verify / batch window holds (include/strata/common/kernels/window_limits.hpp): 8, the 0.2.7 window, or 16 (four pipelined
-# groups of 16 slots = 64 slots on a four-card split, docs/BATCHING.md).  A window of up to 8 rows runs the kernels it always ran, whichever is chosen (the wide instantiations are extra code).  "auto" = 16 for
+# groups of 16 slots = 64 slots on a four-card split).  A window of up to 8 rows runs the kernels it always ran, whichever is chosen (the wide instantiations are extra code).  "auto" = 16 for
 # the HIP engines (a HIP code object loads on first use, so the extra kernels cost nothing until a wide window forms)
 # and 8 for CUDA, which loads every kernel at start (CUDA_MODULE_LOADING=EAGER: the wide kernels would take VRAM from
 # the expert cache of every card); -DSTRATA_WINDOW_MAX_T=16 builds the wide CUDA engine.
@@ -129,7 +129,7 @@ endif()
 # decides whether the kernels are BUILT: on in every release build.
 option(STRATA_MMQ_TQ_OVERLAY "Gyro trellis MMQ prompt kernels: the patched ggml-cuda headers of third_party/strata-ggml/ggml/src/ggml-cuda-tq (with -DSTRATA_GGML_DIR: an overlay of that llama.cpp's headers written at configure time, cmake/strata_ggml_tq_overlay.cmake)" ON)
 option(STRATA_MMQ_KQUANTS "Build the MMQ prompt kernels for Q4_K / Q5_K / Q5_1 / Q6_K: the experts of Unsloth's K-quant files, and on HIP the dense GGUF projections (STRATA_DENSE_MMQ)" ON)
-# Q6_K gate/up in the grouped expert kernels (Unsloth's UD-Q6_K_XL, and layer 2 of UD-Q5_K_XL; docs/QUANTS.md).  On by
+# Q6_K gate/up in the grouped expert kernels (Unsloth's UD-Q6_K_XL, and layer 2 of UD-Q5_K_XL).  On by
 # default since MODEL-UPDATE Phase 1: one more instance per grouped kernel in iq_kernels.cu, +19 KB of sm_60 code,
 # measured to leave every expert-cache slot count as it was (P100, R9700).  -DSTRATA_Q6K_EXPERTS=OFF drops it.
 option(STRATA_Q6K_EXPERTS "Build the Q6_K gate/up grouped expert kernels (UD-Q6_K_XL, UD-Q5_K_XL)" ON)
@@ -160,7 +160,7 @@ endif()
 # (arm64 stays off by default: -DSTRATA_BUILD_TESTS=ON still builds what builds there).  GPU tests are registered only
 # when STRATA_ENABLE_CUDA / STRATA_ENABLE_HIP is on, and the configure summary below says which kinds were registered, so
 # a missing GPU is a stated skip and never a silent pass.  Release builds say -DSTRATA_BUILD_TESTS=OFF themselves
-# (packaging/, setup.py, Dockerfile, spark/).
+# (packaging/, setup.py).
 set(_strata_tests_default OFF)
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/core AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/bench/micro AND STRATA_CPU_X86)
   set(_strata_tests_default ON)
@@ -434,7 +434,7 @@ if(STRATA_NATIVE_EXPERTS)
     add_executable(q8_gemv_bench src/common/kernels/q8_gemv_bench.cpp)
     target_include_directories(q8_gemv_bench PRIVATE ${_strata_gpu_include_directories})
     target_link_libraries(q8_gemv_bench PRIVATE strata_kernels ${_strata_gpu_runtime_target})
-    # EXPDEC (docs/EXPERTDEC.md): the grouped experts' default kernels against STRATA_EXPDEC=1 at T = 1..4, bit for bit
+    # EXPDEC: the grouped experts' default kernels against STRATA_EXPDEC=1 at T = 1..4, bit for bit
     # and in microseconds, on synthetic blobs read cold from DRAM
     add_executable(expdec_bench EXCLUDE_FROM_ALL src/common/kernels/expdec_bench.cpp)
     target_include_directories(expdec_bench PRIVATE ${_strata_gpu_include_directories})
@@ -449,7 +449,7 @@ if(STRATA_NATIVE_EXPERTS)
       # noise, not a kernel bug -- see the PR).
       # q4_0/q4_0 and q4_0/q4_1: a plain llama-quantize Q4_0 file (bartowski's Qwen3.8-Flash-Next-Q4_0: gate/up Q4_0,
       # down Q4_0 on 42 layers and Q4_1 on 6)
-      # q6_K/q8_0: Unsloth UD-Q6_K_XL gate/up Q6_K with Q8_0 down (docs/UNSLOTH_Q6.md). Layer 2 is q8_0/q8_0, already listed.
+      # q6_K/q8_0: Unsloth UD-Q6_K_XL gate/up Q6_K with Q8_0 down. Layer 2 is q8_0/q8_0, already listed.
       set(_strata_parity_pairs q4_K/q5_1 q4_K/q8_0 q5_K/q8_0 q8_0/q8_0 q4_K/q5_0 q5_0/q8_0 q4_0/q4_0 q4_0/q4_1)
       if(STRATA_Q6K_EXPERTS)
         list(APPEND _strata_parity_pairs q6_K/q8_0)
@@ -514,7 +514,7 @@ if(STRATA_NATIVE_EXPERTS)
     add_test(NAME native_dense_types_parity COMMAND native_dense_types_parity)
     set_tests_properties(native_dense_types_parity PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
   endif()
-  # #296's real-weight checks (OrcaRouter Q4_K_S files; docs/ORCA_Q4_K_S.md) - test programs, not part of a release
+  # #296's real-weight checks (OrcaRouter Q4_K_S files) - test programs, not part of a release
   if(STRATA_ENABLE_CUDA AND STRATA_BUILD_TESTS)
     add_executable(ple_q5_parity src/models/qwen38/kernels/ple_q5_parity.cpp)
     target_link_libraries(ple_q5_parity PRIVATE strata_kernels strata_artifact ggml-base ${_strata_gpu_runtime_target})

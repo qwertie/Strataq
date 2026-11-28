@@ -23,7 +23,7 @@ macro(strata_ggml_configure_root)
   set(GGML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
   set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
   if(STRATA_PORTABLE AND NOT STRATA_CPU_X86)
-    # arm64 (DGX Spark: Cortex-X925 + A725): ggml-cpu for any Armv8.2 CPU with dot product, FP16 and int8 matmul instead of the build
+    # arm64: ggml-cpu for any Armv8.2 CPU with dot product, FP16 and int8 matmul instead of the build
     # host's, so the engine built here does not depend on which core the compiler ran on.  Without it GGML_NATIVE OFF would leave
     # ggml-cpu at plain armv8-a, and a native pack's CPU experts would lose the NEON dot products.
     set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
