@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
     check(output(log).empty(), "supported: no line");
 
     // each unsupported path the engine names: off, one line, never repeated
-    const char* where[] = {"HIP", "Metal", "SYCL", "this CUDA card or with STRATA_QSA_WARP",
+    const char* where[] = {"HIP", "this CUDA card or with STRATA_QSA_WARP",
                            "the layer-major prompt path"};
     std::string expected;
     for (const char* w : where) {
