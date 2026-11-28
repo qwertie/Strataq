@@ -1580,89 +1580,6 @@ __global__ void __launch_bounds__(kThreads) markov_kernel_q8(float* __restrict__
     if (lane == 0) logits[v] += a;
 }
 
-// a member's rows [v0, v0 + vn) of the bias (markov_kernel's sums, the prev token's E row already on the device, BF16)
-__global__ void __launch_bounds__(kThreads) markov_share_kernel(float* __restrict__ logits,
-                                                                const uint16_t* __restrict__ H,
-                                                                const uint16_t* __restrict__ erow, int vn, int R) {
-    extern __shared__ float er[];
-    for (int i = threadIdx.x; i < R; i += blockDim.x) er[i] = bf16f(erow[i]);
-    __syncthreads();
-    const int lane = threadIdx.x & 31;
-    const int v = blockIdx.x * (kThreads / 32) + (threadIdx.x >> 5);
-    if (v >= vn) return;
-    const uint16_t* hr = H + (size_t) v * R;
-    float a = 0.0f;
-    for (int c = lane * 8; c < R; c += 32 * 8) {
-        const uint4 q = *(const uint4*) (hr + c);
-        const __half2* hp = (const __half2*) &q;
-#pragma unroll
-        for (int i = 0; i < 4; ++i) {
-            const float2 f = __half22float2(hp[i]);
-            a += f.x * er[c + 2 * i] + f.y * er[c + 2 * i + 1];
-        }
-    }
-    a = warp_sum(a);
-    if (lane == 0) logits[v] += a;
-}
-// the share's argmax (the greedy sampler's rule: the larger value, on a tie the lower index) -> slot {value, v0 + i,
-// seq}, the seq last
-__global__ void __launch_bounds__(1024) argmax_share_kernel(const float* __restrict__ row, int vn, int v0,
-                                                           unsigned* slot, unsigned seq) {
-    __shared__ float sv[32];
-    __shared__ int si[32];
-    float bv = __int_as_float(0xff800000);
-    int bi = 0x7fffffff;
-    for (int i = threadIdx.x; i < vn; i += blockDim.x) {
-        const float x = row[i];
-        if (x > bv) bv = x, bi = i;   // (ascending: the lowest index of a tie stays)
-    }
-    for (int o = 16; o > 0; o >>= 1) {
-        const float ov = __shfl_xor_sync(0xffffffffu, bv, o);
-        const int oi = __shfl_xor_sync(0xffffffffu, bi, o);
-        if (ov > bv || (ov == bv && oi < bi)) bv = ov, bi = oi;
-    }
-    if ((threadIdx.x & 31) == 0) sv[threadIdx.x >> 5] = bv, si[threadIdx.x >> 5] = bi;
-    __syncthreads();
-    if (threadIdx.x == 0) {
-        for (int w = 1; w < (int) (blockDim.x >> 5); ++w)
-            if (sv[w] > bv || (sv[w] == bv && si[w] < bi)) bv = sv[w], bi = si[w];
-        slot[0] = __float_as_uint(bv);
-        slot[1] = (unsigned) (v0 + (bi == 0x7fffffff ? 0 : bi));
-        __threadfence_system();
-        *(volatile unsigned*) (slot + 2) = seq;
-    }
-}
-// every member's share argmax of this step (slots nm apart) -> the global one into *tok, and its E row (host-mapped
-// BF16 [V][R]) into erow for the next step's bias
-__global__ void markov_pick_kernel(const unsigned* slots, int nm, unsigned seq, int* tok, const uint16_t* E,
-                                   uint16_t* erow, int R) {
-    __shared__ int pick;
-    if ((int) threadIdx.x < nm)
-        while ((int) (*(volatile const unsigned*) (slots + (size_t) threadIdx.x * 4 + 2) - seq) < 0) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
-            __nanosleep(32);
-#endif
-        }
-    __syncthreads();
-    if (threadIdx.x == 0) {
-        float bv = __int_as_float(0xff800000);
-        int bi = 0x7fffffff;
-        for (int m = 0; m < nm; ++m) {   // (members in vocabulary order: a tie keeps the lower index)
-            const float v = __uint_as_float(*(volatile const unsigned*) (slots + (size_t) m * 4));
-            const int i = (int) *(volatile const unsigned*) (slots + (size_t) m * 4 + 1);
-            if (v > bv || (v == bv && i < bi)) bv = v, bi = i;
-        }
-        pick = bi;
-        *tok = bi;
-    }
-    __syncthreads();
-#if defined(STRATA_USE_HIP)   // (E is fixed once loaded: a plain load is as fresh)
-    for (int i = threadIdx.x; i < R; i += blockDim.x) erow[i] = E[(size_t) pick * R + i];
-#else
-    for (int i = threadIdx.x; i < R; i += blockDim.x) erow[i] = __ldcv(E + (size_t) pick * R + i);
-#endif
-}
-
 __global__ void __launch_bounds__(1024) confidence_kernel(const float* __restrict__ x, const uint16_t* __restrict__ E,
                                                           const int* __restrict__ tok, const float* __restrict__ w,
                                                           int dim, int R, float* __restrict__ out) {
@@ -1821,46 +1738,6 @@ __global__ void __launch_bounds__(512) route_publish_kernel(const float* __restr
         for (int i = threadIdx.x; i < dim; i += blockDim.x) req->x[t][i] = x[(size_t) t * dim + i];
 }
 
-// a later layer's m likely picks (route_kernel's choice from its logits) into req->ahead[t][off ..)
-__global__ void __launch_bounds__(512) route_ahead_kernel(const float* __restrict__ logits,
-                                                          const float* __restrict__ bias, int n, int m, Req* req,
-                                                          int off) {
-    __shared__ float bs[1024];
-    __shared__ float bv[32];
-    __shared__ int bi[32];
-    const int t = blockIdx.x;
-    logits += (size_t) t * 1024;
-    for (int i = threadIdx.x; i < n; i += blockDim.x) {
-        const float l = logits[i];
-        const float sp = l > 20.0f ? l : log1pf(expf(l));
-        bs[i] = sqrtf(sp) + bias[i];
-    }
-    __syncthreads();
-    const int lane = threadIdx.x & 31, wp = threadIdx.x >> 5;
-    for (int r = 0; r < m; ++r) {
-        float best = -FLT_MAX;
-        int bix = 0x7fffffff;
-        for (int i = threadIdx.x; i < n; i += blockDim.x)
-            if (bs[i] > best || (bs[i] == best && i < bix)) best = bs[i], bix = i;
-        for (int o = 16; o > 0; o >>= 1) {
-            const float ov = __shfl_xor_sync(0xffffffffu, best, o);
-            const int oi = __shfl_xor_sync(0xffffffffu, bix, o);
-            if (ov > best || (ov == best && oi < bix)) best = ov, bix = oi;
-        }
-        if (lane == 0) bv[wp] = best, bi[wp] = bix;
-        __syncthreads();
-        if (threadIdx.x == 0) {
-            float b = -FLT_MAX;
-            int ix = 0x7fffffff;
-            for (int q = 0; q < (int) (blockDim.x >> 5); ++q)
-                if (bv[q] > b || (bv[q] == b && bi[q] < ix)) b = bv[q], ix = bi[q];
-            req->ahead[t][off + r] = ix < n ? ix : -1;
-            if (ix < n) bs[ix] = -FLT_MAX;
-        }
-        __syncthreads();
-    }
-}
-
 __global__ void publish_kernel(Req* req, int T, unsigned seq, int na0, int na1) {
     __threadfence_system();
     req->na[0] = na0;
@@ -1931,156 +1808,10 @@ __global__ void wait_flags_kernel(const unsigned* flags, int n, int stride, unsi
     for (int i = 0; i < n; ++i) wait_at_least(flags + (size_t) i * stride, seq);
     __threadfence_system();
 }
-// a batch of table entries: *pairs[2i] = pairs[2i + 1] (the expert cache's recent slots, between windows;
-// Project Maya #344)
-__global__ void tab_set_kernel(const unsigned long long* __restrict__ pairs, int n) {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < n) *(unsigned long long*) pairs[2 * i] = pairs[2 * i + 1];
-}
 __global__ void set_flag_kernel(unsigned* flag, unsigned v) {
     __threadfence_system();
     *(volatile unsigned*) flag = v;
 }
-
-// three members or more: a reduce-scatter and an all-gather in one launch, a block a contiguous range of the row cut
-// in nm chunks.  The block puts its range of this member's partial out and flags it; once every member's flag of the
-// range is up it sums chunk mi of the range in member order (ar_sum_kernel's sums, bit for bit), puts that out and
-// flags it; once every member's sum flag is up it reads the other chunks' sums.  Each member reads about two rows over
-// PCIe whatever nm is, where every member reading every other row grows with nm
-__global__ void __launch_bounds__(kThreads) ar_rs_kernel(float* x, int n4, float* rows, float* sums, size_t stride,
-                                                        unsigned* bflags, int nm, int mi, int slot, int slots,
-                                                        unsigned seq) {
-    float4* x4 = (float4*) x;
-    const int per = (n4 + (int) gridDim.x - 1) / (int) gridDim.x;
-    const int lo = blockIdx.x * per, hi = min(n4, lo + per), cs = (hi - lo + nm - 1) / nm;
-    auto rflag = [&](int m) { return bflags + (((size_t) m * slots + slot) * kArBlocks + blockIdx.x) * 8; };
-    auto sflag = [&](int m) {
-        return bflags + ((((size_t) nm + m) * slots + slot) * kArBlocks + blockIdx.x) * 8;
-    };
-    auto row = [&](int m) { return (float4*) (rows + ((size_t) m * slots + slot) * stride); };
-    float4* sum = (float4*) (sums + (size_t) slot * stride);
-    if (lo < hi) {
-        float4* mine = row(mi);
-        for (int q = lo + threadIdx.x; q < hi; q += blockDim.x) mine[q] = x4[q];
-    }
-    __threadfence_system();
-    __syncthreads();
-    if (threadIdx.x == 0) *(volatile unsigned*) rflag(mi) = seq;
-    if ((int) threadIdx.x < nm && (int) threadIdx.x != mi) wait_at_least(rflag(threadIdx.x), seq);
-    __syncthreads();
-    const int c0 = min(hi, lo + mi * cs), c1 = min(hi, c0 + cs);
-    for (int q = c0 + threadIdx.x; q < c1; q += blockDim.x) {
-        float4 v = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
-        for (int m = 0; m < nm; ++m) {
-            const float4 p = m == mi ? x4[q] : ld_fresh(row(m) + q);
-            if (m == 0) v = p;
-            else {
-                v.x = __fadd_rn(v.x, p.x);
-                v.y = __fadd_rn(v.y, p.y);
-                v.z = __fadd_rn(v.z, p.z);
-                v.w = __fadd_rn(v.w, p.w);
-            }
-        }
-        sum[q] = v;
-        x4[q] = v;
-    }
-    __threadfence_system();
-    __syncthreads();
-    if (threadIdx.x == 0) *(volatile unsigned*) sflag(mi) = seq;
-    if ((int) threadIdx.x < nm && (int) threadIdx.x != mi) wait_at_least(sflag(threadIdx.x), seq);
-    __syncthreads();
-    for (int q = lo + threadIdx.x; q < hi; q += blockDim.x)
-        if (q < c0 || q >= c1) x4[q] = ld_fresh(sum + q);
-}
-
-// ar_rs_kernel with the rows and the sums in FP16 (DS4_AR_F16): half the bytes over PCIe.  Every member's partial is
-// rounded to FP16 (the owner's too), summed in F32 in member order, the sum rounded to FP16 - and every member, the
-// owner too, takes that rounded sum, so the members' copies of the stream stay the same
-__device__ __forceinline__ uint2 to_h4(float4 v) {
-    const __half2 a = __floats2half2_rn(v.x, v.y), b = __floats2half2_rn(v.z, v.w);
-    return make_uint2(*(const unsigned*) &a, *(const unsigned*) &b);
-}
-__device__ __forceinline__ float4 from_h4(uint2 u) {
-    const float2 a = __half22float2(*(const __half2*) &u.x), b = __half22float2(*(const __half2*) &u.y);
-    return make_float4(a.x, a.y, b.x, b.y);
-}
-__device__ __forceinline__ float4 sat4(float4 v) {   // (FP16's range: a partial past it saturates instead of inf)
-    const float m = 65504.0f;
-    return make_float4(fminf(fmaxf(v.x, -m), m), fminf(fmaxf(v.y, -m), m), fminf(fmaxf(v.z, -m), m), fminf(fmaxf(v.w, -m), m));
-}
-__global__ void __launch_bounds__(kThreads) ar_rs16_kernel(float* x, int n4, float* rows, float* sums, size_t stride,
-                                                          unsigned* bflags, int nm, int mi, int slot, int slots,
-                                                          unsigned seq) {
-    float4* x4 = (float4*) x;
-    const int per = (n4 + (int) gridDim.x - 1) / (int) gridDim.x;
-    const int lo = blockIdx.x * per, hi = min(n4, lo + per), cs = (hi - lo + nm - 1) / nm;
-    auto rflag = [&](int m) { return bflags + (((size_t) m * slots + slot) * kArBlocks + blockIdx.x) * 8; };
-    auto sflag = [&](int m) {
-        return bflags + ((((size_t) nm + m) * slots + slot) * kArBlocks + blockIdx.x) * 8;
-    };
-    auto row = [&](int m) { return (uint2*) (rows + ((size_t) m * slots + slot) * stride); };   // (FP16: half a row)
-    uint2* sum = (uint2*) (sums + (size_t) slot * stride);
-    if (lo < hi) {
-        uint2* mine = row(mi);
-        for (int q = lo + threadIdx.x; q < hi; q += blockDim.x) mine[q] = to_h4(sat4(x4[q]));
-    }
-    __threadfence_system();
-    __syncthreads();
-    if (threadIdx.x == 0) *(volatile unsigned*) rflag(mi) = seq;
-    if ((int) threadIdx.x < nm && (int) threadIdx.x != mi) wait_at_least(rflag(threadIdx.x), seq);
-    __syncthreads();
-    const int c0 = min(hi, lo + mi * cs), c1 = min(hi, c0 + cs);
-    for (int q = c0 + threadIdx.x; q < c1; q += blockDim.x) {
-        float4 v = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
-        for (int m = 0; m < nm; ++m) {
-            const uint2 u = m == mi ? to_h4(sat4(x4[q])) : ld_fresh(row(m) + q);
-            const float4 p = from_h4(u);
-            if (m == 0) v = p;
-            else {
-                v.x = __fadd_rn(v.x, p.x);
-                v.y = __fadd_rn(v.y, p.y);
-                v.z = __fadd_rn(v.z, p.z);
-                v.w = __fadd_rn(v.w, p.w);
-            }
-        }
-        const uint2 s16 = to_h4(sat4(v));
-        sum[q] = s16;
-        x4[q] = from_h4(s16);
-    }
-    __threadfence_system();
-    __syncthreads();
-    if (threadIdx.x == 0) *(volatile unsigned*) sflag(mi) = seq;
-    if ((int) threadIdx.x < nm && (int) threadIdx.x != mi) wait_at_least(sflag(threadIdx.x), seq);
-    __syncthreads();
-    for (int q = lo + threadIdx.x; q < hi; q += blockDim.x)
-        if (q < c0 || q >= c1) x4[q] = from_h4(ld_fresh(sum + q));
-}
-
-// x[i] = the members' partials summed in member order (this member's from x, the others' from their host rows)
-__global__ void __launch_bounds__(kThreads) ar_sum_kernel(float* x, int n4, const float* peers, size_t stride,
-                                                         const unsigned* flags, int nm, int mi, int slot, int slots,
-                                                         unsigned seq) {
-    if (threadIdx.x == 0)
-        for (int m = 0; m < nm; ++m)
-            if (m != mi) wait_at_least(flags + ((size_t) m * slots + slot) * 32, seq);
-    __syncthreads();
-    for (int q = blockIdx.x * blockDim.x + threadIdx.x; q < n4; q += gridDim.x * blockDim.x) {
-        float4 v = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
-        for (int m = 0; m < nm; ++m) {
-            const float4 p = m == mi ? ((const float4*) x)[q]
-                                     : ld_fresh((const float4*) (peers + ((size_t) m * slots + slot) * stride) + q);
-            if (m == 0) v = p;
-            else {
-                v.x = __fadd_rn(v.x, p.x);
-                v.y = __fadd_rn(v.y, p.y);
-                v.z = __fadd_rn(v.z, p.z);
-                v.w = __fadd_rn(v.w, p.w);
-            }
-        }
-        ((float4*) x)[q] = v;
-    }
-}
-
 
 // a thread a (token, value): every stream's value read before any is written
 __global__ void hc_post_inplace_kernel(const float* __restrict__ y, float* h, const float* __restrict__ post,
@@ -2297,10 +2028,6 @@ void route_publish(const float* logits, const float* bias, int n, int k, int k_m
                       plan_ptr, req, vl != 0 ? bias_vl : nullptr, vl, prior);
     if (req != nullptr) strata_ds4_launch(publish_kernel, 1, 1, 0, s, req, T, seq, na0, na1);
 }
-void route_ahead(const float* logits, const float* bias, int n, int m, int T, Req* req, int off, cudaStream_t s) {
-    if (req != nullptr && m > 0 && T > 0 && n <= 1024 && off + m <= kAhead)
-        strata_ds4_launch(route_ahead_kernel, T, 512, 0, s, logits, bias, n, m, req, off);
-}
 bool router_nonfinite_take(cudaStream_t s) {
     int v = 0;
     if (cudaStreamSynchronize(s) != cudaSuccess || cudaMemcpyFromSymbol(&v, g_router_bad, sizeof v) != cudaSuccess) {
@@ -2315,32 +2042,6 @@ bool router_nonfinite_take(cudaStream_t s) {
 }
 void wait_seq(const unsigned* seq_ptr, unsigned seq, cudaStream_t s) {
     strata_ds4_launch(wait_seq_kernel, 1, 32, 0, s, seq_ptr, seq);
-}
-
-// the RAM store's experts for the device (a decode token, window of one): a pick the VRAM table left at 0 whose expert the store holds
-// (zc_tab[expert] = the slot's device address over PCIe, 0: not) is copied to staging slot i with wide coalesced loads (the PCIe
-// rate; the expert kernels' own small loads over PCIe ran at a tenth of it), then the plan points at the copy
-__global__ void zc_copy_kernel(const unsigned long long* __restrict__ plan, const int* __restrict__ idx,
-                               const unsigned long long* __restrict__ zc_tab, uint8_t* __restrict__ stage, size_t stride, size_t bytes) {
-    const int i = blockIdx.y;
-    if (plan[i] != 0) return;
-    const unsigned long long p = zc_tab[idx[i]];
-    if (p == 0) return;
-    const uint4* src = (const uint4*) p;
-    uint4* dst = (uint4*) (stage + (size_t) i * stride);
-    const size_t n = bytes / 16;
-    for (size_t o = (size_t) blockIdx.x * blockDim.x + threadIdx.x; o < n; o += (size_t) gridDim.x * blockDim.x) dst[o] = src[o];
-}
-__global__ void zc_fix_kernel(unsigned long long* __restrict__ plan, const int* __restrict__ idx, const unsigned long long* __restrict__ zc_tab,
-                              int k, uint8_t* __restrict__ stage, size_t stride) {
-    const int i = threadIdx.x;
-    if (i >= k || plan[i] != 0) return;
-    if (zc_tab[idx[i]] != 0) plan[i] = (unsigned long long) (stage + (size_t) i * stride);
-}
-void zc_stage(unsigned long long* plan, const int* idx, const unsigned long long* zc_tab, int k, uint8_t* stage, size_t stride, size_t bytes,
-              cudaStream_t s) {
-    strata_ds4_launch(zc_copy_kernel, dim3(64, k), 256, 0, s, plan, idx, zc_tab, stage, stride, bytes);
-    strata_ds4_launch(zc_fix_kernel, 1, 32, 0, s, plan, idx, zc_tab, k, stage, stride);
 }
 
 void init_pre(float* pre, int T, cudaStream_t s) {
@@ -2623,16 +2324,6 @@ void markov_add(float* logits, const uint16_t* E, const uint16_t* H, const int* 
 void markov_add_q8(float* logits, const uint16_t* E, const uint8_t* Hq, const int* tok, int V, int R, cudaStream_t s) {
     strata_ds4_launch(markov_kernel_q8, cdiv(V, kThreads / 32), kThreads, (size_t) R * sizeof(float), s, logits, E, Hq, tok, V, R);
 }
-void markov_share(float* logits, const uint16_t* H, const uint16_t* erow, int vn, int R, cudaStream_t s) {
-    strata_ds4_launch(markov_share_kernel, cdiv(vn, kThreads / 32), kThreads, (size_t) R * sizeof(float), s, logits, H, erow, vn, R);
-}
-void argmax_share(const float* row, int vn, int v0, unsigned* slot, unsigned seq, cudaStream_t s) {
-    strata_ds4_launch(argmax_share_kernel, 1, 1024, 0, s, row, vn, v0, slot, seq);
-}
-void markov_pick(const unsigned* slots, int nm, unsigned seq, int* tok, const uint16_t* E, uint16_t* erow, int R,
-                 cudaStream_t s) {
-    strata_ds4_launch(markov_pick_kernel, 1, 256, 0, s, slots, nm, seq, tok, E, erow, R);
-}
 void confidence(const float* x, const uint16_t* E, const int* tok, const float* w, int T, int dim, int R, float* out,
                 cudaStream_t s) {
     strata_ds4_launch(confidence_kernel, T, 1024, 0, s, x, E, tok, w, dim, R, out);
@@ -2686,52 +2377,9 @@ void xfer_get(const Xfer& x, const unsigned* flag, unsigned seq, cudaStream_t s,
 void wait_flags(const unsigned* flags, int n, int stride, unsigned seq, cudaStream_t s) {
     if (n > 0) strata_ds4_launch(wait_flags_kernel, 1, 32, 0, s, flags, n, stride, seq);
 }
-void tab_set(const unsigned long long* pairs, int n, cudaStream_t s) {
-    if (n > 0) strata_ds4_launch(tab_set_kernel, (n + 127) / 128, 128, 0, s, pairs, n);
-}
 void set_flag(unsigned* flag, unsigned v, cudaStream_t s) {
     strata_ds4_launch(set_flag_kernel, 1, 1, 0, s, flag, v);
     win_submit(s);   // (the writer on another GPU waits for this acknowledgement before its next put - #384)
-}
-void allreduce(float* x, int n, const ArGroup& a, int mi, unsigned seq, unsigned* cnt,
-               cudaStream_t s, int device) {
-    const int slot = (int) (seq % (unsigned) a.slots);
-    if (a.nm > 2 && a.sums != nullptr && a.bflags != nullptr) {   // (the reduce-scatter: ar_rs_kernel)
-        static const bool f16 = [] {
-            const char* e = std::getenv("DS4_AR_F16");
-            return e != nullptr && std::atoi(e) != 0;   // opt-in: no gain measured on 4x R9700 (21.8 vs 21.9 tok/s)   // (on unless DS4_AR_F16=0)
-        }();
-        const int n4 = n / 4;
-        const int blocks = std::max(1, std::min(kArBlocks, cdiv(n4, kThreads)));
-        uint64_t own = 0;
-        const int per = (n4 + blocks - 1) / blocks;
-        for (int b = 0; b < blocks; ++b) {
-            const int lo = b * per, hi = std::min(n4, lo + per);
-            if (lo >= hi)
-                continue;
-            const int cs = (hi - lo + a.nm - 1) / a.nm;
-            const int c0 = std::min(hi, lo + mi * cs), c1 = std::min(hi, c0 + cs);
-            own += (uint64_t) (c1 - c0);
-        }
-        const uint64_t bytes = f16 ? 8 : 16;
-        strata::core::count_gpu_traffic(device, (own * (a.nm - 1) + n4 - own) * bytes,
-                                        (n4 + own) * bytes);
-        if (f16)
-            strata_ds4_launch(ar_rs16_kernel, blocks, kThreads, 0, s, x, n4, a.data, a.sums, a.stride, a.bflags, a.nm, mi, slot, a.slots, seq);
-        else
-            strata_ds4_launch(ar_rs_kernel, blocks, kThreads, 0, s, x, n4, a.data, a.sums, a.stride, a.bflags, a.nm, mi, slot, a.slots, seq);
-        return;
-    }
-    Xfer xp;
-    xp.n = 1;
-    xp.src[0] = x;
-    xp.dst[0] = a.data + ((size_t) mi * a.slots + slot) * a.stride;
-    xp.bytes[0] = (size_t) n * 4;
-    xfer_put(xp, a.flags + ((size_t) mi * a.slots + slot) * 32, seq, cnt, s, device);
-    strata::core::count_gpu_traffic(device, (uint64_t) (n / 4) * 16 * (a.nm - 1), 0);
-    const int n4 = n / 4;
-    const int blocks = std::max(1, std::min(64, cdiv(n4, kThreads)));
-    strata_ds4_launch(ar_sum_kernel, blocks, kThreads, 0, s, x, n4, a.data, a.stride, a.flags, a.nm, mi, slot, a.slots, seq);
 }
 
 }  // namespace strata::ds4

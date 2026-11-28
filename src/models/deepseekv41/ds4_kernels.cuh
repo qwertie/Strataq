@@ -245,13 +245,6 @@ void route_publish(const float* logits, const float* bias, int n, int k, int k_m
                    const unsigned long long* vram, const float* x, int dim, int* idx, float* w,
                    unsigned long long* plan_ptr, Req* req, unsigned seq, cudaStream_t s, const float* bias_vl = nullptr,
                    unsigned vl = 0, int na0 = 0, int na1 = 0, float prior = 0.0f);
-/// Lookahead: the m picks a later layer will likely make (its gate's logits on this layer's FFN input, the routing's
-/// score + bias, the m best of n) into req->ahead[t][off ..) for the T tokens - before route_publish, which publishes them.
-void route_ahead(const float* logits, const float* bias, int n, int m, int T, Req* req, int off, cudaStream_t s);
-/// The RAM store's picks for the device (a decode token's k plan pointers): those the VRAM table left at 0 whose expert zc_tab has (the
-/// slot's device address) are copied into stage slot i (stride apart, `bytes` each) and the plan then points there.
-void zc_stage(unsigned long long* plan, const int* idx, const unsigned long long* zc_tab, int k, uint8_t* stage, size_t stride, size_t bytes,
-              cudaStream_t s);
 /// Waits (one thread, on the device) until *seq_ptr == seq.
 void wait_seq(const unsigned* seq_ptr, unsigned seq, cudaStream_t s);
 /// True once if the router (route / route_publish) had no pick to make on this device since the last call - every score it was
@@ -277,14 +270,6 @@ void iota_rows(int* out, int T, int n, int stride, cudaStream_t s);
 void markov_add(float* logits, const uint16_t* E, const uint16_t* H, const int* tok, int V, int R, cudaStream_t s);
 /// The same bias with the head quantised to Q8_0 blocks of 32 (34 B a block: F16 d and 32 int8, R a multiple of 32).
 void markov_add_q8(float* logits, const uint16_t* E, const uint8_t* Hq, const int* tok, int V, int R, cudaStream_t s);
-/// The markov bias over a head group: a member's rows [v0, v0 + vn) of it added to its share of a logits row (erow:
-/// the previous token's E row, BF16, on the device) - markov_add's sums; the share's argmax (the greedy sampler's rule)
-/// into a host-mapped slot {value, index, seq}; every member's slot of the step -> the global argmax into *tok and its
-/// E row (E host-mapped) into erow.
-void markov_share(float* logits, const uint16_t* H, const uint16_t* erow, int vn, int R, cudaStream_t s);
-void argmax_share(const float* row, int vn, int v0, unsigned* slot, unsigned seq, cudaStream_t s);
-void markov_pick(const unsigned* slots, int nm, unsigned seq, int* tok, const uint16_t* E, uint16_t* erow, int R,
-                 cudaStream_t s);
 /// The DSpark confidence: out[t] = sigmoid(w . [x[t] | E[tok[t]]]) (x rows dim floats, w F32 [dim + R]).
 void confidence(const float* x, const uint16_t* E, const int* tok, const float* w, int T, int dim, int R, float* out,
                 cudaStream_t s);
@@ -316,22 +301,5 @@ void xfer_get(const Xfer& x, const unsigned* flag, unsigned seq, cudaStream_t s,
 /// set_flag: *flag = v after a system fence (a reader's acknowledgement).
 void wait_flags(const unsigned* flags, int n, int stride, unsigned seq, cudaStream_t s);
 void set_flag(unsigned* flag, unsigned v, cudaStream_t s);
-/// tab_set: n (address, value) pairs, *pairs[2i] = pairs[2i + 1], in one launch (the expert cache's table entries).
-void tab_set(const unsigned long long* pairs, int n, cudaStream_t s);
-/// A tensor-parallel group's all-reduce: host-mapped rows data[member][slot] (stride floats), flags[member][slot]
-/// (32 apart).  x (n floats, n % 4 == 0: this member's partial) -> the sum of the nm members' partials in member order,
-/// the same bits on every member; seq counts the group's all-reduces (the same on each member), slot = seq % slots.
-struct ArGroup {
-    float* data = nullptr;
-    unsigned* flags = nullptr;
-    size_t stride = 0;
-    int nm = 1, slots = 4;
-    // three members or more: a reduce-scatter + all-gather (each member sums its chunk of every block's range, in
-    // member order, then reads the others' sums) - [slots][stride] sums, [2][nm][slots][kArBlocks][8] flags
-    float* sums = nullptr;
-    unsigned* bflags = nullptr;
-};
-constexpr int kArBlocks = 64;
-void allreduce(float* x, int n, const ArGroup& a, int mi, unsigned seq, unsigned* cnt, cudaStream_t s, int device);
 
 }  // namespace strata::ds4
