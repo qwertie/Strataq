@@ -79,11 +79,10 @@ test('the page reads the mark before the first render, and the chat honours it',
   assert.match(chat, /function selectPreview\(id: string\) \{\s*endPreviewDeferral\(\);/);
 });
 
-test('the shell hooks: Windows ProcessFailed, macOS web content process, the same recovery path, no new text', () => {
+test('the shell hooks: Windows ProcessFailed, the same recovery path, no new text', () => {
   const main = readFileSync(resolve(root, '../desktop/src-tauri/src/main.rs'), 'utf8');
   assert.match(main, /fn hook_renderer_failures\(window: &tauri::WebviewWindow, port: u16\)/);
   assert.match(main, /add_ProcessFailed\(&handler, &mut token\)/);
-  assert.match(main, /on_web_content_process_terminate\(/);
   assert.match(main, /recovery::plan\(/);
   const cargo = readFileSync(resolve(root, '../desktop/src-tauri/Cargo.toml'), 'utf8');
   assert.match(cargo, /\[target\.'cfg\(windows\)'\.dependencies\][\s\S]*webview2-com = "0\.39"/);

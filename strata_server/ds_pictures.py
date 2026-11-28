@@ -1,7 +1,7 @@
-"""Pictures for DeepSeek-V4.1-Flash through the engine's OWN vision tower (strata-dsv41 --vision on, the default).
+"""Pictures for DeepSeek-V4.1-Flash through the engine's OWN vision tower (strata-ds41 --vision on, the default).
 
 The Qwen engines get pictures from a separate reader process (strata-vision): it turns a picture into embeddings and the server writes
-those into the file a `GENI` line names.  strata-dsv41 carries its own 319 MiB tower, so the server only has to
+those into the file a `GENI` line names.  strata-ds41 carries its own 319 MiB tower, so the server only has to
   1. decode each picture to RGB and bring it to a size the tower takes (both sides a multiple of 42 = patch 14 x merge 3, at most
      `vision.max_image_tokens` image tokens, at least `vision.min_pixels` pixels),
   2. put one run of image tokens into the prompt where the template wrote its single `<｜deepseek_image｜>` placeholder: the run is

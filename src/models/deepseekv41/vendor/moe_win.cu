@@ -2,7 +2,7 @@
 // Ported into Strata (third_party/project-maya/NOTICE.md, LICENSE); changes are in the git history of this file.
 // src/models/deepseekv41/vendor/moe_win.cu - the window's expert grouping kernel.
 // Extracted from Project Maya's src/kernels/cuda/glm_fast.cu (MIT, see third_party/project-maya/NOTICE.md).
-#include "../ds4_launch.h"   // strata_ds4_launch: <<<>>> on CUDA and HIP, a dispatch on Metal
+#include "../ds4_launch.h"   // strata_ds4_launch
 #include "strata/models/deepseekv41/moe_win.hpp"
 #include <cstdio>
 #include <cstdlib>

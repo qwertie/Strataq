@@ -2486,57 +2486,10 @@ class PeerDevice(unittest.TestCase):
         self.assertEqual(engine_args({"args": ["--native", "x"], "gpu": [0, 1]}),
                          ["--native", "x", "--layer-split", "auto"])
 
-    def test_no_split_with_a_peer(self):
-        args = ["--native", "x", "--peer-device", "1"]
-        self.assertEqual(engine_args({"args": list(args), "gpu": [0, 1]}), args)
-        self.assertEqual(engine_args({"args": list(args), "gpu": [0, 1], "split_skip_if_fits": True}), args)
-
     def test_both_cards_visible(self):
         from strata_common.engine_client import child_env
         env = child_env({"args": ["--peer-device", "1"], "gpu": [0, 1]})
         self.assertEqual(env["CUDA_VISIBLE_DEVICES"], "0,1")
-
-
-class LearnedProfile(unittest.TestCase):
-    """#477: "expert_profile_save" in the config: the engine saves its learned profile there, and the next start
-    begins from it when it is a profile of the same model; without the key the arguments are unchanged."""
-
-    def write(self, path, nl=48, ne=512, n=4):
-        sys.path.insert(0, str(ROOT / "tools"))
-        import make_profile
-        old = make_profile.N_LAYER
-        make_profile.N_LAYER = nl
-        try:
-            make_profile.write_profile(path, [(i % nl, i // nl) for i in range(n)], n_expert=ne)
-        finally:
-            make_profile.N_LAYER = old
-
-    def test_without_the_key_nothing_changes(self):
-        args = ["--native", "x", "--expert-profile", "data/expert-profile.bin", "--adapt-every", "4"]
-        self.assertEqual(engine_args({"args": list(args)}), args)
-        self.assertEqual(engine_args({"args": list(args), "expert_profile_save": ""}), args)
-
-    def test_save_and_start_from_it(self):
-        d = Path(tempfile.mkdtemp())
-        self.write(d / "base.bin")
-        cfg = {"args": ["--expert-profile", "base.bin"], "cwd": str(d), "expert_profile_save": "learned.bin",
-               "expert_profile_save_every": 5}
-        # nothing saved yet: the config's profile, and the engine is told where to save
-        self.assertEqual(engine_args(cfg), ["--expert-profile", "base.bin", "--expert-profile-save", "learned.bin",
-                                            "--expert-profile-save-every", "5"])
-        self.write(d / "learned.bin")
-        self.assertEqual(engine_args(cfg)[:2], ["--expert-profile", "learned.bin"])
-        self.write(d / "learned.bin", ne=256)                    # another model's: not used
-        self.assertEqual(engine_args(cfg)[:2], ["--expert-profile", "base.bin"])
-        (d / "learned.bin").write_bytes(b"STRP" + bytes(20))     # not a whole profile
-        self.assertEqual(engine_args(cfg)[:2], ["--expert-profile", "base.bin"])
-        self.write(d / "learned.bin")
-        (d / "learned.bin").write_bytes((d / "learned.bin").read_bytes()[:30])   # truncated
-        self.assertEqual(engine_args(cfg)[:2], ["--expert-profile", "base.bin"])
-
-    def test_no_profile_in_the_args(self):
-        cfg = {"args": ["--native", "x"], "expert_profile_save": "learned.bin"}
-        self.assertEqual(engine_args(cfg), ["--native", "x", "--expert-profile-save", "learned.bin"])
 
 
 class RepeatStop(unittest.TestCase):
@@ -5320,109 +5273,6 @@ class Transfers(unittest.TestCase):
         c = t._moved({})[0]
         self.assertIsNone(c["source"])
         self.assertIsNone(c["to"]["moving"])
-
-
-IOREG_FIXTURE = '''
-  +-o AGXAcceleratorG13X  <class AGXAcceleratorG13X, id 0x100000428, registered, matched, active, busy 0 (0 ms), retain 41>
-    {
-      "IOClass" = "AGXAcceleratorG13X"
-      "model" = "Apple M1 Max"
-      "PerformanceStatistics" = {"In use system memory (driver)"=0,"Alloc system memory"=22991831040,"Tiler Utilization %"=36,"recoveryCount"=44,"lastRecoveryTime"=216970984728,"Renderer Utilization %"=35,"TiledSceneBytes"=1671168,"Device Utilization %"=76,"SplitSceneCount"=0,"Allocated PB Size"=76152832,"In use system memory"=13384105984}
-      +-o IOUserClientCreator  <class IOUserClientCreator, id 0x100000429, registered, matched, active, busy 0 (0 ms), retain 5>
-        {
-          "IOUserClientCreator" = "pid 402, WindowServer"
-        }
-    }
-
-  +-o AGXAccelerator  <class AGXAccelerator, id 0x10000042a, registered, matched, active, busy 0 (0 ms), retain 12>
-    {
-      "IOClass" = "AGXAccelerator"
-      "model" = "Apple M2 Ultra"
-      "PerformanceStatistics" = {"Renderer Utilization %"=3,"Tiler Utilization %"=2,"In use system memory"=1234567890}
-    }
-'''
-
-WORKING_SET = 26800603136          # bytes; the M1 Max's device in the fixture above
-
-
-class MacTelemetry(unittest.TestCase):
-    """The macOS (Metal backend) reader: IOKit's IOAccelerator nodes and the device's Metal working set."""
-
-    def _reader(self, index=0, text=IOREG_FIXTURE):
-        from strata_common import telemetry
-        return telemetry._Metal(index, run=lambda: text)
-
-    def test_readings(self):
-        g = self._reader()
-        self.assertTrue(g.ok())
-        self.assertEqual(g.name(), "Apple M1 Max")
-        with mock.patch("strata_common.telemetry.metal_working_set", lambda: WORKING_SET):
-            self.assertEqual(g.read(), {"util": 76, "mem_used": 13384105984, "mem_total": WORKING_SET})
-        # the second accelerator is index 1: the older chips' renderer/tiler-only utilization is the fallback
-        g1 = self._reader(1)
-        self.assertTrue(g1.ok())
-        with mock.patch("strata_common.telemetry.metal_working_set", lambda: WORKING_SET):
-            self.assertEqual(g1.read()["util"], 3)          # the renderer, the higher of the two
-            self.assertEqual(g1.name(), "Apple M2 Ultra")
-        self.assertFalse(self._reader(5).ok())
-
-    def test_no_registry(self):
-        g = self._reader(text="")
-        self.assertFalse(g.ok())
-        self.assertEqual(g.read(), {})
-        self.assertIsNone(g.name())
-
-    def test_bad_process(self):
-        from strata_common import telemetry
-        g = telemetry._Metal(0, run=lambda: (_ for _ in ()).throw(OSError("no ioreg")))
-        self.assertFalse(g.ok())
-        self.assertEqual(g.read(), {})
-
-    def test_note_reaches_the_monitor(self):
-        from strata_common import telemetry
-        t = telemetry.Telemetry(extra=lambda: {"tok_s": 1.0})
-        try:
-            with mock.patch.object(telemetry, "gpu_reader", lambda index=0, amd=False: self._reader()):
-                t2 = telemetry.Telemetry(extra=lambda: {"tok_s": 1.0})
-                try:
-                    self.assertEqual(t2.static["gpu_name"], "Apple M1 Max")
-                    self.assertIn("powermetrics", t2.static["gpu_note"])
-                    with mock.patch("strata_common.telemetry.metal_working_set", lambda: WORKING_SET):
-                        s = t2.sample()
-                    self.assertEqual(s["gpu_util"], 76)
-                    self.assertEqual(s["gpu_mem_used"], 13384105984)
-                    self.assertEqual(s["gpu_mem_total"], WORKING_SET)
-                    self.assertIsNone(s.get("gpu_temp"))       # no reading without root; the cards show a dash
-                    self.assertIsNone(s.get("gpu_pcie_gen"))
-                finally:
-                    t2.close()
-        finally:
-            t.close()
-
-
-class TelemetryNoDisks(unittest.TestCase):
-    """psutil.disk_io_counters() returns None where it finds no disk (a gVisor container; Windows with its disk counters
-    off): the sampler goes on without a disk reading instead of its thread ending at the first sample, which left
-    /metrics' hardware empty and the frozen-engine check's GPU reading at 0."""
-
-    def test_sampler_runs_without_disk_counters(self):
-        from strata_common import telemetry
-        vm = SimpleNamespace(total=64 * 2**30, available=40 * 2**30)
-        fake = SimpleNamespace(cpu_count=lambda logical=True: 8, cpu_percent=lambda interval=None: 12.5,
-                               virtual_memory=lambda: vm, disk_io_counters=lambda: None)
-        with mock.patch.dict(sys.modules, {"psutil": fake}):
-            t = telemetry.Telemetry(extra=lambda: {"tok_s": 1.5})
-            try:
-                deadline = time.monotonic() + 5.0
-                while not t.snapshot()["now"] and time.monotonic() < deadline:
-                    time.sleep(0.05)
-                now = t.snapshot()["now"]
-                self.assertEqual(now.get("tok_s"), 1.5)
-                self.assertEqual(now.get("ram_used"), 24 * 2**30)
-                self.assertIsNone(now.get("disk_read_mb"))
-                self.assertIsNone(t.sample()["disk_write_mb"])
-            finally:
-                t.close()
 
 
 class SilentEngine(unittest.TestCase):

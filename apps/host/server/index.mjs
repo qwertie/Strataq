@@ -1387,7 +1387,7 @@ async function api(req, res, path, method, url) {
     return;
   }
 
-  // Files dropped on the app window (Linux, macOS): the shell hands over the paths, the page fetches each file once (native-drop.mjs).
+  // Files dropped on the app window (Linux): the shell hands over the paths, the page fetches each file once (native-drop.mjs).
   if (path === '/api/app/drop' && method === 'POST') {
     if (!fromShell()) return error(res, 403, 'Not allowed.');
     try { return json(res, 200, { files: await nativeDrops.add((await readBody(req)).paths) }); } catch (err) { return error(res, 400, err.message); }

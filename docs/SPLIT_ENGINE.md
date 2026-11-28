@@ -48,7 +48,7 @@ If the engine refuses or fails to start, the server says so in one line and star
 
 ## In the desktop app
 
-The app follows the same rule as the Terminal (Linux only, so the Windows and macOS apps never see it). On a computer where the rule says yes, Auto in the Models screen is the all-cards
+The app follows the same rule as the Terminal (Linux only, so the Windows app never sees it). On a computer where the rule says yes, Auto in the Models screen is the all-cards
 split engine with the MTP draft layer: the plan (`strata drafting plan`, no `--no-split`) says `split` and, when the draft layer is not on the disk, `mtp_needed` (about 5.2 GB); the Load
 fetches that layer once through the same installer step the MTP choice uses (it names the model's own files folder, so the model is not downloaded again), and the start asks Control
 (`strata split-engine apply`) to turn the run config the app built into the split engine's, with the app's request slots (default 4) as the lanes (1 to 8). A choice the person made keeps
@@ -86,7 +86,7 @@ failure, or with `FNX_PEER=0`, it uses the host-memory exchange for the whole ru
 
 ## Not proven
 
-No GeForce pair has been tested (there is none in the lab). Three and four NVIDIA cards, Windows and macOS, a 64 GB RAM PC
+No GeForce pair has been tested (there is none in the lab). Three and four NVIDIA cards, Windows, a 64 GB RAM PC
 with two big cards, and contexts over 128K have not been run. The copy-engine ring now used for prompts differs in its last bits from sFNX's GPU-thread ring (`FNX_PF_RING_SM=1`, kept): 39 of 61 suite answers are identical between the two. Answers differ from the normal layer split's in the same way (29 of 61 identical), because the arithmetic differs.
 
 ## Build

@@ -19,7 +19,6 @@ import json
 import os
 import re
 import stat
-import sys
 from pathlib import Path
 
 from strata_control import discovery
@@ -341,7 +340,6 @@ def _already_set_up(shards: list[Path], candidate: dict | None) -> dict | None:
 
 
 ISSUE_WORDS = {
-    "not_on_this_mac": "Unsloth's UD-IQ1_M set doesn't run on a Mac yet; the UD-IQ1_S, 2.00 and 2.25 sets do",
     "not_on_this_spark": "Unsloth's 1-bit DeepSeek sets were not tested on a DGX Spark yet; the 2.00 and 2.25 sets were",
     "multiple_model_groups": "the folder holds more than one model",
     "incomplete_or_invalid_shard_set": "some parts of the model are missing",
@@ -684,8 +682,8 @@ def _dsv41_plan(path: Path, details) -> dict | None:
                      "expected_tensor_count": None,
                      "setup_args_hint": ["--family", dsv41_sets.FAMILY, "--model", row["model"], "--gguf-dir", str(place)]}
         line = _not_here(row["model"])
-        if line:       # recommend, never force: say what does work and stop before anything is copied or packed (Mac: no Metal IQ1_S kernel; DGX Spark: never run)
-            issues.append("not_on_this_mac" if sys.platform == "darwin" else "not_on_this_spark")
+        if line:       # recommend, never force: say what does work and stop before anything is copied or packed
+            issues.append("not_on_this_spark")
             candidate = None
             messages.append(line)
         messages.append(f"This is DeepSeek-V4.1-Flash, {row['label']}: all {len(row['present'])} model files are here"

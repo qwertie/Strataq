@@ -623,7 +623,7 @@ private:
     // STRATA_GRAPH_PRIO (record_window / capture): the captured tails of the priority streams at their joins and the
     // main stream's tails at their forks, so that a capture that dropped the stream priorities can be repaired per
     // node (apply_node_priorities walks each tail back to its fork)
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && !defined(STRATA_GPU_METAL)   // (the three methods are no-ops there)
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906)   // (the three methods are no-ops there)
     std::vector<cudaGraphNode_t> prio_forks_;
     std::vector<std::pair<cudaGraphNode_t, int>> prio_tails_;
 #endif
@@ -665,9 +665,6 @@ private:
     strata::kernels::DraftRule draft_rule_{strata::kernels::DraftRule::Exact};
     int hist_len_ = 0;
     bool head_sampling_ = true;          ///< set_head_sampling
-#if defined(STRATA_GPU_METAL)
-    void* metal_ = nullptr;              ///< the Metal decode window (metal/src/engine/window.cpp): init/run/commit go there
-#endif
     std::vector<float> logit_bias_host_;
     float* logit_bias_device_ = nullptr;
     int device_ = -1;                    ///< the device `init` ran on: run/commit switch to it (layer split)

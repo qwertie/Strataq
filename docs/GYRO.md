@@ -11,7 +11,7 @@ Setup lists them as a model family of their own, "Qwen3.8-Flash-Next (Gyro)". Th
 you care.
 
 > **On this page:** [Quick start](#quick-start) · [Sizes](#sizes) · [Compared with other sizes](#compared-with-other-sizes) ·
-> [Platforms](#platforms) · [Intel Arc (SYCL)](#intel-arc-sycl) · [On a Mac](#on-a-mac) ·
+> [Platforms](#platforms) ·
 > [Install by hand](#install-by-hand) · [Numerics](#numerics) · [Known limits](#known-limits) ·
 > [Credit and licenses](#credit-and-licenses) · [History](#history--older-measurements)
 
@@ -41,8 +41,7 @@ the file on a fast local drive. The memory figure is what the weights take once 
 
 Gyro-L (agentionai's 50 GiB file) uses another trellis family, the pair trellis (types 147 to 149, TQP5 to TQP7). The
 engine reads it with the same pack step and expert kernels as the other Gyro files, on the CPU and on CUDA cards. The
-prompt path uses the trellis MMQ build where the build has it; Metal and SYCL have no kernels for it, so they use the CPU
-rows and the FP16 prompt path. We have not run the 50 GiB file ourselves yet.
+prompt path uses the trellis MMQ build where the build has it. We have not run the 50 GiB file ourselves yet.
 
 **Pictures.** Gyro reads pictures with the original model's picture reader file, the same one every
 Qwen3.8-Flash-Next model uses. Setup downloads it with the model. The reader opens only the vocabulary and the header of
@@ -86,8 +85,6 @@ time in a decode profile.
 | --- | --- |
 | NVIDIA (CUDA, Linux and Windows) | Supported, including RTX 50 cards (sm_120). |
 | AMD (HIP) | Experimental. The authors validated gfx1151. We ran gfx1201 with output identical to rc2's. |
-| Intel Arc (SYCL, Linux, built from source) | Runs both files. See [Intel Arc (SYCL)](#intel-arc-sycl). |
-| Apple Silicon (Metal) | Runs both files. See [On a Mac](#on-a-mac). |
 
 If Gyro misbehaves on an RTX 50 card, update the engine.
 
@@ -103,85 +100,6 @@ uses the fork's own instances instead.
 **Decode kernels.** The trellis decode kernels keep the 4 KB codebook in shared memory (`STRATA_IQ_STAGE_GRID=0` reads it
 from the global table again) and take four rows per warp. The sums are added in the same order as the unstaged kernels,
 so answers are bit for bit the same. A Tesla P100 (compute capability 6.0) runs its own variant, `STRATA_TQ_STAGE`.
-
-## Intel Arc (SYCL)
-
-Gyro-S and Gyro-M run on Intel Arc cards on Linux, with the SYCL engine that setup builds from source
-([INTEL.md](INTEL.md)). Setup lists them for an Arc like for any card and warns, never refuses, when VRAM and RAM
-together are short.
-
-**Tested by us:** one Arc A750 (8 GB, i915 driver) in a PC with a Ryzen 5 5600X (6 cores, AVX2) and 62 GB of RAM. It ran
-the first-release files of Gyro-S and Gyro-M (same size as the pinned ones, different SHA-256). The pinned Gyro-S passes
-the same parity run (16 cases, 0 failures) and answers correctly through the server. It was not compared with CUDA.
-
-**Not tested by us:** a B-series card (`strata launch` says it is new and how to report a problem), two Arc cards (the
-second-card expert helper refuses a Gyro pack and says so) and an Arc on the xe driver. The Battlemage AOT build
-(`bmg-g31`) compiles with the trellis kernels but was not run.
-
-The trellis decode kernels do the same integer and float operations in the same order as the CUDA ones (int8 codebook,
-q8_1 activations). The Hadamard rotation of the expert input and of the SwiGLU output runs on the card, and the prompt
-takes the grouped XMX path, which decodes the trellis types into its tiles. Experts in the card's cache run on the card.
-Misses go to the CPU pool or over the PCIe link, as with every pack.
-
-**Checks.** `tq_sycl_parity <pack> <model.gguf> [layer ...]` (also `--synthetic [--hadamard] GU/DOWN` and
-`--bench GU/DOWN`) takes real experts of the file (layers 0 to 3, 10, 20, 30 and 47, two experts each) and compares the
-card with a float reference and with the CPU path.
-
-| Check | Result |
-| --- | --- |
-| Decode kernels against a host replay of their own arithmetic | Equal in every bit (0 of 3,840 gate/up and 0 of 7,680 down values differ; Gyro-S and Gyro-M, 16 cases each) |
-| Prompt dequantizers against the fp16 codebook | Equal in every bit (0 of 4.9 million values) |
-| Card's Hadamard rotation against the CPU's | Bit for bit (the fp16 form within 3e-4) |
-| Card against the float reference | Within 1.7 to 2.0e-2 relative L1 error (3e-2 is the bound every expert type gets) |
-| CPU path against the float reference | Within 0.9e-2 |
-
-The card and the CPU path agree within tolerance, not bit for bit. The CPU path uses an int16 codebook and Q8_0
-activations, the card the int8 codebook and q8_1, as on CUDA.
-
-**Against CUDA.** Gyro-S on an RTX 3060 and on the A750, both with 64 cached experts, no PCIe share and no CPU prompt
-share, ten prompts of 26 to 100 tokens, 48 greedy tokens with the MTP draft: 7 of the 10 prompts give the same 48 tokens.
-The other three agree for 9, 9 and 6 tokens and then differ at a near-tie. The first-token KL is 1.3e-4 to 1.1e-2 and
-the top token is always the same. A 1,406-token prompt gives the same 16 tokens on both.
-
-> **Measured on:** Arc A750 8 GB, Ryzen 5 5600X, 62 GB RAM, setup's config (32K context, 300 MiB VRAM reserve, MTP draft
-> of 4, PCIe probe 10.4 GB/s), median of 5 interleaved pairs, engine 0.2.2 era.
-
-| | Result |
-| --- | ---: |
-| Gyro-S prompt, 1,406 tokens | 82.0 tok/s |
-| Gyro-S prompt, 2,377 tokens | 101.9 tok/s |
-| Gyro-S prompt, 20,000 tokens | 195 tok/s |
-| Gyro-S decode | 15.8 tok/s |
-| Gyro-M decode (8K context) | 14.2 tok/s (12.6 to 14.4); prompt 62 tok/s at 1,406 tokens |
-
-Decode speed is the CPU's and the link's. With 8 GB the card holds 410 of the 24,576 experts, so about 15 experts per
-layer and token come from the CPU pool (5 workers, AVX2, 8 GB/s; the trellis decode is compute bound) and about 5 over
-the link. For packs with trellis experts the engine scales the PCIe share with a 12 GB/s reference instead of 20 (0.48
-instead of 0.29 here). The card's kernels are not the limit: 20 microseconds an expert, against 18 for IQ3_S.
-
-Smaller prompt chunks leave room for more cached experts and cost prompt speed. On the 1,406-token prompt,
-`--prefill 1024` gives 1,090 slots, +13% decode and -24% prompt speed. `--prefill 512` gives 1,429 slots and -36%
-prompt speed. The default stays `--prefill auto`.
-
-**Gyro-M on 8 GB.** Its dense weights are bigger (2.9 GiB of native projections against 1.9). With setup's 32K context
-the card is 750 MiB short of one cache slot and the engine stops with that message. It starts with
-`--max-context 8192 --vram-reserve-mib 100 --prefill 1024` (412 slots). A card with 12 GB or more does not need that.
-
-**Memory.** Gyro-S needs about 27.6 GB of VRAM and RAM together. The n-gram table (28 GB) stays on the SSD, so on an Arc
-setup does not put `--ple-io ram` in the config for Gyro (it does for the other packs on an i915 card). One run used
-about 24 GB of RAM for the expert arena.
-
-## On a Mac
-
-Apple Silicon Macs run Gyro-S and Gyro-M with Metal kernels (`metal/kernels`), the same published files and the same
-Hadamard-folded pack. What a Mac needs, the measured speeds on a 32 GB Mac mini and what was checked are in
-[MAC.md](MAC.md#gyro-s-and-gyro-m-agentionais-trellis-experts). Setup:
-
-```sh
-./setup.sh --family gyro --model Gyro-S
-```
-
-The app and `strata launch` list it under Gyro models.
 
 ## Install by hand
 
@@ -310,15 +228,6 @@ weights are agentionai's quantization of Qwen3.8-Flash-Next under the Qwen Commu
 
 Against Q2_0 before the change: Gyro-S 54.2 against 64.4 tok/s (16% slower), Gyro-M 50.5 against 65.6 (23% slower).
 Gyro-S gained +30% on a Tesla P100 from the `STRATA_TQ_STAGE` variant (5 pairs).
-
-### Arc A750 before the XMX prompt path
-
-> **Measured on:** Arc A750 8 GB, setup's config, median of 5 interleaved pairs.
-
-| | Before | Later |
-| --- | ---: | ---: |
-| Gyro-S prompt, 1,406 tokens | 40.2 tok/s | 82.0 tok/s |
-| Gyro-S decode | 13.7 tok/s | 15.8 tok/s |
 
 ### The port against agentionai's rc2 (2026-10-15/16)
 

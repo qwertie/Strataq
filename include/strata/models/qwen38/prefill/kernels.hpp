@@ -71,8 +71,6 @@ void gdn_recurrence(float* state, const float* h, const float* gate, const float
 /// one-block-per-head kernel under STRATA_GDN_REC_HEADS), 1 = four lanes per column (no barrier per token) + the grid-stride norm, 2 = the
 /// one-block-per-head kernel (its fused norm rounds differently).  0 and 1 give the same bits.  On HIP, 0 and 1 run the opt-in
 /// chunked WMMA recurrence instead (gfx11, STRATA_GDN_CHUNKED=1, 64 tokens and more: other bits, see docs/AMD_HIP.md).
-/// SYCL only: 6 = the Xe sub-group recurrence (16-lane sub-groups, one barrier per token) + the norm kernel, the same
-/// bits as 0 on an Arc A770; gdn_recurrence takes it by default on Alchemist (STRATA_GDN_XE=0 off, =1 any Intel GPU).
 void gdn_recurrence_variant(int variant, float* state, const float* h, const float* gate, const float* beta,
                             const float* z, const float* gamma, float eps, float* y, uint16_t* y16, int64_t T,
                             void* stream, int64_t ld16 = 0);
@@ -85,7 +83,7 @@ bool gdn_conv_recurrence_fused(float* history, const float* qkv, const float* co
 /// KVA (CUDA/HIP only): the same recurrence kernels as gdn_recurrence, bit for bit, without the output
 /// normalization: state, h, gate, beta and the scratch `y` only.  The output projection and the gated residual
 /// write have no consumer when only the state advances, and their input (z, the gate projection) is not needed
-/// either.  Declared here for the CUDA build; the SYCL tree keeps its own recurrence and does not reference it.
+/// either.
 void gdn_recurrence_state_only(float* state, const float* h, const float* gate, const float* beta, float* y,
                                int64_t T, void* stream);
 

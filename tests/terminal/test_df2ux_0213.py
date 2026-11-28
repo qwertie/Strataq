@@ -17,7 +17,6 @@ from tests.terminal.launch_support import HW_12, Home, catalog, run_cli
 
 STRIX = ("hip", ["gfx1151"])
 SPARK = ("cuda", ["sm_121"])
-ARC = ("sycl", ["arc_a"])
 Q4 = "qwen3.8-flash-next-unsloth-ud-q4_k_xl"
 
 
@@ -55,13 +54,9 @@ class PlanNamesTheRealDrafter(unittest.TestCase):
                 self.assertIn("0.34 GB", got["text"])
                 self.assertNotIn("1.2 GB", got["text"])
 
-    def test_the_spark_and_arc_and_a_full_model_name(self):
+    def test_the_spark(self):
         with serving(), hardware(SPARK):
             self.assertEqual(self.plan("--family", "qwen", "--model", "IQ3_S", "--mode", "auto")["gb"], 0.34)
-        with serving(), hardware(ARC):
-            got = self.plan("--family", "qwen", "--model", "IQ3_XXS", "--mode", "auto")
-            self.assertEqual((got["gb"], got["file"]), (0.52, drafting.TUNED_BF16_NAME))
-            self.assertEqual(self.plan("--model", "qwen3.8-flash-next-iq3_xxs", "--mode", "auto")["gb"], 0.52, "a run config's own name is taken as it is")
 
     def test_a_set_the_tuned_pack_is_not_for_keeps_the_stock_size(self):
         with serving(), hardware(STRIX):
@@ -83,10 +78,6 @@ class PlanNamesTheRealDrafter(unittest.TestCase):
 
 class TheLaunchPlan(unittest.TestCase):
     """`strata launch --plan` for a model that is not installed yet: the number is the tuned drafter's."""
-
-    def setUp(self):
-        from tests.terminal.launch_support import not_intel
-        not_intel(self)
 
     def test_the_download_list_and_the_plan_line_use_the_tuned_pack(self):
         from strata_cli.launch.runner import Runner

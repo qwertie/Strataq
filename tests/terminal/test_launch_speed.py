@@ -236,15 +236,7 @@ class Resolve(unittest.TestCase):
             self.assertEqual(engine_takes_experts(exe), want, name)
         self.assertEqual(dsv41_engine_version("/x/engine-dsv41/0.1.50-a/strata-dsv41"), (0, 1, 50))
         self.assertFalse(engine_takes_experts(None))
-        self.assertFalse(engine_takes_experts("/nowhere/strata-dsv41"))        # a name that says nothing and a program that is not there
-
-    def test_a_build_of_your_own_is_asked_for_its_version(self):
-        done = mock.Mock(stdout="strata-dsv41 0.1.50.1 (abc)\n", stderr="")
-        with mock.patch("strata_cli.launch.runner.subprocess.run", return_value=done):
-            self.assertTrue(engine_takes_experts("/home/me/build/strata-dsv41"))
-        done = mock.Mock(stdout="strata-dsv41 0.1.49.2\n", stderr="")
-        with mock.patch("strata_cli.launch.runner.subprocess.run", return_value=done):
-            self.assertFalse(engine_takes_experts("/home/me/build/strata-dsv41"))
+        self.assertTrue(engine_takes_experts("/home/me/build/strata-ds41"))    # outside a package folder: a build of strata-ds41
 
     def test_another_model_has_no_speed(self):
         cat = mock.Mock()

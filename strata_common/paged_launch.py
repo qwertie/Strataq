@@ -1,17 +1,44 @@
-"""Adapts saved server settings for the opt-in page-pool engines."""
+"""Adapts saved server settings for the page-pool engines (strata-q38, strata-ds41), and maps engine programs that
+are no longer shipped to the ones that replaced them."""
 from pathlib import Path
 
 from . import draft_layer, user_args
 
+#: The run config "arch" of Qwen3.6-35B-A3B, the one family whose engine (strata-q36) is not a page-pool engine.
+QWEN36_ARCH = "qwen35moe"
+
 
 def is_paged_engine(cfg: dict) -> bool:
-    """Recognizes the two page-pool programs selected by the saved executable path."""
-    return get_engine_name(cfg) in ("strata-q38", "strata-ds41")
+    """Tells whether a run config starts strata-q38 or strata-ds41: every family but Qwen3.6 (by its "arch" or by
+    strata-q36 named as the program), except the all-cards split engine (strata-split-N), whose run config names its
+    own program."""
+    name = get_engine_name(cfg)
+    return cfg.get("arch") != QWEN36_ARCH and name != "strata-q36" and not name.startswith("strata-split")
+
+
+def is_deepseek(cfg: dict) -> bool:
+    """Tells whether a run config is DeepSeek V4.1's, by its "arch" or by the program it names."""
+    return cfg.get("arch") == "deepseek41" or get_engine_name(cfg) in ("strata-ds41", "strata-dsv41")
+
+
+def get_current_engine_path(exe: str, cfg: dict) -> str:
+    """Gets the program to start in place of `exe`, an engine path resolved from run config `cfg`: a saved config may
+    still name a program that is no longer shipped (`strata`, `strata-dsv41`); the program that replaced it sits in
+    the same engine folder."""
+    path = Path(exe)
+    name = path.stem.lower()
+    if name == "strata":
+        new = "strata-q36" if cfg.get("arch") == QWEN36_ARCH else "strata-q38"
+    elif name == "strata-dsv41":
+        new = "strata-ds41"
+    else:
+        return exe
+    return str(path.with_name(new + path.suffix))
 
 
 def translate_args(cfg: dict, args: list[str]) -> list[str]:
     """Keeps supported options and reports settings with no page-pool equivalent."""
-    deepseek = get_engine_name(cfg) == "strata-ds41"
+    deepseek = is_deepseek(cfg)
     if not deepseek:
         args = user_args.flat(user_args.groups(args))
     model_off = cfg.get("mtp") is False or cfg.get("drafting") == "off"
@@ -73,7 +100,7 @@ def translate_args(cfg: dict, args: list[str]) -> list[str]:
             out += ["--lookahead", "0"]
         if deepseek:
             out += ["--dspark", "none"]
-    ignored = [key for key in ("vram_elastic", "split_skip_if_fits", "batchMtp") if cfg.get(key)]
+    ignored = ["batchMtp"] if cfg.get("batchMtp") else []
     if cfg.get("drafting") == "dflash2":
         ignored.append("drafting=dflash2")
     if ignored:
@@ -84,5 +111,5 @@ def translate_args(cfg: dict, args: list[str]) -> list[str]:
 
 
 def get_engine_name(cfg: dict) -> str:
-    """Gets the executable basename from config paths saved on either operating system."""
+    """Gets the lower-case executable basename from config paths saved on either operating system."""
     return Path(str(cfg.get("exe", "")).replace("\\", "/")).stem.lower()

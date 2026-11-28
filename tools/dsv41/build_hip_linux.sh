@@ -1,5 +1,5 @@
 #!/bin/bash
-# strata-dsv41 + the kernel parity tests for AMD (HIP) on Linux.  Default arch gfx1151 (Strix Halo, RDNA3.5); gfx1201 (R9700) works the same.
+# strata-ds41 + the kernel parity tests for AMD (HIP) on Linux.  Default arch gfx1151 (Strix Halo, RDNA3.5); gfx1201 (R9700) works the same.
 # Built and ready, NOT run on a Linux Strix box (there is none); the Windows build of the same sources is the tested one.
 #
 #   ROCM_ROOT=/opt/rocm   (or the TheRock wheel root, e.g. .../_rocm_sdk_devel)  tools/dsv41/build_hip_linux.sh [targets...]
@@ -24,5 +24,5 @@ if [ ! -f "$B/build.ninja" ]; then
     "-DCMAKE_HIP_FLAGS=--rocm-path=$R --rocm-device-lib-path=$BC" \
     "-DCMAKE_PREFIX_PATH=$R"
 fi
-cmake --build "$B" -j "$J" --target ${@:-strata-dsv41 ds4_iq_test} -- -k 0
+cmake --build "$B" -j "$J" --target ${@:-strata-ds41 ds4_iq_test} -- -k 0
 echo "built in $B"

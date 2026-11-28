@@ -15,7 +15,7 @@
 # matching your card. Narrow CUDA_ARCHITECTURES to your card for a faster build. Native code for the CPU that builds the image is NOT
 # used (STRATA_PORTABLE=ON), so the image runs on any x86-64 CPU with AVX2.
 #
-# Plain legacy-builder features only (no heredocs, no --mount). AMD (HIP) and Intel (SYCL) source builds: docs/AMD_HIP.md, docs/INTEL.md.
+# Plain legacy-builder features only (no heredocs, no --mount). AMD (HIP) source builds: docs/AMD_HIP.md.
 
 ARG CUDA_IMAGE=nvidia/cuda:13.0.0-devel-ubuntu24.04
 ARG RUNTIME_BASE=ubuntu:24.04

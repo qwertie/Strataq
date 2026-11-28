@@ -13,7 +13,7 @@ to DEST under --out, optionally filtered by --data-glob.
 
 Distribution libraries (libc, libm, libstdc++, libdrm, libnuma, ...) are not copied: they are listed in
 `SYSTEM-LIBS.txt` beside the output so a missing one on a target PC can be named. The GPU driver's own libraries
-(libcuda.so.1, libnvidia-*, libze_intel_gpu, libOpenCL ICDs) are never bundled: they belong to the driver.
+(libcuda.so.1, libnvidia-*, libOpenCL ICDs) are never bundled: they belong to the driver.
 Nothing is downloaded; this only reads files on the build machine.
 """
 
@@ -40,7 +40,7 @@ def _copy(src, dst) -> None:
 from pathlib import Path
 
 SYSTEM_DIRS = ("/lib/", "/lib64/", "/usr/lib/", "/usr/lib64/")
-DRIVER_PATTERNS = ("libcuda.so*", "libnvidia-*", "libnvcuvid*", "libze_intel_gpu*", "libigdrcl*", "libOpenCL.so*",
+DRIVER_PATTERNS = ("libcuda.so*", "libnvidia-*", "libnvcuvid*", "libOpenCL.so*",
                    "libGLX*", "libEGL*", "libvulkan*", "libdrm_amdgpu*", "libdrm.so*", "libamdgpu*")
 LDD_LINE = re.compile(r"^\s*(\S+)\s+=>\s+(\S+)\s+\(0x")
 

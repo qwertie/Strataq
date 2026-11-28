@@ -3,11 +3,8 @@
 // Ported into Strata (third_party/project-maya/NOTICE.md, LICENSE); changes are in the git history of this file.
 // src/ds4/ds4_iq.cu - a GGUF's low-bit routed experts on the device (see ds4_iq.cuh).  The block layouts and grids are
 // ggml's (ggml-common.h, MIT, third_party/ggml/LICENSE); the sign and grid tricks are llama.cpp's vecdotq.cuh.
-#include "ds4_launch.h"   // strata_ds4_launch: <<<>>> on CUDA and HIP, a dispatch on Metal
+#include "ds4_launch.h"   // strata_ds4_launch
 #include "ds4_iq.cuh"
-#if defined(STRATA_METAL)
-#include <ds4_metal_host.h>
-#endif
 #include "ds4_numerics.cuh"
 #include "ds4_experts_rule.hpp"
 
@@ -1166,7 +1163,7 @@ bool tc_ok() {   // as ds4_gguf.cu's: sm_70 and later, STRATA_DS4_NO_TC=1 keeps 
 // its codebook loaded once; HIP keeps the full grid (one tile a block)
 template <auto Kernel>
 int resident_ctas() {   // (a static a kernel: the occupancy differs by the codebook's shared memory)
-#if defined(STRATA_USE_HIP) || defined(STRATA_METAL)
+#if defined(STRATA_USE_HIP)
     return 1 << 30;
 #else
     static std::atomic<int> cache[16];
@@ -1537,12 +1534,6 @@ bool dequant_rows(int type, const void* raw, size_t ld, int k, int n, uint16_t* 
 }
 
 bool supported(int t) {
-#if defined(STRATA_METAL)
-    // The MSL kernels (metal/src/engine/msl/ds4_iq.metal) implement the 2.0-bit types plus IQ1_M; IQ1_S and IQ4_NL
-    // have CUDA kernels here but no Metal ones.  Saying so makes those layers "cpu only" (ds4_model.cu, expert_layout),
-    // so their experts stay on the CPU lane instead of stopping in "kernel launch with no Metal dispatch".
-    if (t == kIQ4_NL) return false;   // (IQ1_S: ds4_iq1s_mvn + the tile kernel since the Unsloth sets)
-#endif
     // the types the kernels below are instantiated for (DS4_IQ_SWITCH + the trellis ones + the dense K-quants)
     switch (t) {
         case kIQ2_XXS: case kIQ2_XS: case kIQ2_S: case kIQ3_XXS: case kIQ3_S: case kIQ4_XS:
@@ -1609,12 +1600,6 @@ const char* name(int t) {
 }
 
 bool gate_up(const Args& a, int groups, int ne_max, cudaStream_t s) {
-#if defined(STRATA_METAL)
-    // gate_up_kernel on the Metal dispatch (the prompt / window path's expert GEMM); the launch below is the fallback
-    if (::strata::dsv41::metal_host::iq_gu(a.plan_ptr, a.grp_ptr, a.grp_start, a.grp_ent, a.n_groups, a.tr, a.n_embd,
-                                           a.n_ff, a.limit, a.xq, a.xd, a.h, a.tg, groups))
-        return true;
-#endif
     if (is_tq(a.tg)) return tq::gate_up(a, groups, ne_max, s);
     if (a.n_embd % 256 != 0 || a.n_ff % (kWarps * kGuRW) != 0) return false;
 #define GU_(T) gu_ne<T>(a, groups, ne_max, s)
@@ -1624,12 +1609,6 @@ bool gate_up(const Args& a, int groups, int ne_max, cudaStream_t s) {
 }
 
 bool down(const Args& a, int groups, int ne_max, cudaStream_t s) {
-#if defined(STRATA_METAL)
-    // down_kernel on the Metal dispatch; the launch below is the fallback
-    if (::strata::dsv41::metal_host::iq_dn(a.plan_ptr, a.grp_ptr, a.grp_start, a.grp_ent, a.n_groups, a.tr, a.n_embd,
-                                           a.n_ff, a.hq, a.hd, a.part, a.td, groups))
-        return true;
-#endif
     if (is_tq(a.td)) return tq::down(a, groups, ne_max, s);
     if (a.n_ff % 256 != 0 || a.n_embd % (kWarps * kDnRW) != 0) return false;
 #define DN_(T) dn_ne<T>(a, groups, ne_max, s)
@@ -1667,10 +1646,6 @@ long long hipk_launches() {
 }
 
 bool set_gate_up(const SetArgs& a, cudaStream_t s) {
-#if defined(STRATA_METAL)
-    if (a.hbounds != nullptr && ::strata::dsv41::metal_host::iq_set_gu(a.wbase, a.stride, a.tr, a.hbounds, a.n_exp, a.total_rows, a.n_embd, a.n_ff, a.limit, a.xf, a.ldx, a.idx, a.h, a.ldo, a.tg, a.td))
-        return true;
-#endif
     if (is_tq(a.tg)) return tq::set_gate_up(a, s);
     if (a.n_embd % 256 != 0 || a.n_ff % BN != 0) return false;
     SetArgs t = a;
@@ -1686,10 +1661,6 @@ bool set_gate_up(const SetArgs& a, cudaStream_t s) {
 }
 
 bool set_down(const SetArgs& a, cudaStream_t s) {
-#if defined(STRATA_METAL)
-    if (a.hbounds != nullptr && ::strata::dsv41::metal_host::iq_set_dn(a.wbase, a.stride, a.tr, a.hbounds, a.n_exp, a.total_rows, a.n_embd, a.n_ff, a.limit, a.xh, a.ldx, a.y, a.ldo, a.tg, a.td))
-        return true;
-#endif
     if (is_tq(a.td)) return tq::set_down(a, s);
     if (a.n_ff % 256 != 0 || a.n_embd % BN != 0) return false;
     SetArgs t = a;
@@ -1776,9 +1747,6 @@ void swiglu_f16(const float* gu, int ld, int n, int ff, float limit, uint16_t* h
 }
 
 bool mv(const MvJob* jobs, int n, cudaStream_t s) {
-#if defined(STRATA_METAL)
-    if (n > 0 && n <= 64 && ::strata::dsv41::metal_host::iq_mv((const void*) jobs, n)) return true;
-#endif
     {   // the trellis jobs go to their kernels, the others on
         MvJob tqj[64], oth[64];
         int nt = 0, no = 0;

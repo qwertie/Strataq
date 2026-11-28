@@ -113,7 +113,6 @@ class LaunchSettings:
     model: str | None = None                   # catalog size (IQ3_XXS ...)
     model_path: str | None = None              # "Use model files I already have": a .gguf file or a folder
     dsv41_package: str | None = None           # DeepSeek: the engine package the person downloaded by hand (checked, then installed)
-    engine: str | None = None                  # setup's --engine: "original" or "new"; None = setup's default
     data_dir: str | None = None                # where model files are stored (None: the Strata default)
     gpus: list[int] | None = None              # None = the engine's choice (all usable cards)
     gpu_roles: dict[str, str] | None = None    # {"1": "main", "0": "helper", "2": "off"}: a role for every card; None = the recommendation
@@ -291,7 +290,7 @@ def settings_from_pairs(pairs: list[str]) -> dict[str, str]:
 
 
 #: Options whose value is a WORD the engine reads (on, off, auto, none): the word goes through as typed. Making "on" a bare flag
-#: started strata-dsv41 with a lone `--dspark`, which it refuses ("--dspark needs a value", #3959), and "off" removed the flag instead of
+#: started DeepSeek's engine with a lone `--dspark`, which it refuses ("--dspark needs a value", #3959), and "off" removed the flag instead of
 #: switching the drafter off.
 WORD_VALUE_FLAGS = frozenset({"--dspark"})
 
@@ -336,8 +335,6 @@ def flags_text(s: LaunchSettings, *, preset: str | None = None) -> str:
             parts.append(f"--model {s.model.lower()}" + (f" --family {s.family}" if s.family and s.family != "qwen" else ""))
         if s.data_dir:
             parts.append(f'--data-dir "{s.data_dir}"')
-        if s.engine:
-            parts.append(f"--engine {s.engine}")
         if s.context:
             parts.append(f"--context {context_label(s.context).lower()}")
         if s.kv:

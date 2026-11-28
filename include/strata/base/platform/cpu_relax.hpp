@@ -2,8 +2,8 @@
 //
 // x86: `_mm_pause` and `_mm_sfence` (the fence orders the write-combining stores into pinned host memory before
 // the doorbell the GPU polls).  aarch64: `yield` and `dmb oshst` - the outer-shareable store barrier is what
-// makes host stores visible to a coherent device (GB10 / Grace NVLink-C2C) before a later store.  Apple silicon (the
-// Metal build) keeps `dmb ishst`, the barrier its compat header (metal/include/metal_compat/immintrin.h) has always used.
+// makes host stores visible to a coherent device (GB10 / Grace NVLink-C2C) before a later store.  Apple silicon (a
+// CPU-only build: no device polls its stores) keeps `dmb ishst`.
 // Local port of the approach in https://github.com/Niko1221/Strata/pull/1077 onto main e8ca9af.
 #pragma once
 
@@ -20,7 +20,7 @@
 inline void strata_cpu_pause() { __asm__ __volatile__("yield" ::: "memory"); }
 #if defined(__APPLE__)
 inline void strata_store_fence() { __asm__ __volatile__("dmb ishst" ::: "memory"); }
-#define strata_load_fence() ((void) 0)   // the Metal build has never had one
+#define strata_load_fence() ((void) 0)   // (no GPU raises a flag there)
 #else
 inline void strata_store_fence() { __asm__ __volatile__("dmb oshst" ::: "memory"); }
 // After a spin saw a flag the GPU raised, the data the GPU wrote before it must be read after the flag: an ARM core

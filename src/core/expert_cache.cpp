@@ -6,7 +6,7 @@
 
 // #533's segmented cache uses CUDA's virtual memory management (cuMem*): not on HIP, neither the RDNA backend nor
 // the gfx906 compat build (PR #638), which compiles this file as HIP without STRATA_USE_HIP
-#if defined(STRATA_USE_HIP) || defined(STRATA_HIP_GFX906) || defined(STRATA_GPU_METAL)
+#if defined(STRATA_USE_HIP) || defined(STRATA_HIP_GFX906)
 #define STRATA_EC_NO_VMM 1
 #endif
 
@@ -25,8 +25,7 @@
 #include <utility>
 #include <cstring>
 
-// (not in a SYCL build: its CUDA names are a compatibility layer without the PCI ids NVML is matched by)
-#if defined(_WIN32) && !defined(STRATA_EC_NO_VMM) && !defined(SYCL_LANGUAGE_VERSION)
+#if defined(_WIN32) && !defined(STRATA_EC_NO_VMM)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif

@@ -2,7 +2,7 @@
 // leaves when the cache is over its slot budget.
 //
 // The cache holds conversation checkpoints: snapshots of the running state (the GDN recurrence, the PLE
-// history, the QSA indexer tails - `ConvCheckpoint` in generate.cpp) that a request resumes its prompt
+// history, the QSA indexer tails) that a request resumes its prompt
 // from instead of reading those tokens again.  The request path keeps only the checkpoints whose tokens
 // are a prefix of the current prompt - any other checkpoint's positional cells have been overwritten,
 // because the KV cache is one arena that holds one branch of history at a time - so at any moment the
@@ -31,7 +31,7 @@ namespace strata::core::conv_cache {
 
 /// The index in `stamps` of the chain item to drop once the chain holds more than `cap` items.  `stamps`
 /// are the items' last-use stamps; the caller owns the chain and erases the returned index.  Pure and
-/// deterministic so conv_cache_test.cpp can walk the scenarios by hand.
+/// deterministic so checkpoint_retention_test.cpp can walk the scenarios by hand.
 inline size_t eviction_victim(const uint64_t* stamps, size_t n, int64_t cap) {
     if (cap < 2 || n < 2) return 0;   // no room for root and leaf: the pin is off, the oldest leaves
     size_t v = 1;                     // the root (0) is pinned; least recent use among the rest
@@ -75,25 +75,6 @@ inline size_t eviction_victim(const uint64_t* stamps, size_t n, int64_t cap, con
     for (size_t i = 2; i < n; ++i)
         if (stamps[i] < stamps[v]) v = i;
     return v;
-}
-
-/// #2409: what a conversation restore can allocate on a card. It writes into session buffers that already exist; the one
-/// thing it may create is the calling thread's private copy stream for that card (conversation_copy.hpp), which it takes
-/// from the pool of finished threads when there is one, and the first launch of the two small residency kernels loads
-/// their code. A stream and an event cost well under 2 MiB where it was measured (conversation_copy_streams_test prints
-/// it); 64 MiB covers both many times over and is far below the reserves (--vram-reserve-mib 700), so the check can only
-/// fire on a card that is really full.
-constexpr uint64_t kRestoreFirstUseMib = 64;
-
-/// Whether a parked snapshot can be restored without a first-use allocation failing: every card for which the restore
-/// would have to create its copy stream (`stream_ready[i]` false) must have `need_bytes` free. A card that already has a
-/// stream needs nothing, so it never refuses - unlike a floor on `--vram-reserve-mib`, which a loaded card is always under
-/// (#2409's review). A missing sample (`free_bytes` null) does not refuse.
-inline bool restore_fits(const uint64_t* free_bytes, const uint8_t* stream_ready, size_t n, uint64_t need_bytes) {
-    if (free_bytes == nullptr || stream_ready == nullptr || need_bytes == 0) return true;
-    for (size_t i = 0; i < n; ++i)
-        if (!stream_ready[i] && free_bytes[i] < need_bytes) return false;
-    return true;
 }
 
 /// --prompt-cache-spread: the item whose removal leaves the smallest gap for its distance from the newest, so the kept

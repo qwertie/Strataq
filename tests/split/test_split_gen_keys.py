@@ -18,8 +18,8 @@ ACCEPTED = {"temperature", "top_p", "top_k", "min_p", "penalty_repeat", "penalty
 # logprobs / allowed / logit_bias are refused with a 400 first (refuse_for_split, logit_bias.validate_request)
 DROPPED = {"pen_from", "priority"}
 REFUSED = {"logprobs", "allowed", "logit_bias"}
-# keys only other engines are sent: the DeepSeek engine's restore points (STRATA_DS4_RESTORE_POINTS), the prefill-only request of strata_server/split.py, rid for several writers
-OTHER_ENGINES = {"marks", "tail", "shared", "prefill", "rid"}
+# keys only other engines are sent: the paged engines' restore points (STRATA_DS4_RESTORE_POINTS)
+OTHER_ENGINES = {"marks", "tail", "shared"}
 
 
 def server_keys() -> set[str]:
@@ -30,8 +30,6 @@ def server_keys() -> set[str]:
     for tup in re.findall(r'for k in \(((?:"\w+",? ?)+)\):\n\s+v = tune\.get\(k\)', text):
         keys |= set(re.findall(r'"(\w+)"', tup))
     keys |= set(re.findall(r'f" (pen_from)=', text))
-    keys |= set(re.findall(r'f" (rid)=', text))
-    keys |= set(re.findall(r'" (prefill)=1', text))
     keys |= set(re.findall(r'(marks|tail|shared)=', text.split("def restore_keys", 1)[1].split("def projection_key", 1)[0]))
     keys |= set(re.findall(r'f" (cvec)=', text))
     keys |= set(re.findall(r'"(logit_bias)="', (ROOT / "strata_common" / "logit_bias.py").read_text(encoding="utf-8")))

@@ -105,8 +105,9 @@ void moe_grouped_s2_wide(const unsigned long long* grp_ptr, const int32_t* grp_s
                          const uint8_t* x_q8_0, const float* x_scales, void* scratch, float* out, void* stream,
                          int max_group);
 #endif
-/// What a verify window calls: `max_group` is the window's rows.  A build with narrow windows (the default, and every SYCL / Metal
-/// build, whose kernel libraries have only `moe_grouped_s2`) runs `moe_grouped_s2`: its windows hold at most 8 rows.
+/// What a verify window calls: `max_group` is the window's rows.  A build with narrow windows (the default) runs
+/// `moe_grouped_s2`: its windows hold at most 8 rows.
+
 inline void moe_grouped_s2_window(const unsigned long long* grp_ptr, const int32_t* grp_start, const int32_t* n_groups,
                                   const int32_t* ent_dst, const int32_t* ent_tok, int64_t cap_groups, int64_t cap_entries,
                                   const uint8_t* x_q8_0, const float* x_scales, void* scratch, float* out, void* stream,

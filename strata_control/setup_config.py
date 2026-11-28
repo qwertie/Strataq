@@ -423,8 +423,7 @@ def config_for(inp: SetupInputs, lib) -> SetupConfig:
         # Keep these settings saved; the paged-launch adapter still needs support before it can honor them.
         args += ["--control-vector-scaled", f"{esp}:1.0", "--control-vector-layer-range", "4", "44",
                  "--cvec-mode", "project", "--cvec-dir", "per-layer"]
-    new = lib.Q38EXE if getattr(a, "engine", None) == "new" else None        # setup's choose_engine settled it
-    cfg = {"exe": engine_exe(eng, new), "args": args, "cwd": str(ROOT), "tokenizer": str(pack / "tokenizer"),
+    cfg = {"exe": engine_exe(eng), "args": args, "cwd": str(ROOT), "tokenizer": str(pack / "tokenizer"),
            "model_name": f"{fam['name']}-{model.lower()}", "log": str(home() / f"strata-{tag.lower()}.log"),
            "lib_dirs": lib_dirs, "port": port}
     if cuda_tk == 12:                                  # the experimental CUDA 12 engine (engine-cuda12/)
@@ -595,7 +594,6 @@ class Dsv41Inputs:
     fam: Any = None
     hip: Any = None
     lib_dirs: Any = None
-    mac: Any = None
     md: Any = None
     named: Any = None
     pack: Any = None
@@ -622,7 +620,6 @@ def dsv41_config_for(inp: Dsv41Inputs, lib) -> Dsv41Config:
     fam = inp.fam
     hip = inp.hip
     lib_dirs = inp.lib_dirs
-    mac = inp.mac
     md = inp.md
     named = inp.named
     pack = inp.pack
@@ -644,11 +641,9 @@ def dsv41_config_for(inp: Dsv41Inputs, lib) -> Dsv41Config:
     # --dspark-conf 0.65: the drafts' confidence floor (H100 replay, DSPARK-DEFAULTS.md: within 0.01-0.02 of the per-class best,
     # never below 0.3).  The engine has no flag for the draft block (3 in the same table): it reads the block size from the pack,
     # so only the floor is written.
-    # A Mac (0.2.7.1): the drafter is not loaded at all (--dspark none). It was exact there but not faster (15.1 and 11.0 tokens/s against 15.3
-    # without it on the M5 Max), and the engine's "auto" would load it on a 128 GB Mac: its 7 GB of experts take memory the trunk's experts need.
-    args = ["--pack", str(pack), "--max-context", str(ctx), "--eos", "1", "--vision", ds_vision, "--dspark", "none" if mac else "auto",
-            *(["--dspark-conf", "0.65"] if md.get("recipe") in ("ista", "coder") and not mac else []), *dsv41_prefill_chunk_args(cards, ram),
-            *plan["args"], *dsv41_vision_reserve_args(ds_vision, mac, plan)]
+    args = ["--pack", str(pack), "--max-context", str(ctx), "--eos", "1", "--vision", ds_vision, "--dspark", "auto",
+            *(["--dspark-conf", "0.65"] if md.get("recipe") in ("ista", "coder") else []), *dsv41_prefill_chunk_args(cards, ram),
+            *plan["args"], *dsv41_vision_reserve_args(ds_vision, plan)]
     env = dsv41_config_env(cards)
     cfg = {"exe": str(exe), "args": args, "cwd": str(ROOT), "tokenizer": str(pack / "tokenizer"),
            "model_name": fam["name"], "arch": fam["arch"], "log": str(home() / f"strata-{tag.lower()}.log"),
@@ -658,8 +653,6 @@ def dsv41_config_for(inp: Dsv41Inputs, lib) -> Dsv41Config:
         cfg["cuda"] = 12
     if hip:
         cfg["backend"] = "hip"
-    if mac:
-        cfg["backend"] = "metal"
     idx = [c["index"] for c in cards]
     if len(idx) > 1 or a.gpu is not None or a.gpus:      # (a.gpu is also setup's own pick: one card pinned when several devices are in the PC)
         cfg["gpu"] = idx if len(idx) > 1 else idx[0]

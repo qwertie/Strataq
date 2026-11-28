@@ -99,11 +99,11 @@ class ComponentStart(unittest.TestCase):
         src.mkdir()
         (src / "engine_main.py").write_text(FAKE_ENGINE, encoding="utf-8")
         if WINDOWS:
-            entry = "strata.cmd"
+            entry = "strata-q38.cmd"
             (src / entry).write_bytes(f'@echo off\r\n"{sys.executable}" "%~dp0engine_main.py" %*\r\n'.encode())
             library = "cudart64_13.dll"
         else:
-            entry = "strata"
+            entry = "strata-q38"
             (src / entry).write_text(f'#!/bin/sh\nexec "{sys.executable}" "$(dirname "$0")/engine_main.py" "$@"\n')
             library = "libcudart.so.13"
         (src / library).write_bytes(b"a runtime library the stub never loads " * 200)

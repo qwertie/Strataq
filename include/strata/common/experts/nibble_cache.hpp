@@ -253,9 +253,8 @@ struct NibbleCache {
     }
 };
 #else
-// A build without the 4-bit kernels (STRATA_EXPERT_NIBBLE_BUILT 0: HIP, Metal, a CUDA build without
-// STRATA_EXPERIMENTAL_SM60): nibble_refusal refuses the switch, so no cache is ever converted and none of this is
-// entered.
+// A build without the 4-bit kernels (STRATA_EXPERT_NIBBLE_BUILT 0: HIP, a CUDA build without
+// STRATA_EXPERIMENTAL_SM60): no cache is ever converted and none of this is entered.
 struct NibbleCache {
     int64_t n = 0;
     double seconds = 0;

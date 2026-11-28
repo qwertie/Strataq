@@ -9,7 +9,8 @@
 // (tens of ns, against a kernel launch of microseconds); STRATA_DISPATCH_STATS=0 turns it off.
 //
 // The report is JSON, written at exit when STRATA_DISPATCH_REPORT=<path> is set (and by the CLI's --stats to stdout as "dispatch").
-// Header only, standard C++17, no CUDA / HIP / SYCL / Metal types: every backend compiles it.
+// Header only, standard C++17, no CUDA / HIP types: every backend compiles it.
+
 #pragma once
 
 #include <atomic>

@@ -47,22 +47,20 @@ function emit() {
 /** Which release asset belongs on this machine. */
 function assetMatcher() {
   const { platform, arch } = process;
-  if (platform === 'darwin') {
-    return {
-      test: (name) => /macos/i.test(name) && (arch === 'arm64' ? /arm64/i.test(name) : /x64|x86_64/i.test(name)) && /\.tar\.gz$/.test(name),
-      ext: 'tar.gz',
-    };
-  }
   if (platform === 'linux') {
     return {
       test: (name) => /ubuntu|linux/i.test(name) && (arch === 'arm64' ? /arm64|aarch64/i.test(name) : /x64|x86_64/i.test(name)) && /\.tar\.gz$/.test(name),
       ext: 'tar.gz',
     };
   }
-  return {
-    test: (name) => /win/i.test(name) && /x64|x86_64/i.test(name) && /\.zip$/.test(name),
-    ext: 'zip',
-  };
+  if (platform === 'win32') {
+    return {
+      test: (name) => /win/i.test(name) && /x64|x86_64/i.test(name) && /\.zip$/.test(name),
+      ext: 'zip',
+    };
+  }
+  // A Mac or another system: no build is offered, so findRelease reports that none matches.
+  return { test: () => false, ext: '' };
 }
 
 export async function findRelease() {

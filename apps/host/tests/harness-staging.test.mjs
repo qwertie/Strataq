@@ -12,7 +12,7 @@ import { isHarnessCodePackage, isOtherOsBinaryFolder, missingHarnessImports } fr
 const nm = (...p) => ['harness', 'node_modules', ...p].join(sep);
 
 test('the Harness own code packages are never pruned, on any platform', () => {
-  for (const platform of ['linux', 'darwin', 'win32']) {
+  for (const platform of ['linux', 'win32']) {
     for (const name of ['dsh-win32-process', 'dsh-darwin-thing', 'dsh-linux-thing', 'dsh-sandbox-windows-acl']) {
       assert.equal(isOtherOsBinaryFolder(platform, name, nm('@deepseek-ai', name)), false, `${platform}: ${name}`);
     }
@@ -24,7 +24,6 @@ test('the Harness own code packages are never pruned, on any platform', () => {
 test('other systems prebuilt binaries are still dropped', () => {
   assert.equal(isOtherOsBinaryFolder('linux', 'sharp-win32-x64', nm('@img', 'sharp-win32-x64')), true);
   assert.equal(isOtherOsBinaryFolder('linux', 'musl', nm('@deepseek-ai', 'node-addon-system-linux-x64', 'bin', 'musl')), true);
-  assert.equal(isOtherOsBinaryFolder('darwin', 'win32-x64', nm('node-pty', 'prebuilds', 'win32-x64')), true);
   assert.equal(isOtherOsBinaryFolder('win32', 'linux-x64', nm('node-pty', 'prebuilds', 'linux-x64')), true);
   // this platform's own binaries stay
   assert.equal(isOtherOsBinaryFolder('linux', 'linux-x64', nm('node-pty', 'prebuilds', 'linux-x64')), false);

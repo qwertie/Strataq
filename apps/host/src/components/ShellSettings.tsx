@@ -46,7 +46,7 @@ export function ApprovalNotifySetting() {
         onClick={() => { if (!on) void askNotificationPermission(); setApprovalNotify(!on); }}/>;
 }
 
-/** Keep the app running in the tray when its window is closed (#3477). Desktop app on Windows and macOS only. */
+/** Keep the app running in the tray when its window is closed (#3477). Desktop app on Windows only. */
 export function TraySetting({ shell, save }: { shell: ShellState; save: (patch: { tray: boolean }) => Promise<string | null> }) {
     return <button className="st-toggle" role="switch" aria-checked={shell.minimizeToTray} aria-label={tr("Minimise to tray")} onClick={() => void save({ tray: !shell.minimizeToTray })}/>;
 }

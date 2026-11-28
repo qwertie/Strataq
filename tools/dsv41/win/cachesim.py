@@ -1,4 +1,4 @@
-"""cachesim.py - offline expert-cache policies on routing traces (DS4_TRACE files of strata-dsv41).
+"""cachesim.py - offline expert-cache policies on routing traces (DS4_TRACE files of the DeepSeek model, ds4_model.cu).
 
 A trace is a run of records: u8 layer, u8 T (bit 7: guesses follow), T x k int16 expert ids [, u8 na1, u8 na2, T x (na1 + na2)
 int16 guesses for the next layer and the one after].  One decode step (or verify window) is the records of layers 0..nl-1 in order.

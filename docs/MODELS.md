@@ -65,19 +65,12 @@ It uses its own engine, a separate download that the app and `strata launch` fet
 The download includes the shared n-gram (Engram) table and the DSpark drafter. Pick 2.25 for coding and agent work if
 you have the disk. Perplexity is measured on a fixed set of 4,995 test texts; lower is closer to the original.
 
-### Try the page-pool engine
+### The page-pool engine
 
-The original engine stays the default. To try `strata-ds41`, set `exe` in the server's JSON config to its full
-path. In the app, open the model's settings and set **Engine program** to that path. In the Terminal, use:
+DeepSeek runs on `strata-ds41` and Qwen3.8 on `strata-q38`, the page-pool engines. The engines they replaced
+(`strata-dsv41` and `strata`) are gone from Strataq.
 
-```sh
-strata launch --family deepseek41 --model ist-das-2.00bpw --set exe=C:/engines/strata-ds41.exe --yes --no-tui
-```
-
-Use `strata-q38` the same way for Qwen3.8. The binary and its matching runtime libraries must already be installed.
-No new engine-choice flag is needed. Restore the original `exe` path to return to the original engine.
-
-These engines add live memory settings in the Memory panel, several conversations at once, pausing conversations
+These engines have live memory settings in the Memory panel, several conversations at once, pausing conversations
 in RAM or on disk, saved sessions, and layer splitting. DeepSeek's layer split is still under test; separate-card
 validation remains open in D9. Pictures, the suffix drafter, `--batch-groups` and `--tp` are unavailable.
 The server keeps context, GPU selection and `parallel` (starting conversations at once). It logs options it leaves
@@ -87,7 +80,8 @@ pages kept in the pools. These are engine options in the config's `args`, also a
 
 Measured on Strix Halo on Windows, HIP, the IQ2_XXS pack, 8,192 context, D7: with DSpark, 1,200 trunk experts
 and 384 drafter experts on the GPU, two alternating rounds of 64 tokens per answer, story / code / count decode
-was 3.62 / 4.06 / 7.92 tok/s* with `strata-dsv41`, against 3.80 / 4.79 / 9.41 tok/s* with `strata-ds41`.
+was 3.62 / 4.06 / 7.92 tok/s* with the old engine (`strata-dsv41`), against 3.80 / 4.79 / 9.41 tok/s* with
+`strata-ds41`.
 The new engine used 18,432 MiB GPU and 8,192 MiB RAM pools; the old engine used `DS4_COMMIT_CAP_GB=26.10`,
 `--no-expert-cache --ssd-cache 0`. Both used `--dspark-conf 0.65`. Equal expert totals placed different experts
 on the GPU, so this compares those placements too.
@@ -108,14 +102,12 @@ Sources and limits: [D7, D8 and M12](MEMORY_MANAGER_PLAN.md).
 | NVIDIA RTX 30, 40 and 50 series, 12 GB or more | Windows, Linux |
 | AMD Radeon AI PRO R9700 | Linux |
 | AMD Ryzen AI Max (Strix Halo, gfx1151, 128 GB unified; 64 GB or more shared with Windows) | Windows |
-| Apple Silicon Mac, 64 GB or more, macOS 15 or newer ([DEEPSEEK_MAC.md](DEEPSEEK_MAC.md); text and pictures) | macOS |
 
 Tested on an RTX 3060 (Linux), an RTX 5070 (Windows), four R9700 cards (Linux) and a Ryzen AI Max+ 395 with 128 GB unified (Windows:
 14 to 16 tokens a second on code with the default Faster mode, 10 to 11 on chat, 78 tokens a second on a 4K prompt and 109 on
-8K). The RTX 30 kernels were also checked on an RTX A4000. Windows on RTX 30 and the RX 9070 are built but were not run. On a
-Mac it was run on an M5 Max with 128 GB ([DEEPSEEK_MAC.md](DEEPSEEK_MAC.md)). Strix Halo on Linux does not run it yet; on Strix Halo Windows the graphics memory is the RAM, so most of the experts are
+8K). The RTX 30 kernels were also checked on an RTX A4000. Windows on RTX 30 and the RX 9070 are built but were not run. Strix Halo on Linux does not run it yet; on Strix Halo Windows the graphics memory is the RAM, so most of the experts are
 read from the SSD and an NVMe drive matters.
-The opt-in page-pool engine was also tested on Strix Halo on Windows (above).
+The page-pool engine was also tested on Strix Halo on Windows (above).
 
 RTX 40 cards are covered by the engine packages since 0.2.7 (sm_89 code); we have not run one ourselves, see [DEEPSEEK41.md](DEEPSEEK41.md#the-engine-package) for a user's measurement.
 
@@ -193,8 +185,6 @@ picture). The rule is the same on NVIDIA and AMD.
 | `--vision cpu` / `--vision gpu` | choose the reader |
 
 - **AMD:** `strata-vision-hip` is the card's reader. If it cannot start, Strata uses the CPU reader ([AMD_HIP.md](AMD_HIP.md)).
-- **Mac:** pictures run on the GPU ([MAC.md](MAC.md)).
-- **Intel Arc:** an Arc with 24 GB or more keeps the CPU reader unless you pass `--vision gpu`. A Battlemage card (B580, B70) has pictures off until you pass `--vision on` ([INTEL.md](INTEL.md)).
 
 More: [Images](DETAILS.md#images-vision).
 
@@ -240,7 +230,7 @@ it keeps as many as fit and reads the rest from the SSD (much slower), and for t
 | **Q8_0** | 188 GB | 120 GiB | ~136 GB | 100% (the reference) |
 
 For comparison, IQ3_S matches the top token of Q8_0 87.7% of the time. Quality numbers, the speed bound and
-NVIDIA, AMD and Intel details are in [QUANTS.md](QUANTS.md); the files are described in [UD-Q4_K_XL](UNSLOTH_Q4.md) and
+NVIDIA and AMD details are in [QUANTS.md](QUANTS.md); the files are described in [UD-Q4_K_XL](UNSLOTH_Q4.md) and
 [UD-Q6_K_XL](UNSLOTH_Q6.md). Older AMD speeds are in [History](#history--older-measurements).
 
 ```sh
@@ -259,9 +249,9 @@ options and never setup's default. The download includes the 28 GB n-gram table.
 | **Gyro-S** | 58.5 GB | 27.6 GB | the smallest option, for PCs with little memory; lower quality |
 | **Gyro-M** | 92.0 GB | 35 GB | about IQ3_XXS quality with about 20% less GPU memory |
 
-Gyro runs on NVIDIA and AMD (experimental), on Intel Arc under Linux, and on Apple Silicon Macs. It reads pictures.
+Gyro runs on NVIDIA and AMD (experimental). It reads pictures.
 On an RTX 3060 12 GB and an R9700, Gyro-M decodes 16 to 21% slower than Q2_0. Details, measurements and credit:
-[GYRO.md](GYRO.md). Intel Arc: [INTEL_ARC.md](INTEL_ARC.md). Mac: [MAC.md](MAC.md#gyro-s-and-gyro-m-agentionais-trellis-experts).
+[GYRO.md](GYRO.md).
 
 ```sh
 strata launch --family gyro --model Gyro-S
@@ -304,7 +294,7 @@ A smaller model from the same maker: [Qwen3.6-35B-A3B](https://huggingface.co/Qw
 parameters, 3 billion active per token, 256 experts, Apache 2.0). Strata runs
 [Unsloth's GGUFs with the MTP draft layer](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF) on its own engine
 path, chosen by the file. It is in the app's model list and in setup (`--family qwen36`). It runs on NVIDIA and AMD
-cards; the Intel Arc engine and the Mac engine do not run it. It reads pictures and serves several requests at once.
+cards. It reads pictures and serves several requests at once.
 
 | Size | File | RAM setup plans for | In plain words |
 | --- | ---: | ---: | --- |

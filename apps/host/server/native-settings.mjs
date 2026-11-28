@@ -1,11 +1,11 @@
 import { validMcpName, MCP_NAME_HELP } from './mcp-names.mjs';
 import { SPEED_SWITCH_TABLE, DRAFTING_FAMILIES as GENERATED_DRAFTING_FAMILIES, DFLASH2_MODEL_PATTERN } from './policy-generated.mjs';
-/* The Drafting hint, word for word, with the size of the drafter this model would really fetch (the tuned one is 0.34 GB, 0.52 on an Arc card; the stock one 1.2). */
+/* The Drafting hint, word for word, with the size of the drafter this model would really fetch (the tuned one is 0.34 GB; the stock one 1.2). */
 export function draftingHint(gb=1.2){const size=Number.isFinite(Number(gb))&&Number(gb)>0?Number(gb):1.2;return `Which drafter guesses words ahead to make answers faster, one at a time. Auto (recommended) is DFlash2 for Qwen3.8-Flash-Next where the engine has it, the MTP otherwise; on two or more identical graphics cards that the all-cards split engine takes, it is that engine with the MTP draft layer. DFlash2 downloads a ${size} GB drafter once, the MTP its draft layer once. With Auto, several requests at once use the MTP. If you choose DFlash2 yourself, it runs with the number of requests you set. If DFlash2 cannot run, the MTP is used alone and Details says why. Off turns the drafter off.`;}
 /** Editable native keys. Unknown config keys stay intact. */
 export const NATIVE_FIELDS=[
  {id:'exe',label:'Engine program',group:'Serving',type:'string',
-  hint:'Full path to an installed strata-q38 or strata-ds41 for live memory settings, or to the original engine.'},
+  hint:'Full path to an installed strata-q38, strata-ds41 or strata-q36. A saved path to the earlier strata or strata-dsv41 starts the program that replaced it.'},
  {id:'reasoning_budget_tokens',label:'Thinking token budget',group:'Responses',type:'number',min:0,max:1048576,hint:'Leave blank for the model default.'},
  {id:'fit_max_tokens',label:'Fit output to remaining context',group:'Responses',type:'boolean',hint:'Shortens the requested output cap when the prompt leaves less room.'},
  {id:'anthropic_thinking',label:'Anthropic thinking',group:'Responses',type:'enum',choices:['model','on_request'],hint:'Follow the model default or think only when requested.'},
@@ -48,7 +48,7 @@ export const SPEED_SWITCHES=SPEED_SWITCH_TABLE.map(s=>({
 }));
 const GFX12=/^gfx120[01]$/i, RADEON_9000=/\b(?:RX\s*9\d{3}|AI\s*PRO\s*R97\d{2}|R97\d{2})\b/i;
 /**
- * Which switches make sense for this model on this PC: only those are shown. `backend` is the engine's (cuda, hip, sycl, metal, cpu). `arch` is the "arch"
+ * Which switches make sense for this model on this PC: only those are shown. `backend` is the engine's (cuda, hip, cpu). `arch` is the "arch"
  * of the model's run config: setup writes it only for the families with an engine path of their own (Qwen3.6-35B-A3B "qwen35moe", DeepSeek "deepseek41");
  * the Qwen3.8-Flash-Next files (the original, Swift, Coder, Unsloth, Gyro, NVFP4) have none. KVA was measured on the Flash-Next shape (48 layers, 512
  * experts) and the engine declines it on any other, so "Faster long prompts" is shown for a model without an "arch" only.

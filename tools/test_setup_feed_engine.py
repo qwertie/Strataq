@@ -28,11 +28,11 @@ class FeedEngine(unittest.TestCase):
         self.eng = self.root / "engine"
         self.eng.mkdir()
         (self.eng / "BUILD.json").write_text(json.dumps({"version": "0.1.45", "source": "prebuilt", "archs": [89]}), encoding="utf-8")
-        (self.eng / setup.EXE).write_bytes(b"old")
+        (self.eng / setup.Q38EXE).write_bytes(b"old")
         self.package = self.root / "components" / "engine" / "0.1.46-test"
         self.package.mkdir(parents=True)
         (self.package / "BUILD.json").write_text(json.dumps({"version": "0.1.46", "archs": [89]}), encoding="utf-8")
-        (self.package / setup.EXE).write_bytes(b"new")
+        (self.package / setup.Q38EXE).write_bytes(b"new")
         for name, value in (("home", lambda: self.root), ("say", lambda *a, **k: None), ("ok", lambda *a, **k: None),
                             ("warn", lambda *a, **k: None)):
             patch = mock.patch.object(setup, name, value)
@@ -53,15 +53,15 @@ class FeedEngine(unittest.TestCase):
         self.assertIn("update", cmd)
         self.assertIn("--no-control", cmd)
         self.assertNotIn("STRATA_NO_ACQUIRE", run.call_args.kwargs["env"])        # this one step may fetch
-        self.assertEqual((self.eng / setup.EXE).read_bytes(), b"new")
+        self.assertEqual((self.eng / setup.Q38EXE).read_bytes(), b"new")
         meta = json.loads((self.eng / "BUILD.json").read_text(encoding="utf-8"))
         self.assertEqual((meta["version"], meta["source"]), ("0.1.46", "prebuilt"))
-        self.assertEqual((self.eng / ".previous" / setup.EXE).read_bytes(), b"old")      # one generation to roll back to
+        self.assertEqual((self.eng / ".previous" / setup.Q38EXE).read_bytes(), b"old")      # one generation to roll back to
 
     def test_no_feed_keeps_the_installed_engine(self):
         with self.run_update(code=6):
             self.assertIsNone(setup.engine_from_feed(self.eng, updating=True))
-        self.assertEqual((self.eng / setup.EXE).read_bytes(), b"old")
+        self.assertEqual((self.eng / setup.Q38EXE).read_bytes(), b"old")
 
     def test_a_release_without_the_zip_falls_back_to_the_feed(self):
         gpu = {"arch": 89, "archs": [89], "vram_gb": 8.0, "index": 0}

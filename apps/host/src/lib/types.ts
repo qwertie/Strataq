@@ -28,12 +28,12 @@ export interface GpuReading { id:string; temperatureC:number|null; utilizationPc
 export interface GpuInfo {
   id?: string;
   index: number;
-  vendor: 'apple' | 'nvidia' | 'amd' | 'intel' | 'unknown';
+  vendor: 'nvidia' | 'amd' | 'intel' | 'unknown';
   name: string;
   vramGb: number;
   freeVramGb?: number;
   unified: boolean;
-  backend: 'metal' | 'cuda' | 'rocm' | 'vulkan' | 'cpu';
+  backend: 'cuda' | 'rocm' | 'vulkan' | 'cpu';
   driver?: string;
 }
 

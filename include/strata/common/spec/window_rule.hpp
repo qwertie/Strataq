@@ -40,14 +40,15 @@ inline bool mtp_q_applies(bool use_mtp, bool df2_active, bool mtp_prob, bool fro
 }
 
 /// DFlash2 with a LONG suffix match: the lookup window is taken without a DFlash2 draft round.  The choice "lookup or DFlash2" needs the draft only to
-/// test that its first token agrees; when the match is long the lookup is the likelier winner and the draft (2.4 ms on Metal, 1.2 ms on the RTX PRO
+/// test that its first token agrees; when the match is long the lookup is the likelier winner and the draft (1.2 ms on the RTX PRO
 /// 5000) would be thrown away.  The round's draft is then DEFERRED to the start of the next iteration, where the policy decides (lookup: the committed
 /// rows only update the drafter's ring; otherwise the draft is made then, from the same taps).  min_match 0 = off.
 inline bool skip_draft_for_lookup(bool df2_active, int min_match, int lookup_k, int match) {
     return df2_active && min_match > 0 && lookup_k > 0 && match >= min_match;
 }
 
-/// STRATA_DF2_LOOKUP_SKIP=N (match length in tokens; 0 = off).  `build_default`: what a build without the variable uses (Metal 8, others 0 until measured).
+/// STRATA_DF2_LOOKUP_SKIP=N (match length in tokens; 0 = off).  `build_default`: what a build without the variable uses (0 until measured).
+
 inline int df2_lookup_skip_min(int build_default) {
     static const int v = [build_default] {
         const char* e = std::getenv("STRATA_DF2_LOOKUP_SKIP");

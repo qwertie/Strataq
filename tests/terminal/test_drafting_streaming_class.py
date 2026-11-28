@@ -1,8 +1,8 @@
 """Auto defaults for the 12 GB / streaming CUDA class (owner 11-06 ~15:30 "1 yes"; drafting.CLASS_DEFAULTS, one removable entry per set).
 
-The class is the one the confidence already reads: a CUDA card whose slots_of() is under the last-but-one CONF_STEPS step, so conf_for() gives 0.8 (P2003, RTX 3060 12 GB).
+The class is the one the confidence already reads: a CUDA card whose slots_of() is under the last-but-one CONF_STEPS step, so conf_for_slots() gives 0.8 (P2003, RTX 3060 12 GB).
 IQ3_S -> Auto is the MTP. UD-IQ4_XS-v31 -> Auto is DFlash2 with the tuned selq4 pack at the class's current 0.8 (it depends on RTX2's file-tier fix in the same release).
-Anything chosen by name wins; the resident-CUDA, Strix, gfx1201, Arc and Metal entries and the conf tables are unchanged.
+Anything chosen by name wins; the resident-CUDA, Strix and gfx1201 entries and the conf tables are unchanged.
 """
 
 from __future__ import annotations
@@ -31,7 +31,6 @@ L620 = ("cuda", ["sm_120"], 73728)
 SPARK = ("cuda", ["sm_121"], None)
 STRIX = ("hip", ["gfx1151"], None)
 R9700 = ("hip", ["gfx1201"], 32768)
-ARC = ("sycl", ["arc_a"], None)
 
 
 def flag(args, name):
@@ -72,17 +71,17 @@ class TheClass(Base):
     def test_it_is_the_card_class_the_confidence_calls_0_8(self):
         for hardware in (P2003, ("cuda", ["sm_86"], 8192), ("cuda", ["sm_75"], 6144)):
             slots = drafting.slots_of(self.args, hardware[2])
-            self.assertEqual(drafting.conf_for("cuda", slots), 0.8, hardware)
+            self.assertEqual(drafting.conf_for_slots(slots), 0.8, hardware)
             self.assertTrue(drafting.streaming_class("cuda", hardware[1], args=self.args, vram_mib=hardware[2]), hardware)
         for hardware in (CARD16, CARD24, L620, SPARK, ("cuda", ["sm_120"], None), ("cuda", ["sm_86"], None)):
             self.assertFalse(drafting.streaming_class(hardware[0], hardware[1], args=self.args, vram_mib=hardware[2]), hardware)
-        for backend, archs in (("hip", ["gfx1100"]), ("hip", ["gfx1201"]), ("sycl", ["arc_a"]), ("metal", [])):
+        for backend, archs in (("hip", ["gfx1100"]), ("hip", ["gfx1201"])):
             self.assertFalse(drafting.streaming_class(backend, archs, args=self.args, vram_mib=12288), backend)
         # the boundary is the 0.8 step itself, and a person's own --expert-cache counts as the confidence counts it
         for given, inside in (("2300", True), ("2400", False), ("64", True)):
             args = self.args + ["--expert-cache", given]
             self.assertEqual(drafting.streaming_class("cuda", ["sm_120"], args=args, vram_mib=73728), inside, given)
-            self.assertEqual(drafting.conf_for("cuda", drafting.slots_of(args, 73728)) == 0.8, inside, given)
+            self.assertEqual(drafting.conf_for_slots(drafting.slots_of(args, 73728)) == 0.8, inside, given)
 
 
 class IQ3SOnTheClass(Base):
@@ -121,7 +120,7 @@ class IQ3SOnTheClass(Base):
         self.assertEqual(drafting.choice_of("auto", model_name=IQ3S, backend="cuda", archs=["sm_86"], args=self.args, vram_mib=12288), "mtp")
 
     def test_every_other_card_keeps_dflash2_for_iq3_s(self):
-        for hardware in (CARD16, CARD24, L620, SPARK, STRIX, ARC):
+        for hardware in (CARD16, CARD24, L620, SPARK, STRIX):
             d, args = self.apply(IQ3S, hardware)
             self.assertEqual((d.drafter, flag(args, "--draft")), ("dflash2", "dflash2"), hardware)
 
@@ -188,28 +187,21 @@ class OtherSetsAndEntriesAreUnchanged(Base):
 
     def test_the_other_entries_and_the_conf_tables(self):
         self.assertEqual(drafting.CONF_STEPS, ((12000, 0.35), (7500, 0.5), (3000, 0.7), (0, 0.8)))
-        self.assertEqual(drafting.BACKEND_CONF, {"sycl": 0.6, "metal": 0.5})
         self.assertEqual((drafting.DRAFT_CONF, drafting.SPEC_WINDOW), (0.35, 6))
         self.assertEqual(set(drafting.CLASS_DEFAULTS), {("cuda", "iq3_s", "streaming"), ("cuda", "unsloth-ud-iq4_xs-v31", "streaming")})
         self.assertEqual(set(drafting.SET_DEFAULTS), {
-            ("metal", "unsloth-ud-q4_k_xl"), ("metal", "unsloth-ud-iq4_xs-v31"), ("metal", "iq3_s"),
             ("cuda", "iq3_s"), ("cuda", "unsloth-ud-iq4_xs-v31"),
-            ("hip", "iq3_s"), ("hip", "unsloth-ud-q4_k_xl"), ("hip", "unsloth-ud-iq4_xs"), ("hip", "unsloth-ud-iq4_xs-v31"),
-            ("sycl", "iq3_xxs")})
+            ("hip", "iq3_s"), ("hip", "unsloth-ud-q4_k_xl"), ("hip", "unsloth-ud-iq4_xs"), ("hip", "unsloth-ud-iq4_xs-v31")})
         self.assertEqual(list(drafting.AUTO_MTP), [("hip", "gfx1201")])
-        self.assertEqual(drafting.choice_of("auto", model_name=IQ3S, backend="metal"), "mtp")
         self.assertEqual(drafting.choice_of("auto", model_name=IQ3S, backend="hip", archs=["gfx1201"]), "mtp")
         self.assertEqual(drafting.choice_of("auto", model_name=IQ3S, backend="hip", archs=["gfx1151"]), "dflash2")
-        self.assertEqual(drafting.choice_of("auto", model_name=IQ3S, backend="sycl", archs=["arc_a"]), "dflash2")
         self.assertEqual(drafting.choice_of("auto", model_name=IQ3S, backend="cuda", archs=["sm_86"]), "dflash2", "no card signal given: the general rule, as before")
 
-    def test_the_resident_strix_arc_and_metal_starts_are_what_they_were(self):
+    def test_the_resident_and_strix_starts_are_what_they_were(self):
         self.put_tuned()
         for hardware, name, conf in ((L620, IQ3S, "0.55"), (SPARK, V31, "0.35"), (STRIX, IQ3S, "0.35")):      # l620: 0.55 since 11-08
             d, args = self.apply(name, hardware)
             self.assertEqual((d.drafter, flag(args, "--draft-model"), flag(args, "--draft-conf")), ("dflash2", str(drafting.tuned_path(self.data)), conf), (hardware, name))
-        d, args = self.apply(Q4, ("metal", [], None))
-        self.assertEqual((flag(args, "--draft-model"), flag(args, "--draft-conf")), (str(drafting.tuned_path(self.data)), "0.7"))
         self.assertEqual(self.apply(IQ3S, R9700)[0].drafter, "mtp")
         self.assertEqual(self.apply(IQ3S, R9700, drafting="dflash2")[0].drafter, "dflash2")
 

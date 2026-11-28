@@ -156,24 +156,7 @@ void session_release(SessionState& s) {
         }
 }
 
-#if defined(STRATA_GPU_METAL)
-}  // namespace strata::core
-namespace strata::metal_engine {
-void window_reset(const strata::core::SessionState* ss);   // metal/src/engine/window.cpp: that session's running state (the main one or a batch slot's) back to a new sequence's
-}  // namespace strata::metal_engine
-namespace strata::core {
-#endif
-
 void session_zero(SessionState& s, const ModelGeometry& g, const float* R_init, void* stream) {
-#if defined(STRATA_GPU_METAL)
-    // the running state lives in the Metal decode window; the session's own device buffers are not read there
-    (void) g; (void) R_init; (void) stream;
-    strata::metal_engine::window_reset(&s);
-    s.ple_prev[0] = -1;
-    s.ple_prev[1] = -1;
-    s.ple_token = -1;
-    return;
-#endif
     cudaStream_t cs = (cudaStream_t) stream;
     // the residual: `hc` copies of the one vector a caller hands in.  A real sequence's first token is the
     // embedding broadcast to every stream, which is the reference's own initial condition.

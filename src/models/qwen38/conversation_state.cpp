@@ -263,16 +263,6 @@ bool conversation_checkpoint_validate(const ConversationCheckpoint& c, const Ses
     return image_keys(c.imgs, c.ids.size()) || fail(error, "invalid checkpoint running-state payload");
 }
 
-#if defined(STRATA_GPU_METAL)
-}  // namespace strata::core
-namespace strata::metal_engine {
-// the running state lives in the Metal decode window (metal/src/engine/window.cpp), not in the session's buffers
-bool window_checkpoint_save(strata::core::ConversationCheckpoint& c, const strata::core::SessionState* ss, std::string& error);
-bool window_checkpoint_restore(const strata::core::ConversationCheckpoint& c, const strata::core::SessionState* ss, std::string& error);
-}  // namespace strata::metal_engine
-namespace strata::core {
-#endif
-
 namespace {
 struct CkptAsync {
     std::mutex mu;
@@ -311,7 +301,7 @@ VramSlot* vram_slot_for(size_t n, int dev) {
     return best;
 }
 bool ckpt_async_on() {
-#if defined(STRATA_USE_HIP) || defined(STRATA_HIP_GFX906) || defined(STRATA_GPU_METAL)
+#if defined(STRATA_USE_HIP) || defined(STRATA_HIP_GFX906)
     return false;
 #else
     static const bool on = [] { const char* v = std::getenv("STRATA_CKPT_ASYNC"); return v != nullptr && v[0] == '1'; }();
@@ -327,7 +317,7 @@ bool ckpt_async_on() {
 struct CkptGather { std::mutex mu; void* stage = nullptr; void* host = nullptr; size_t cap = 0; int dev = -1; };
 CkptGather& ckpt_gather() { static CkptGather a; return a; }
 bool ckpt_gather_on() {
-#if defined(STRATA_USE_HIP) || defined(STRATA_HIP_GFX906) || defined(STRATA_GPU_METAL)
+#if defined(STRATA_USE_HIP) || defined(STRATA_HIP_GFX906)
     return false;
 #else
     static const bool on = [] { const char* v = std::getenv("STRATA_CKPT_GATHER"); return v != nullptr && v[0] == '1'; }();
@@ -393,10 +383,6 @@ bool checkpoint_save(ConversationCheckpoint& c, const SessionState& ss, const Mo
     conversation_checkpoint_join(nullptr);   // (the staging buffer is reused)
     if (std::getenv("STRATA_PARK_TRACE")) std::fprintf(stderr, "strata parktrace: save join %.2f ms\n",
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - j0).count());
-#if defined(STRATA_GPU_METAL)
-    (void) g;
-    return strata::metal_engine::window_checkpoint_save(c, &ss, error);
-#endif
     ConversationStateSizes z;
     if (!checkpoint_targets(ss, g, c.ids.size(), z, error)) return false;
     const size_t layers = owned_qsa(ss);
@@ -500,13 +486,6 @@ bool conversation_checkpoint_restore(const ConversationCheckpoint& c, SessionSta
             if (x.tag == c.dev_tag && x.dev == dev && x.n == c.gdn.size()) { x.used = ++vram_slots().clock; hit = &x; }
     }
     if (hit == nullptr) conversation_checkpoint_join(c.gdn.data());
-#if defined(STRATA_GPU_METAL)
-    (void) g;
-    if (!strata::metal_engine::window_checkpoint_restore(c, &ss, error)) return false;
-    ss.ple_prev[0] = c.ids.size() >= 2 ? c.ids[c.ids.size() - 2] : -1;
-    ss.ple_prev[1] = c.ids.size() >= 1 ? c.ids[c.ids.size() - 1] : -1;
-    return true;
-#endif
     if (!conversation_checkpoint_validate(c, ss, g, error)) return false;
     ConversationStateSizes z;
     if (!conversation_session_sizes(g, ss, z, error)) return false;

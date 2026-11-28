@@ -1,10 +1,9 @@
 // include/strata/models/qwen38/model.hpp - the Qwen3.8 engine's loaded model: the weights, the head, the per-layer
 // embeddings, the session, the drafter, the expert sources and cache, the CPU pool and the layer split's stages.
 //
-// `Model::load` is the loader that used to be inline in `strata`'s main() (src/program/generate.cpp); the old engine
-// constructs a Model, loads it and keeps working on its members under their old names. Its members are the loader's
-// former local variables: what the serve and generate loops use is public, so a second program can be built on the same
-// loader instead of a copy of it (docs/MEMORY_MANAGER_PLAN.md, step M2d).
+// `Model::load` is the loader that used to be inline in the first engine's main(), which strata-q38's paged model
+// (paged_model.cpp) now calls. Its members are the loader's former local variables, public so that the paged model can
+// work on them.
 #pragma once
 
 #include "strata/models/qwen38/options.hpp"
@@ -117,7 +116,7 @@ struct GpuStage {
     int32_t* mrope = nullptr;                            ///< --vision: the image-position table on its device
 };
 
-/// Qwen3.8's model as `strata` loads it from its settings: weights, head, per-layer embeddings, session, drafter,
+/// Qwen3.8's model as strata-q38 loads it from its settings: weights, head, per-layer embeddings, session, drafter,
 /// expert sources, expert cache and CPU pool, and the stages of a layer split. Owns them; the GPU buffers held as raw
 /// pointers (`arena`, `sbuf`, `d_parts`, `d_logits`, ...) are freed by the program that loaded it, at its end.
 class Model {
@@ -148,18 +147,11 @@ public:
     /// Gets the draft vocabulary file DFlash2 binds its head from: the subset df2_vocab_resolve chose with DFlash2 alone
     /// (`df2_solo`), else the MTP's (--mtp-draft-vocab, or <mtp>/draft_vocab.bin).
     std::string get_df2_vocab_path() const;
-    /// Lets DFlash2 bind the MTP drafter's copy of the draft head instead of its own (`df2_expect_share`); call after
-    /// mtp.bind and before df2.bind.
-    void offer_df2_head();
     /// Gets the VRAM DFlash2's own draft head and logits take when it binds (0 when it shares the MTP's head).
     int64_t get_df2_head_bytes() const;
     /// Gets how many (layer, expert) pairs a live slot of their stage's expert cache holds (a slot past the live ones
     /// was given back).
     int64_t count_gpu_held() const;
-    /// P1.8: turns the file tier's Linux defaults (io prefetch, the decode gate) and the routing-aware prefetch off
-    /// while every routed expert is in the GPU caches, and back on when one is not.  Call at a quiet point (a request's
-    /// start, a VRAM resize): nothing in flight.  Only what the policy turned off is turned on again.
-    void refresh_file_tier();
     /// Copies `host_res` to the device table `dst` (CUDA0's or a stage's) and waits for the copy.
     cudaError_t put_residency(int32_t* dst) const;
     /// Gets what a verify window on CUDA0 knows of the expert cache: the residency tables and the slots.
@@ -176,11 +168,6 @@ public:
     /// Tells the prompt path the share of the expert bytes that are pinned in RAM (it sizes its streamed ring and the
     /// slots it may borrow by it).
     void set_prompt_pinned_share();
-    /// --resident-experts: copies the experts no GPU cache holds into RAM (page-locked when it can), except
-    /// `stage_pairs` (the (layer, expert) pairs other GPUs hold); the experts of the slots the prompt path may borrow
-    /// (from slot `lend_from` on; -1: none) it keeps as far as RAM allows.  Returns 0, otherwise the exit status for
-    /// main().
-    int pin_resident_experts(const std::vector<std::pair<int32_t, int32_t>>& stage_pairs, int64_t lend_from);
     /// Settles the expert tiers once the RAM copy is decided: the asynchronous adaptive tier off without one, and the
     /// mapped view of the experts closed when they are read unbuffered.
     void finish_expert_tiers();
@@ -193,13 +180,6 @@ public:
 
     /// Gets the stage that runs layer `l` with a layer split (0: CUDA0's).
     int stage_of(int64_t l) const;
-    /// Gets the rows a verifier's window holds: the solo path's drafts (--spec rows), the plain batch windows (the
-    /// slots) and, with STRATA_PIPED_MTP, a group's rows (its slots, each its token and its proposals).  Final only once
-    /// load() has fitted the slots and the groups, at the verifiers' init.
-    int get_batch_max_t() const;
-    /// Tells whether strata-q38 loads this model: its page pools hold the experts and the conversations
-    /// (`open_expert_pages` is set), so the old engine's features that size slots or state by their own rules stay off.
-    bool is_paged() const { return (bool) open_expert_pages; }
     /// Gets the bytes of the GDN state that one snapshot of session `s0` copies.
     size_t gdn_snapshot_bytes(const strata::core::SessionState& s0) const;
     /// Gets the canonical tensors of layers [lb, le) that a card of a layer split loads into its arenas (the PLE's,
@@ -319,7 +299,6 @@ public:
     strata::core::ExpertCache xcache;   ///< CUDA0's expert cache (VRAM slots)
     /// strata-q38: opens `xcache` in the pages of the GPU's page pool, for at most the given number of experts, in
     /// place of the cache's own sizing; load() calls it when it would open the cache, before the profile fills it.
-    /// Empty (the `strata` program): the cache's own slots.
     std::function<bool(int64_t max_experts, std::string& err)> open_expert_pages;
     /// strata-q38: opens a layer split's later stage's expert cache `st.cache` in the pages of its card's page pool,
     /// in place of load()'s sizing of it from `st.profile` (load() then fills it as before).  Empty: load() sizes it.
@@ -355,7 +334,8 @@ public:
     bool graph_hits = false;
 
 private:
-    // the file tier's idle policy (refresh_file_tier); STRATA_FILE_TIER_IDLE=0 turns it off
+    // the file tier's idle policy at load (every routed expert in the GPU caches: no io prefetch, no look-ahead);
+    // STRATA_FILE_TIER_IDLE=0 turns it off
     bool file_tier_idle_ok = false;
     bool gpu_holds_all = false;       ///< every routed expert was in the GPU caches at the last check
     bool io_pf_by_default = false;    ///< the Linux file-tier defaults turned io prefetch on (no STRATA_IO_PREFETCH given)
@@ -381,7 +361,7 @@ extern int64_t g_lend_keep;
 /// Set by Model::pin_resident_experts; read by the serve loop's VRAM checks.
 extern std::atomic<bool> g_uma_pinned_complement;
 /// Tells whether a start short of VRAM may be moved off the GPU (strata/core/spill_gate.hpp): a discrete card only,
-/// not Metal and not an integrated GPU (Strix Halo and the other APUs share the host's RAM).
+/// not an integrated GPU (Strix Halo and the other APUs share the host's RAM).
 bool spill_discrete_gpu();
 /// Gets " (N MiB of M MiB VRAM free on this GPU)" for an allocation's failure message (clears the CUDA error first).
 std::string vram_free_note();
@@ -417,8 +397,8 @@ void set_tail_skip_default(const Model& m, int64_t gpu_experts, const char* who)
 /// Tesla P100 0.20, RTX A4000 flat from 0.15 to 0.40; the 0.1.41 rule gave 0.55, 0.29, 0.30) lie within one 0.05 step
 /// of link / (link + 1.85 x pool rate).  Three updates at most (after 48, then 96 and 96 more windows), each rounded to
 /// 0.05, so a noisy window cannot move the share by less than a step and it stops moving after the third.
-/// STRATA_PCIE_FRAC_DEFAULT=old keeps the 0.1.41 rule.  Used by the older engine's serve loop (generate.cpp) and by
-/// strata-q38 (paged_model.cpp).
+/// STRATA_PCIE_FRAC_DEFAULT=old keeps the 0.1.41 rule.  Used by strata-q38
+/// (paged_model.cpp).
 struct PcieAuto {
     bool on = false;
     double link_gbps = 0.0, blob_bytes = 0.0;   ///< the probed link; the experts' mean blob size
@@ -454,8 +434,6 @@ struct PcieAuto {
         return std::fabs(f - cur) < 0.025 ? -1.0 : f;
     }
 };
-/// Gets the host-to-device bandwidth the last PCIe probe measured, GB/s (<= 0: none ran).
-double get_last_h2d_gbps();
 #if !defined(_WIN32)
 /// Tells whether `path` is on a rotational disk (1), not (0) or unknown (-1), from sysfs; `dev` gets the disk's name.
 int on_rotational_disk(const std::string& path, std::string& dev);

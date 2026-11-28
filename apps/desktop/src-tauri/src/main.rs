@@ -280,7 +280,7 @@ fn pick_stable_port() -> Result<u16, String> {
 
 /// Locate a bundled resource.
 ///
-/// In a packaged `.app` Tauri places `bundle.resources` under `Contents/Resources`. During
+/// In a packaged build Tauri reports where it placed `bundle.resources`. During
 /// development they are not copied, so the repository layout is the fallback. Both are tried so
 /// `tauri dev` and the packaged bundle behave the same way.
 #[cfg(not(target_os = "linux"))]
@@ -496,7 +496,7 @@ fn host_command(res: &Path, port: u16, shutdown_token: &str) -> Result<Command, 
     Ok(cmd)
 }
 
-/// Windows and macOS: start the App Host from inside the app process and return the port it serves on.
+/// Windows: start the App Host from inside the app process and return the port it serves on.
 #[cfg(not(target_os = "linux"))]
 fn start_host(app: &tauri::AppHandle) -> Result<u16, String> {
     let res = resource_dir(app)?;
@@ -593,13 +593,12 @@ fn stop_host_child(child: &mut Child, port: Option<u16>, token: Option<&str>) {
 
 /// Where a packaged build keeps `bundle.resources`, found from the executable's own path.
 ///
-/// macOS `.app`: `Contents/MacOS/<exe>` -> `Contents/Resources`. Windows NSIS: next to the exe.
+/// Windows NSIS: next to the exe.
 /// Linux deb/AppImage: `<prefix>/bin/<exe>` -> `<prefix>/lib/<productName>`.
 fn packaged_resource_dir(exe: &Path) -> Option<PathBuf> {
     let dir = exe.parent()?;
     let mut candidates = vec![dir.to_path_buf()];
     if let Some(up) = dir.parent() {
-        candidates.push(up.join("Resources"));
         candidates.push(up.join("lib").join("Strata"));
         candidates.push(up.join("lib").join("strata-desktop"));
     }
@@ -842,13 +841,13 @@ fn write_self_test_report(path: &str, steps: Vec<(String, bool, String)>, error:
 fn main() {
     // ------------------------------------------------------------------ self-test
     //
-    // `Strata.app/Contents/MacOS/strata-desktop --self-test[=path]` starts the App Host from the
+    // `strata-desktop --self-test[=path]` starts the App Host from the
     // *packaged resources*, waits for it to answer, checks that it serves the supplied UI, writes a
     // JSON report and exits 0/1. This is what makes the shipped artifact verifiable without a human
     // at the screen — the lesson from the Electron attempt, where a packaged app that never started
     // its host hung with no output at all.
     let args: Vec<String> = std::env::args().collect();
-    // Windows and macOS: the run log and the panic hook come first, before anything that can fail. A start that goes wrong then leaves a
+    // Windows: the run log and the panic hook come first, before anything that can fail. A start that goes wrong then leaves a
     // log, a crash file and a message box instead of a process that is gone with 0xc0000409 and nothing else (Linux: supervisor.rs).
     #[cfg(not(target_os = "linux"))]
     desktoplog::init_startup(self_test_path(&args).is_none());
@@ -880,22 +879,10 @@ fn main() {
     run_embedded();
 }
 
-/// Windows and macOS: one process owns the host and the window.
+/// Windows: one process owns the host and the window.
 #[cfg(not(target_os = "linux"))]
 fn run_embedded() {
-    let builder = tauri::Builder::default();
-    // macOS: WKWebView ends the page's web content process under memory pressure and leaves a blank window; the page is loaded again (#5079).
-    #[cfg(target_os = "macos")]
-    let builder = builder.on_web_content_process_terminate(|webview| {
-        let port = webview.app_handle().state::<HostPort>().0.lock().ok().and_then(|p| *p);
-        let Some(port) = port else { return };
-        let failed = webview.url().ok().map(|u| u.to_string());
-        let target = webview.clone();
-        on_renderer_failure(format!("http://127.0.0.1:{port}"), recovery::Failure::RendererExited, "web content process terminated".to_string(), failed, move |url| {
-            if let Ok(url) = url.parse::<tauri::Url>() { let _ = target.navigate(url); }
-        });
-    });
-    builder
+    tauri::Builder::default()
         // First, as the plugin requires: a second launch ends here after telling the running app to show itself.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
@@ -968,7 +955,7 @@ fn open_window(app: &tauri::App, port: u16, shell_token: &str) -> Result<(), Box
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url)).title("Strata").inner_size(1440.0, 920.0).min_inner_size(900.0, 600.0);
     // Dropping pictures on the chat (QA report 1, item 4). Windows: the shell's own file-drop handler is off, because with it on the system hands
     // the dropped file to the shell and the page never sees it; with it off the page gets ordinary drag and drop events (apps/host DropZone), as
-    // in a browser. Linux and macOS: the page gets the drag events but WebKit gives it no files, so the handler stays on and the shell passes the
+    // in a browser. Linux: the page gets the drag events but WebKit gives it no files, so the handler stays on and the shell passes the
     // drop on (see drop_script and hand_over_drop below).
     #[cfg(windows)]
     let builder = builder.disable_drag_drop_handler();
@@ -1419,7 +1406,6 @@ mod tests {
     fn packaged_resources_are_found_for_each_platform_layout() {
         let root = scratch("layout");
         for (exe_rel, res_rel) in [
-            ("Contents/MacOS/strata-desktop", "Contents/Resources"),
             ("install/strata-desktop.exe", "install"),
             ("usr/bin/strata-desktop", "usr/lib/Strata"),
         ] {

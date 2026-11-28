@@ -22,7 +22,7 @@ import package_engine  # noqa: E402
 
 WINDOWS = os.name == "nt"
 HERE = components.host_platform()
-EXE = "strata.exe" if WINDOWS else "strata"
+EXE = "strata-q38.exe" if WINDOWS else "strata-q38"
 LIB = "cudart64_13.dll" if WINDOWS else "libcudart.so.13"
 
 
@@ -95,24 +95,26 @@ class Manifest(unittest.TestCase):
         import feed_tool
         folder = self.package()
         elf = bytes([0x7f]) + b"ELF" + bytes(60)
-        for name in ("strata-dsv41", "strata-vision"):                    # ELF programs without execute bits (copied over from Windows)
+        for name in ("strata-ds41", "strata-vision"):                     # ELF programs without execute bits (copied over from Windows)
             (folder / name).write_bytes(elf)
             os.chmod(folder / name, 0o644)
         (folder / "libx.so").write_bytes(elf)
         if WINDOWS:                                                       # a Linux package packed on Windows: the ELF header decides
-            self.assertEqual(feed_tool._mode(folder / "strata-dsv41", "strata-dsv41", "strata"), 0o755)
-            self.assertEqual(feed_tool._mode(folder / "strata-vision", "strata-vision", "strata"), 0o755)
+            self.assertEqual(feed_tool._mode(folder / "strata-ds41", "strata-ds41", "strata-q38"), 0o755)
+            self.assertEqual(feed_tool._mode(folder / "strata-vision", "strata-vision", "strata-q38"), 0o755)
 
-    def test_strata_dsv41_travels_beside_the_engine_and_can_be_required(self):
-        dsv = "strata-dsv41.exe" if WINDOWS else "strata-dsv41"
+    def test_the_other_engines_travel_beside_the_entrypoint_and_deepseek_can_be_required(self):
+        dsv = "strata-ds41.exe" if WINDOWS else "strata-ds41"
+        q36 = "strata-q36.exe" if WINDOWS else "strata-q36"
         with self.assertRaises(SystemExit):
             self.package(require_dsv41=True)                                  # a package without it is refused when it is required
-        self.assertNotIn(dsv, {f[0] for f in ec.read_manifest(self.package()).files})   # optional by default (Intel, Mac, Pascal ...)
+        self.assertNotIn(dsv, {f[0] for f in ec.read_manifest(self.package()).files})   # optional by default (Pascal ...)
         (self.src / dsv).write_bytes(b"dsv41-binary-" * 50)
+        (self.src / q36).write_bytes(b"q36-binary-" * 50)
         other = self.root / "again"
         other.mkdir()
         folder = package_engine.build(self.src, "cuda", "0.1.46", HERE, other, archs=("sm_86",), build_id="x", require_dsv41=True)
-        self.assertIn(dsv, {f[0] for f in ec.read_manifest(folder).files})
+        self.assertTrue({dsv, q36} <= {f[0] for f in ec.read_manifest(folder).files})
         self.assertEqual(package_engine.main(["--verify", str(folder), "--require-dsv41"]), 0)
         (self.src / dsv).unlink()
         plain = self.root / "plain"

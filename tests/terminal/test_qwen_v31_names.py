@@ -36,9 +36,9 @@ if __name__ == "__main__":
 
 
 class AdoptUnsloth(unittest.TestCase):
-    """ENG-AMD (round 0214): `strata launch` refused every Unsloth set on an Intel Arc card because adopt.FAMILIES lacked "unsloth"."""
+    """ENG-AMD (round 0214): `strata launch` refused every Unsloth set it had to adopt because adopt.FAMILIES lacked "unsloth"."""
 
-    def _plan(self, tmp, model, hub, n, backend="sycl", family="unsloth"):
+    def _plan(self, tmp, model, hub, n, backend="hip", family="unsloth"):
         from pathlib import Path
         from strata_cli.launch import adopt
         d = Path(tmp) / "data"
@@ -55,20 +55,19 @@ class AdoptUnsloth(unittest.TestCase):
                                    backend=backend, pack_name=f"unsloth-{model.lower()}")
         return cfg, problems
 
-    def test_every_new_set_is_written_for_an_arc_card(self):
+    def test_every_new_set_is_adopted(self):
         import tempfile
-        from unittest import mock
         from strata_cli.launch import adopt
         self.assertIn("unsloth", adopt.FAMILIES)
         for model, hub, n in (("UD-IQ1_M", "UD-IQ1_M", 3), ("UD-Q2_0", "UD-Q2_0", 3), ("UD-IQ2_XS", "UD-IQ2_XS", 3), ("UD-Q2_K_XL", "UD-Q2_K_XL", 4),
                               ("UD-IQ3_XXS", "UD-IQ3_XXS", 4), ("UD-Q3_K_XL", "UD-Q3_K_XL", 4), ("UD-IQ4_XS-v31", "UD-IQ4_XS", 4), ("UD-Q4_K_XL", "UD-Q4_K_XL", 4)):
-            with self.subTest(model=model), tempfile.TemporaryDirectory() as t, mock.patch.object(adopt, "intel_driver", return_value="i915"):
+            with self.subTest(model=model), tempfile.TemporaryDirectory() as t:
                 cfg, problems = self._plan(t, model, hub, n)
                 self.assertEqual(problems, [])
                 a = cfg["args"]
                 self.assertTrue(a[a.index("--native") + 1].endswith(f"{hub}-00001-of-{n:05d}.gguf"))
                 self.assertNotIn("--ple-gguf", a)            # the engine finds the n-gram table by its tensor name (setup.py writes no --ple-gguf for 3+ shards)
-                self.assertEqual(cfg["backend"], "sycl")
+                self.assertEqual(cfg["backend"], "hip")
 
     def test_the_other_families_still_pass_the_table_shard(self):
         import tempfile
@@ -79,4 +78,4 @@ class AdoptUnsloth(unittest.TestCase):
             self.assertIn("--ple-gguf", cfg["args"])
         with tempfile.TemporaryDirectory() as t:
             self.assertEqual(adopt.plan(family="deepseek41", model="x", model_dir=t, data_dir=t, src=t, context=1, kv=None, model_name="x",
-                                        family_def={}, log=t, backend="sycl")[0], None)
+                                        family_def={}, log=t, backend="hip")[0], None)

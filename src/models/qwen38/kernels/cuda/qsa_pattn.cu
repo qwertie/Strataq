@@ -23,7 +23,7 @@
 #include <cstring>
 
 #if !defined(__HIPCC__) && defined(STRATA_EXPERIMENTAL_SM60)
-#define STRATA_PATTN_BUILT 1   // the CUDA build with STRATA_EXPERIMENTAL_SM60 only (not HIP, not Metal)
+#define STRATA_PATTN_BUILT 1   // the CUDA build with STRATA_EXPERIMENTAL_SM60 only (not HIP)
 #include <cuda_fp16.h>
 #else
 #define STRATA_PATTN_BUILT 0

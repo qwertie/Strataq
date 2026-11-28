@@ -49,9 +49,8 @@
           - id: qwen3.8-flash-next
             name: Qwen3.8-Flash-Next (local)
             # These are the *actual* limits the selected local profile reports, not catalog
-            # defaults. Setup recommends 32K below 96 GB unified memory and measures to 32K; see
-            # docs/MAC.md. Over-claiming here would let the agent build a request the engine
-            # refuses mid-turn.
+            # defaults. Over-claiming here would let the agent build a request the engine refuses
+            # mid-turn.
             contextWindow: 32768
             # Sized against the *whole* request, not just the visible prompt: the Harness system
             # prompt plus its tool definitions is already ~29K tokens of the 32K window, so an 8K
@@ -59,8 +58,8 @@
             # "request exceeds the context window ... requests are never truncated".
             # The worker will not silently shrink a request, which is correct; the route must
             # declare a budget that fits. The real-machine profile should either raise the engine's
-            # context (docs/MAC.md measures to 32K, and the model supports more) or set the engine
-            # config's `fit_max_tokens` so the server trims with a label rather than refusing.
+            # context (the model supports more) or set the engine config's `fit_max_tokens` so the
+            # server trims with a label rather than refusing.
             maxTokens: 2048
             input:
               - text

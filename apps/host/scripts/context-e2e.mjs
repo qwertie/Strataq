@@ -25,7 +25,7 @@ import { countTokens } from '../server/agent/context-fit.mjs';
 const REPO = join(import.meta.dirname, '..', '..', '..');
 const env = (name, fallback) => process.env[name] ?? fallback;
 const DOCS = env('E2E_DOCS', 'C:\\Users\\AI-Server\\Documents\\Strata');
-const ENGINE = env('E2E_ENGINE', 'C:\\Users\\AI-Server\\Desktop\\Strata\\GitHub\\wt-023-int\\build-cuda\\strata.exe');
+const ENGINE = env('E2E_ENGINE', 'C:\\Users\\AI-Server\\Desktop\\Strata\\GitHub\\wt-023-int\\build-cuda\\strata-q38.exe');
 const PROFILE = env('E2E_EXPERT_PROFILE', 'C:\\Users\\AI-Server\\AppData\\Local\\Programs\\Strata\\control\\data\\expert-profile.bin');
 const PYTHON = env('E2E_PYTHON', 'python');
 const PORT = Number(env('E2E_PORT', '18590'));

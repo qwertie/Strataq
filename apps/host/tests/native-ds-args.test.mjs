@@ -1,19 +1,18 @@
 /**
- * The options the app hands to the DeepSeek engine (strata-dsv41), which exits with "unknown option X" on a name it does not take:
+ * The options the app hands to the DeepSeek engine (strata-ds41):
  *  - #4358 #4359 #4505 #4507: a model with pictures off had its `--vision off` pair cut in half (`--eos 1 off --dspark auto`);
- *  - #4504: the Settings field "GPU memory for other apps" wrote --vram-reserve-mib, the resource preference wrote --pool-workers.
+ *  - the resource preference writes no Qwen-engine options into a DeepSeek model's file.
  * Nothing here starts an engine: Control is a fake that records the run config the host saved for the start (a scratch profile,
  * never the real one).
  */
 import './helpers/isolate-profile.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { createNativeControl } from '../server/native-control.mjs';
-import { DS_VALUE_FLAGS, DS_SWITCH_FLAGS, DS_RENAMED, dsEngineArgs, dsUserArgs, dsArgsNote, withoutVisionFlag } from '../server/native-ds-args.mjs';
+import { withoutVisionFlag } from '../server/native-vision-flag.mjs';
 
 const DS_ARGS = ['--pack', '/p/ds', '--max-context', '32768', '--eos', '1', '--vision', 'off', '--dspark', 'auto', '--dspark-conf', '0.65', '--prefill-chunk', '1024'];
 
@@ -48,53 +47,6 @@ function strayWords(args, valued) {
   }
   return stray;
 }
-
-test('the DeepSeek option list is a subset of what ds4_main.cpp and ds4_options.cpp parse (it cannot drift ahead of the engine)', () => {
-  const sources = [
-    'src/models/deepseekv41/ds4_main.cpp', 'src/models/deepseekv41/ds4_options.cpp',
-    'include/strata/common/serve/option_names.hpp',
-  ].map(f => fileURLToPath(new URL(`../../../${f}`, import.meta.url)));
-  if (!sources.every(existsSync)) return;                            // a package without the engine source
-  const [main, options, aliases] = sources.map(f => readFileSync(f, 'utf8'));
-  const text = [main, options].join('\n');
-  const parsed = new Set([...text.matchAll(/a == "(-{1,2}[a-z][a-z0-9-]*)"/g)].map(m => m[1]));
-  for (const [, oldName, primary] of aliases.matchAll(/\{"([^"]+)", "([^"]+)"\}/g)) {
-    if (parsed.has(primary))
-      parsed.add(oldName);
-  }
-  assert.ok(parsed.has('--eos-ids') && parsed.has('--reserve-mib'), 'the pattern found the engine option parser');
-  for (const flag of [...DS_VALUE_FLAGS, ...DS_SWITCH_FLAGS, ...Object.keys(DS_RENAMED), ...Object.values(DS_RENAMED)])
-    assert.ok(parsed.has(flag), `${flag} is not an option of strata-dsv41`);
-  assert.ok(!parsed.has('--pool-workers'), '--pool-workers is rejected by strata-dsv41');
-});
-
-test('dsEngineArgs renames --vram-reserve-mib, leaves out --pool-workers with its value and keeps the --vision pair', () => {
-  const r = dsEngineArgs([...DS_ARGS, '--vram-reserve-mib', '512', '--pool-workers', '20', '--resident-budget-gib', '40']);
-  assert.deepEqual(r.args, [...DS_ARGS, '--reserve-mib', '512']);
-  assert.deepEqual(r.renamed, [{ from: '--vram-reserve-mib', to: '--reserve-mib' }]);
-  assert.deepEqual(r.dropped.map(d => [d.flag, d.value]), [['--pool-workers', '20'], ['--resident-budget-gib', '40']]);
-  assert.match(dsArgsNote(r), /--vram-reserve-mib is passed as --reserve-mib/);
-  assert.match(dsArgsNote(r), /--pool-workers 20, --resident-budget-gib 40/);
-  assert.equal(dsArgsNote(dsEngineArgs(DS_ARGS)), '', 'nothing changed, nothing said');
-});
-
-test('dsEngineArgs keeps primary EOS and context names compatible with older installed engines', () => {
-  assert.deepEqual(dsEngineArgs(['--eos-ids', '1,2', '--ctx', '8192']).args,
-    ['--eos', '1,2', '--max-context', '8192']);
-});
-
-test('dsEngineArgs: a reserve under both names keeps the engine\'s own, a switch at the end and values that look like numbers survive', () => {
-  assert.deepEqual(dsEngineArgs(['--reserve-mib', '300', '--vram-reserve-mib', '512']).args, ['--reserve-mib', '300']);
-  assert.deepEqual(dsEngineArgs(['--pack', '/p', '--no-expert-cache']).args, ['--pack', '/p', '--no-expert-cache']);
-  assert.deepEqual(dsEngineArgs(['--pool-workers']).args, [], 'a flag with no value');
-  assert.deepEqual(dsEngineArgs(['--spec', '4', '--tp', '2', '--kv', 'int8', '--experts', 'auto']).args, ['--tp', '2', '--experts', 'auto']);
-  assert.deepEqual(dsEngineArgs(undefined).args, []);
-});
-
-test('dsUserArgs drops what the engine rejects and keeps the options it takes and the app\'s reserve', () => {
-  assert.deepEqual(dsUserArgs(['--pool-workers', '20', '--vram-reserve-mib', '512', '--cpu-threads', '8']), ['--vram-reserve-mib', '512', '--cpu-threads', '8']);
-  assert.deepEqual(dsUserArgs(['--pool-workers', '20']), []);
-});
 
 test('withoutVisionFlag takes the Qwen engine\'s stand-alone --vision out, and a picture word an old file left after it', () => {
   assert.deepEqual(withoutVisionFlag(['--max-context', '4096', '--vision', '--kv', 'int8']), ['--max-context', '4096', '--kv', 'int8']);
@@ -171,22 +123,6 @@ test('a DeepSeek pack with the tower and `--vision off` in its arguments: Read p
     }
     assert.deepEqual(got, ['on', 'off'], 'no tower in the pack: the engine is not told to read pictures');
   } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test('#4504: the reserve field and the resource preference reach strata-dsv41 as --reserve-mib, with no --pool-workers', async () => {
-  const f = fixture({ vram_reserve_mib: 512, ui_resource_profile: 'work', args: [...DS_ARGS, '--pool-workers', '20', '--vram-reserve-mib', '512'], args_written: [...DS_ARGS, '--pool-workers', '20', '--vram-reserve-mib', '512'], user_args: ['--pool-workers', '20'] });
-  try {
-    await f.native.refresh(true);
-    const job = await finish(f.native, f.native.operation('load', { model: f.id, vision: 'no', resourceProfile: 'work' }).id);
-    assert.equal(job.state, 'done', job.error);
-    const saved = f.saved[0], args = saved.args;
-    assert.ok(!args.includes('--pool-workers') && !args.includes('20'), args.join(' '));
-    assert.ok(!args.includes('--vram-reserve-mib'), args.join(' '));
-    assert.equal(args[args.indexOf('--reserve-mib') + 1], '512', args.join(' '));
-    assert.equal(args.filter(a => a === '--reserve-mib').length, 1);
-    assert.ok(!(saved.user_args ?? []).includes('--pool-workers'), 'the person\'s saved options lose it too');
-    for (const flag of args.filter(a => a.startsWith('--'))) assert.ok(DS_VALUE_FLAGS.has(flag) || DS_SWITCH_FLAGS.has(flag), `${flag} is an option of strata-dsv41`);
-  } finally { await f.native.close(); f.cleanup(); }
 });
 
 test('the resource preference no longer writes Qwen-engine options into a DeepSeek model\'s file when it is tuned', async () => {

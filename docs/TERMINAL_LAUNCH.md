@@ -20,7 +20,7 @@ strata launch --stop
 
 ## Install (one line)
 
-Linux and Mac:
+Linux:
 
 ```sh
 curl -fsSL https://github.com/qwertie/Strataq/releases/latest/download/install.sh -o install.sh && sh install.sh
@@ -95,7 +95,7 @@ strata launch --show-key
 | `--vision off\|on\|gpu\|cpu` | Picture reading. Default: on when the model and the engine can. |
 | `--parallel N` | Requests answered at the same time, 1 to 8. Default: fit to your card; DeepSeek: one at a time. |
 | `--mtp on\|off` | The draft layer. `off` saves about 1 GB of graphics memory and is slower. Default: on. |
-| `--drafting auto\|mtp\|dflash2\|off` | Which drafter guesses ahead. `dflash2` is for Qwen3.8-Flash-Next only and downloads its drafter once (0.34 GB for the models that have a tuned drafter, 0.52 GB on Intel Arc, else 1.2 GB). If it cannot run, MTP is used and the start says why. |
+| `--drafting auto\|mtp\|dflash2\|off` | Which drafter guesses ahead. `dflash2` is for Qwen3.8-Flash-Next only and downloads its drafter once (0.34 GB for the models that have a tuned drafter, else 1.2 GB). If it cannot run, MTP is used and the start says why. |
 | `--gpu LIST`, `--gpu-roles LIST` | Which cards to use, and a role per card. |
 | `--tune quick\|thorough\|skip`, `--tune-allow-small`, `--retune` | Tuning. `--retune` measures again; a model tuned before for the same choices on this computer reuses the stored result. |
 | `--set KEY=VALUE` | An advanced engine setting or `STRATA_*` variable (repeatable). Unknown names get a warning. |
@@ -229,25 +229,21 @@ already exist. Nothing is copied or moved.
 (Enter means yes; `--yes` skips the question), downloads the model, and ends with a message that names the problem and the next step.
 The exit code is 0 and nothing is started.
 
-## Intel Arc and cards of different makes
+## Cards of different makes
 
-- **Intel Arc:** the Terminal downloads the released Linux SYCL engine, but its model preparation for Arc is a container build that it does not
-  run. If the model's files and prepared pack are already on disk, `strata launch` writes the run settings itself. Otherwise it reports the preparation problem. Use
-  [Intel setup](INTEL_ARC.md) for the preparation route.
-- **Mixed makes:** one engine drives the cards of one make (CUDA: NVIDIA, HIP: AMD). Only those cards are offered, and a model is never
-  split across makes. Two models at once, one per make, is not supported. If the other make has the bigger card, you get one line saying so.
+One engine drives the cards of one make (CUDA: NVIDIA, HIP: AMD). Only those cards are offered, and a model is never
+split across makes. Two models at once, one per make, is not supported. If the other make has the bigger card, you get
+one line saying so. Strataq has no engine for Intel Arc cards.
 
 ## Limits
 
 - The model download uses `setup.py` in its control mode (no pip, no engine fetch, no compiler), as the desktop app does. It needs internet and room for the files.
-- The Linux SYCL package updates through `strata update`. Do not copy it into the components folder by hand.
 
-### Choose a page-pool engine
+### The page-pool engines
 
-The original engines stay the default. To use an installed `strata-ds41` or `strata-q38`, pass its full path with
-`--set exe=C:/engines/strata-ds41.exe` (DeepSeek) or `--set exe=C:/engines/strata-q38.exe` (Qwen3.8).
-This sets the existing server config's `exe`; it is saved with presets. Keep the matching runtime libraries beside
-the program or in the config's `lib_dirs`. `--parallel` sets the starting conversations at once; it can change
-live in the Memory panel. Context and GPU choices carry over. Unsupported options are logged and left out.
+Qwen3.8 runs on `strata-q38` and DeepSeek on `strata-ds41`. To run an engine you built yourself, pass its full path
+with `--set exe=C:/engines/strata-q38.exe`. This sets the server config's `exe`; it is saved with presets. Keep the
+matching runtime libraries beside the program or in the config's `lib_dirs`. `--parallel` sets the starting
+conversations at once; it can change live in the Memory panel. Context and GPU choices carry over. Unsupported options are logged and left out.
 Pool sizes use `--set gpu-mib=18432 --set ram-mib=8192`; `tokens-min` and `tokens-max` are engine options too.
-See [the measured speeds and limits](MODELS.md#try-the-page-pool-engine).
+See [the measured speeds and limits](MODELS.md#the-page-pool-engine).

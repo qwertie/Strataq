@@ -165,6 +165,5 @@ for the default and 0 MiB with the flag.
 
 - This change on upstream main (0.1.43.1) was compiled for CUDA (13.0, sm_120, MSVC, Windows) and checked with the
   short run above. The longer measurements come from the 0.1.41 build.
-- HIP (the same sources) and SYCL. On SYCL, `Prefill::init` refuses the hybrid layout; the SYCL engine has no flag
-  for it.
+- HIP (the same sources).
 - Linux, multi-GPU, `--batch` and `--pipeline-windows` (all refused), and models other than Qwen3.8-Flash-Next IQ3_XXS.

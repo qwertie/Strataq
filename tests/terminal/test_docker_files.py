@@ -64,14 +64,6 @@ class Scripts(unittest.TestCase):
             self.assertTrue({"dsv41/pack_gguf", "dsv41/tune"} <= tools)          # the nested ones this assertion exists for
             for name in sorted(tools):
                 self.assertTrue((ctx / "terminal-src" / "tools" / f"{name}.py").is_file(), f"build.sh did not copy tools/{name}.py into the context")
-            # the Mac repack scripts the bundle carries (the v0.2.11 image build stopped at "No such file ... metal/tools/metal_repack.py")
-            metal: set[str] = set()
-            for node in pt.body:
-                if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "INSTALLER_METAL_TOOLS" for t in node.targets):
-                    metal.update(ast.literal_eval(node.value))
-            self.assertTrue(metal)
-            for name in sorted(metal):
-                self.assertTrue((ctx / "terminal-src" / "metal" / "tools" / f"{name}.py").is_file(), f"build.sh did not copy metal/tools/{name}.py into the context")
 
     def test_scripts_use_unix_line_ends(self):
         for name in ("entrypoint.sh", "strata-wrapper.sh", "healthcheck.sh", "build.sh", "publish.sh"):
@@ -115,7 +107,7 @@ class Compose(unittest.TestCase):
         return data
 
     def test_common_settings(self):
-        for name in ("docker-compose.nvidia.yml", "docker-compose.amd.yml", "docker-compose.intel.yml"):
+        for name in ("docker-compose.nvidia.yml", "docker-compose.amd.yml"):
             svc = self.load(name)["services"]["strata"]
             self.assertIn("strata-data:/data", svc["volumes"], name)
             self.assertEqual(svc["ulimits"]["memlock"], {"soft": -1, "hard": -1}, name)
@@ -136,9 +128,6 @@ class Compose(unittest.TestCase):
         self.assertIn("/dev/dri:/dev/dri", amd["devices"])
         self.assertIn("video", amd["group_add"])
         self.assertTrue(any("render" in str(g).lower() or "RENDER" in str(g) for g in amd["group_add"]))
-        intel = self.load("docker-compose.intel.yml")["services"]["strata"]
-        self.assertIn("/dev/dri:/dev/dri", intel["devices"])
-        self.assertNotIn("/dev/kfd:/dev/kfd", intel["devices"])
 
 
 @unittest.skipIf(SH is None, "needs sh")
@@ -213,10 +202,9 @@ class Document(unittest.TestCase):
 
     def test_tags_in_the_document_match_the_compose_defaults(self):
         doc = (ROOT / "docs" / "DOCKER.md").read_text(encoding="utf-8")
-        for tag in ("0.2.7-cuda13", "0.2.7-cuda12", "0.2.7-rocm-gfx120x", "0.2.7-rocm-gfx110x", "0.2.7-rocm-gfx1151", "0.2.7-sycl"):
+        for tag in ("0.2.7-cuda13", "0.2.7-cuda12", "0.2.7-rocm-gfx120x", "0.2.7-rocm-gfx110x", "0.2.7-rocm-gfx1151"):
             self.assertIn(tag, doc)
-        for name, tag in (("docker-compose.nvidia.yml", "ghcr.io/niko1221/strata:0.2.7-cuda13"), ("docker-compose.amd.yml", "ghcr.io/niko1221/strata:0.2.7-rocm-gfx120x"),
-                          ("docker-compose.intel.yml", "ghcr.io/niko1221/strata:0.2.7-sycl")):
+        for name, tag in (("docker-compose.nvidia.yml", "ghcr.io/niko1221/strata:0.2.7-cuda13"), ("docker-compose.amd.yml", "ghcr.io/niko1221/strata:0.2.7-rocm-gfx120x")):
             self.assertIn(tag, (DOCKER / "compose" / name).read_text(encoding="utf-8"))
 
     def test_the_user_doc_says_images_are_published_from_0_2_1(self):
@@ -245,7 +233,7 @@ class Publishing(unittest.TestCase):
         src = (DOCKER / "fetch-engines.py").read_text(encoding="utf-8")
         flavors = re.findall(r'^    "([a-z0-9-]+)": \("', src, re.M)
         doc = (ROOT / "docs" / "DOCKER.md").read_text(encoding="utf-8")
-        self.assertTrue({"cuda13", "cuda12", "rocm-gfx120x", "rocm-gfx110x", "rocm-gfx1151", "sycl"} <= set(flavors), flavors)
+        self.assertTrue({"cuda13", "cuda12", "rocm-gfx120x", "rocm-gfx110x", "rocm-gfx1151"} <= set(flavors), flavors)
         for flavor in flavors:
             self.assertIn(f"0.2.7-{flavor}", doc)
 

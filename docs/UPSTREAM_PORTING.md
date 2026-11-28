@@ -28,19 +28,18 @@ a change over.
 
 ## Special cases
 
-- **A change to a file and its SYCL copy** (`src/X` and `sycl/src/X`): where the two are now one shared file,
-  apply it once. Where the SYCL copy is still separate, apply it to both, as upstream did. The files shared since A6
-  are listed in `sycl/tools/normalize.sh` (`shared`): apply upstream's change to `src/X` or `include/strata/X` only,
-  drop the hunks for the `sycl/` copy, and build SYCL. If the change uses a CUDA name the SYCL build lacks, add the
-  name to `sycl/include/sycl_compat/cuda_runtime.h`; do not bring the copy back.
-- **A change to only the SYCL copy** of a file that is now shared: decide whether it is a SYCL-only difference.
-  If it is, it goes behind the SYCL side of the shared interface; otherwise apply it to the shared file.
+- **Changes with no destination.** This fork deleted the Mac engine (`metal/`), the Intel Arc engine (`sycl/`), the
+  original Qwen3.8 engine (the `main()` of `src/program/generate.cpp`, `strata`) and the old DeepSeek engine (the
+  `serve` of `src/models/deepseekv41/ds4_main.cpp`, `strata-dsv41`). Skip hunks for those, and for setup's and the
+  Terminal's Mac, Intel and `--engine` paths. Record the skip in the [log](#log). A hunk in such a file can still
+  fix code that the paged engines share: check the shared file the hunk calls into.
 - **A change to code that this fork merged** (for example DeepSeek's own sampler header, replaced by the shared
   one): check whether the change also applies to the shared code; often the shared code already has it.
-- **A change to the 14,800-line `main()` in `src/program/generate.cpp`**: the code has moved into libraries
-  under `src/common/` and `src/models/qwen38/`. Find it by a function or log-message name from the hunk. The part
+- **A change to the 14,800-line `main()` in `src/program/generate.cpp`**: that `main()` is deleted, but much of its
+  code had moved into libraries under `src/common/` and `src/models/qwen38/` that `strata-q38` uses. Find it by a
+  function or log-message name from the hunk; if it is not there, the hunk has no destination. The part
   from `set_coupled_draft` to "session is up" (the model loading) is `Model::load` in `src/models/qwen38/model.cpp`,
-  as it was: its locals that the rest of `main()` uses are `Model`'s members, which `main()` binds to their old names.
+  as it was: its locals that the rest of `main()` used are `Model`'s members.
   The command line (`usage`, the option loop, the per-device defaults, the process set-up before the first GPU call)
   is in `src/models/qwen38/options.cpp`; the residency tables and the token graph are `Model::build_hit_tables`; the
   CLI run's prompt path and verify windows are `Conversation` (`src/models/qwen38/conversation.cpp`).
@@ -50,7 +49,8 @@ a change over.
 ## Path map
 
 Old paths are upstream's. Status is `planned` until the step is done, then `done`. Each refactor commit that moves
-code updates its rows here. Rows are grouped by step; `{a,b}` lists several files of one folder.
+code updates its rows here. Rows for `sycl/` and `metal/` and for `generate.cpp`'s `main()` are history: those were
+deleted later. Rows are grouped by step; `{a,b}` lists several files of one folder.
 
 | Upstream path | Path here | Step | Status |
 |---|---|---|---|

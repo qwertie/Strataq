@@ -117,7 +117,7 @@ test('a plain load fetches the tuned drafter with the 12 hour rule, then plans a
   } finally { await f.native.close(); f.cleanup(); }
 });
 
-/* CLEAN-1A (owner 11-07): the plain Load follows Auto everywhere. Where Auto's drafter is the standard DFlash2 pack (Intel Arc, UD-Q4_K_XL on NVIDIA 72 GB / 12 GB and the Spark), Control says `needed` without `tuned_needed`; the app fetches it just the same, asking Control. */
+/* CLEAN-1A (owner 11-07): the plain Load follows Auto everywhere. Where Auto's drafter is the standard DFlash2 pack (UD-Q4_K_XL on NVIDIA 72 GB / 12 GB and the Spark), Control says `needed` without `tuned_needed`; the app fetches it just the same, asking Control. */
 const STOCK_PLAN = { ...TUNED_PLAN, tuned_needed: false, tuned: false, gb: 1.2, drafter_gb: 1.2 };
 const stockAfterFetch = (_o, state) => (state.fetchCalls.length ? { ...STOCK_PLAN, needed: false, gb: 0 } : STOCK_PLAN);
 

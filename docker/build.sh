@@ -4,14 +4,13 @@
 #
 #   docker/build.sh --flavor cuda --engine ~/pkgs/0.1.45.3-linux-x86_64-cuda-cuda13 --tag strata:0.2.7-cuda13
 #   docker/build.sh --flavor hip  --engine ~/pkgs/0.1.45.3-linux-x86_64-hip-gfx120X  --tag strata:0.2.7-rocm-gfx120x
-#   docker/build.sh --flavor sycl --engine ~/pkgs/0.1.45.3-linux-x86_64-sycl         --tag strata:0.2.7-sycl
 #
 # --engine is the package FOLDER that packaging/package_engine.py wrote (engine-component.json inside). It can be given more than
 # once to put several packages in one image (the Terminal picks the one that fits the card).
 #
-#   --flavor cuda|hip|sycl   which system libraries the runtime adds (see docker/Dockerfile)
+#   --flavor cuda|hip        which system libraries the runtime adds (see docker/Dockerfile)
 #   --tag NAME               image name (default strata:<version>-<flavor>)
-#   --base IMAGE             base image (default ubuntu:24.04; sycl: ubuntu:26.04)
+#   --base IMAGE             base image (default ubuntu:24.04)
 #   --repo DIR               the Strata source tree (default: the one this script is in)
 #   --version V              label (default: read from CMakeLists.txt)
 #   --ctx DIR                keep the build context here (default: a temporary folder, removed after the build)
@@ -41,10 +40,10 @@ $2"; shift 2 ;;
     *) echo "build.sh: unknown option $1" >&2; exit 2 ;;
   esac
 done
-[ -n "$flavor" ] || { echo "build.sh: --flavor cuda|hip|sycl is required" >&2; exit 2; }
-case "$flavor" in cuda|hip|sycl) ;; *) echo "build.sh: --flavor must be cuda, hip or sycl" >&2; exit 2 ;; esac
+[ -n "$flavor" ] || { echo "build.sh: --flavor cuda|hip is required" >&2; exit 2; }
+case "$flavor" in cuda|hip) ;; *) echo "build.sh: --flavor must be cuda or hip" >&2; exit 2 ;; esac
 [ -n "$engines" ] || { echo "build.sh: --engine <package folder> is required" >&2; exit 2; }
-[ -n "$base" ] || { [ "$flavor" = sycl ] && base=ubuntu:26.04 || base=ubuntu:24.04; }
+base=${base:-ubuntu:24.04}
 if [ -z "$version" ]; then
   version=$(sed -n 's/^[[:space:]]*project([^)]*VERSION[[:space:]]*\([0-9][0-9.]*\).*/\1/p' "$repo/CMakeLists.txt" | head -1)
   version=${version:-dev}
@@ -64,9 +63,7 @@ case "$commit" in *[!0-9a-f]*|"") commit="" ;; esac
 # tools/: every .py at any depth, because the bundle's DeepSeek scripts are nested (INSTALLER_SCRIPTS in package_terminal.py names dsv41/*:
 # the Dockerfile's terminal stage stops at "installer tool missing: tools/dsv41/tune.py" when only the top-level modules are in the context)
 cd "$repo"
-# metal/tools/: the two repack scripts the bundle carries (INSTALLER_METAL_TOOLS in package_terminal.py; without them the terminal stage
-# stops at "No such file or directory: '/src/metal/tools/metal_repack.py'", as the v0.2.11 image build did)
-paths="packaging bin strata.py strata_base strata_common strata_control strata_cli strata_server requirements.txt requirements-monitor.txt docs/MANAGEMENT_PROTOCOL.md docs/TERMINAL_LAUNCH.md data bench/prompts/standard-v1 setup.py ref/load.py CMakeLists.txt metal/tools/metal_repack.py metal/tools/stream_experts.py"
+paths="packaging bin strata.py strata_base strata_common strata_control strata_cli strata_server requirements.txt requirements-monitor.txt docs/MANAGEMENT_PROTOCOL.md docs/TERMINAL_LAUNCH.md data bench/prompts/standard-v1 setup.py ref/load.py CMakeLists.txt"
 if git rev-parse --git-dir >/dev/null 2>&1; then
   # shellcheck disable=SC2086
   { git ls-files -z -- $paths ':(glob)tools/**/*.py'; } | tar --null -T - -cf - | tar -xf - -C "$ctx/terminal-src"

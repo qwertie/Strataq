@@ -1,9 +1,9 @@
 # The code-sharing refactor
 
 This fork reorganizes Strata so that code is written once and shared: between the three model engines
-(Qwen3.8-Flash-Next, Qwen3.6-35B-A3B, DeepSeek V4.1-Flash), between the GPU backends (CUDA, HIP, SYCL, Metal)
-and between the Python programs. The goal is less code to read, change and test. Success is measured in lines
-of code (below).
+(Qwen3.8-Flash-Next, Qwen3.6-35B-A3B, DeepSeek V4.1-Flash), between the GPU backends (CUDA and HIP)
+and between the Python programs. The SYCL (Intel) and Metal (Mac) backends have since been deleted. The goal is
+less code to read, change and test. Success is measured in lines of code (below).
 
 - The target layout and its rules: [ARCHITECTURE.md](ARCHITECTURE.md).
 - Which old path goes where, and how to carry an upstream change over: [UPSTREAM_PORTING.md](UPSTREAM_PORTING.md).
@@ -38,7 +38,7 @@ session on an NVIDIA machine. Changes nobody can test come last.
 | A3 | Move every whole file whose new place is already clear, without changing it: the folders `src/platform`, `src/artifact`, `src/spec`, `src/dsv41`, `src/qwen35`, `src/ngram`, `src/plan`; from `src/core/`, the runtime files to `src/base/gpu`, the conversation files to `src/common/state` and the Qwen3.8-only files to `src/models/qwen38`; the matching files in `sycl/`. Files that must be split wait for their step. | 0 | |
 | A4 | DeepSeek's own copies of host code: `ds4_os.hpp`, `ds4_pool.hpp`, `include/strata/models/deepseekv41/sampler.hpp` | ~1K | `ds4_os.hpp` done; the pool and the sampler wait (open issues) |
 | A5 | The `src/base/gpu` runtime interface (the shared code must not call the CUDA runtime directly), then `src/common/state`, `src/common/serve`, `src/common/spec` and the one-GPU parts of `src/common/experts`. These are also the base for the planned paged-KV engine. | 3–7K | serve: all three engines; state: descriptor done, Qwen3.6 and Qwen3.8's running state on it, Qwen3.8's K/V left; spec: window planner; experts: one-GPU helpers (ExpertCache waits for the runtime interface) |
-| A6 | SYCL: the 7 files that are 95% or more the same as their `src/` original become shared | ~2.4K | done: 8 files (see [UPSTREAM_PORTING.md](UPSTREAM_PORTING.md)) |
+| A6 | SYCL: the 7 files that are 95% or more the same as their `src/` original become shared | ~2.4K | done: 8 files; moot since `sycl/` was deleted |
 
 ### Phase B: changes NVIDIA-only code; one batched test session on an NVIDIA machine
 
@@ -49,29 +49,23 @@ session on an NVIDIA machine. Changes nobody can test come last.
 | B3 | The multi-GPU parts of `src/common/experts` (`peer_experts`, `remote_experts`) | ~0.5K | kept in `src/core` (they use Qwen3.8's kernels and the CUDA runtime directly); duplicates merged, the SYCL copy of `peer_experts.hpp` dropped |
 | B✓ | Test session on an RTX 30-series machine with several cards: parity tests on sm_86, sm_75/80 through `STRATA_EMULATE_CC`, multi-GPU, a DeepSeek speed comparison. Ada (sm_89) and Blackwell (sm_120, NVFP4) stay untested unless such a card is found. | | |
 
-### Phase C: nobody here can test it (optional)
+### Phase C: removed
 
-| Step | Work | Est. | Status |
-|---|---|---:|---|
-| C1 | The other 77 SYCL copies of `src/` files (31 are 75–95% the same, 46 less) become shared | 10–25K | |
-| C2 | The SYCL kernels generated from the `.cu` sources instead of kept as translated copies | unknown | |
-
-Do Phase C only if someone with an Intel Arc card can test it.
+C1 (share the other 77 SYCL copies of `src/` files) and C2 (generate the SYCL kernels from the `.cu` sources) are moot:
+`sycl/` was deleted.
 
 ## Checks for every step
 
 | Check | Where | How |
 |---|---|---|
-| Python tests | this PC | `.venv/Scripts/python -m pytest -n 16 tests/terminal tests/architecture strata_server --ignore=tests/terminal/test_lifecycle_matrix.py` (that file leaves Monitor windows open when its flaky tests fail; run it on its own), and the tests in `tools/`, `tests/desktop`, `tests/sycl`, `tests/time_skip` and `tests/tuning` one file at a time (`for f in $(git ls-files 'tools/test_*.py' 'tools/**/test_*.py' 'tests/desktop/test_*.py' 'tests/sycl/test_*.py' 'tests/time_skip/test_*.py' 'tests/tuning/test_*.py'); do .venv/Scripts/python -m pytest -q "$f"; done`: pytest-xdist cannot collect `tools/` as a whole). pytest and pytest-xdist are installed in the repo's `.venv`. At the baseline, about 75 tests in `tests/terminal` and 12 in `tools/` already failed on this PC (process handling on Windows, a missing llama.cpp `gguf-py`), and a few time-sensitive ones fail now and then under `-n 16`, so compare the failures by name with a run of the previous commit |
+| Python tests | this PC | `.venv/Scripts/python -m pytest -n 16 tests/terminal tests/architecture strata_server --ignore=tests/terminal/test_lifecycle_matrix.py` (that file leaves Monitor windows open when its flaky tests fail; run it on its own), and the tests in `tools/`, `tests/desktop`, `tests/time_skip` and `tests/tuning` one file at a time (`for f in $(git ls-files 'tools/test_*.py' 'tools/**/test_*.py' 'tests/desktop/test_*.py' 'tests/time_skip/test_*.py' 'tests/tuning/test_*.py'); do .venv/Scripts/python -m pytest -q "$f"; done`: pytest-xdist cannot collect `tools/` as a whole). pytest and pytest-xdist are installed in the repo's `.venv`. At the baseline, about 75 tests in `tests/terminal` and 12 in `tools/` already failed on this PC (process handling on Windows, a missing llama.cpp `gguf-py`), and a few time-sensitive ones fail now and then under `-n 16`, so compare the failures by name with a run of the previous commit |
 | HIP build and GPU tests | this PC | `build-hip-win` (gfx1151, tests on): build the targets the step touches, run their `*_parity` and `*_test` programs |
 | CUDA compile | Docker on this PC | the command below; about 3 minutes after the first build |
-| SYCL compile | Docker on this PC | the command below; about 4 minutes |
 | Speed | this PC | decode and prompt speed within noise of a same-day run of the previous commit, for any step that touches engine code |
 
 The CUDA image is made once with an inline Dockerfile (`nvidia/cuda:13.0.0-devel-ubuntu24.04` plus
-build-essential, git, python3-venv, cmake 4.4.3 and ninja 1.13.2), tagged `strata-cuda-dev`. The SYCL image is
-the repo's own: `docker build --pull -t strata-sycl-dev sycl/tools`. Both build into Docker volumes, so nothing is
-written to the checkout. From Git Bash:
+build-essential, git, python3-venv, cmake 4.4.3 and ninja 1.13.2), tagged `strata-cuda-dev`. It builds into a Docker
+volume, so nothing is written to the checkout. From Git Bash:
 
 ```sh
 # CUDA: every target, both NVIDIA code families (sm_75, sm_120) and the test machine's sm_86, the DeepSeek engine
@@ -80,16 +74,10 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/work/Strata" -v strata-cuda-bu
     -DSTRATA_ENABLE_CUDA=ON -DSTRATA_BUILD_DSV41=ON -DSTRATA_NATIVE_EXPERTS=ON -DSTRATA_PORTABLE=ON \
     -DSTRATA_Q6K_EXPERTS=ON -DSTRATA_MMQ_KQUANTS=ON "-DCMAKE_CUDA_ARCHITECTURES=75-real;86-real;120-real;120-virtual" \
     -DSTRATA_GGML_DIR=/work/Strata/third_party/llama.cpp ) && cmake --build /build -j 32 && cmake --build /build --target strata_kq'
-
-# SYCL: the engine, JIT (no Intel card needed to compile)
-MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/work/Strata" -v strata-sycl-build:/build \
-  -e REPO=/work/Strata -e BUILD_DIR=/build strata-sycl-dev "cd /work/Strata && bash sycl/tools/build.sh strata"
 ```
 
 A move that changes CMake paths can leave a stale build in a volume: delete it with `docker volume rm
-strata-cuda-build` (or `strata-sycl-build`) and build again.
-
-Metal is checked only by the `metal-build` GitHub workflow, because it needs a Mac.
+strata-cuda-build` and build again.
 
 ## Rules for each step
 
@@ -118,8 +106,6 @@ Found during the work; each needs a decision or a later step.
   downloads it (137 MB) and the tests fail, at the baseline commit too. The test needs a local fake feed.
 - **A third AMD reader.** `strata_common/telemetry.py` has its own Windows display-adapter reader, which works
   differently from `engine_component`'s (it keeps cards with 2 GB or more and reads the vendor from the provider name).
-- **SYCL's upstream merge script.** `sycl/tools/merge_upstream.py` maps upstream paths straight onto `sycl/`; after the
-  A3 moves the paths no longer line up, so a merge needs the path map in [UPSTREAM_PORTING.md](UPSTREAM_PORTING.md).
 - **Two CPU worker pools, not merged.** They share an idea (one 64-bit claim word tagged with the batch, so a
   late worker cannot take a job of the next batch; spin, then sleep), but differ where the speed is decided:
 
@@ -175,7 +161,9 @@ Found during the work; each needs a decision or a later step.
 
 ## B✓ test list
 
-What the NVIDIA session has to run for the phase B steps done so far. Build as in [the checks](#checks-for-every-step)
+What the NVIDIA session has to run for the phase B steps done so far. It was written before the original Qwen3.8
+engine (`strata`, `src/program/generate.cpp`) and the old DeepSeek engine (`strata-dsv41`) were deleted; the runs
+through the engine's `--serve` below meant those engines. Build as in [the checks](#checks-for-every-step)
 (CUDA, `-DSTRATA_BUILD_DSV41=ON -DSTRATA_NATIVE_EXPERTS=ON`); compare each against the same run of the commit before
 the step. [tools/nvidia_session](../tools/nvidia_session/README.md) runs the whole list in one session, against the
 build of `87d20a5c` (before any C++ moved), and names the commits to bisect where they differ.
@@ -255,7 +243,7 @@ Windows loads the driver's `System32mdhip64_7.dll` before anything on `PATH`, s
 into a folder together with `engine\*.dll` (as `engine\strata.exe` is installed) and run it there. End-to-end checks
 use a copy of the run config with `"exe"` pointing at the engine under test and the server on another port (8091), with
 alternating runs of the two builds. Models on this PC: Qwen3.8 IQ3_S (`strata-iq3_s.json`) and Qwen3.6 UD-Q4_K_XL
-(`../Strata-data/models/qwen36-UD-Q4_K_XL`); DeepSeek V4.1 IST-DAS 2.00 bpw (`../DeepSeek-V4.1-Flash`, run config `strata-deepseek-v4.1-flash-ist-das-2.00bpw.json`; build `strata-dsv41` with `STRATA_BUILD_DSV41=ON`).
+(`../Strata-data/models/qwen36-UD-Q4_K_XL`); DeepSeek V4.1 IST-DAS 2.00 bpw (`../DeepSeek-V4.1-Flash`, run config `strata-deepseek-v4.1-flash-ist-das-2.00bpw.json`; build `strata-ds41` with `STRATA_BUILD_DSV41=ON`).
 
 ## Results
 

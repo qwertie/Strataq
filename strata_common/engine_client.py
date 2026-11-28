@@ -2,7 +2,7 @@
 progress and errors, and building its command line and environment from a run config.  Also reads the API keys a config
 names (key_list, api_key_of).
 
-Used by the API servers (strata_server/server.py, sycl/serve/server_intel.py), by the Terminal (strata_cli) and by its
+Used by the API server (strata_server/server.py), by the Terminal (strata_cli) and by its
 calibration and readiness checks (strata_control).
 """
 from __future__ import annotations
@@ -17,7 +17,6 @@ import os
 import queue
 import re
 import signal
-import struct
 import subprocess
 import sys
 import tempfile
@@ -512,10 +511,10 @@ def experts_loading_words(args: list, size: str) -> str:
 OPENS_BROWSER = False        # set in main() when the server was started with --open: only then may a message say a browser opens
 
 
-# STRATA_DS4_RESTORE_POINTS (4): the DeepSeek engines and the paged engines of both families (strata-ds41, strata-q38)
-# keep restore points where a later prompt is likely to leave this one - the request line carries marks=<pos>,...,
-# tail=<pos> and shared=<pos> - besides the points they keep on their own.  N (1-16) turns them on, and is also the
-# DeepSeek engines' cap a conversation (they read the same setting); 0: no keys, every request line as before.
+# STRATA_DS4_RESTORE_POINTS (4): the paged engines (strata-ds41, strata-q38) keep restore points where a later prompt
+# is likely to leave this one - the request line carries marks=<pos>,..., tail=<pos> and shared=<pos> - besides the
+# points they keep on their own.  N (1-16) turns them on, and is also strata-ds41's cap per conversation (it reads the
+# same setting); 0: no keys, every request line as before.
 # STRATA_DS4_RESTORE_TAIL (512): how far before the prompt's end the tail point sits (0: none).  (Project Maya #639,
 # restore points; include/strata/common/state/restore_points.hpp.)
 RESTORE_LEAST = 1024        # no point before this many tokens: such a start is read again in about the time a point costs
@@ -852,8 +851,9 @@ class _RequestOwned:
 class StrataEngine:
     """Starts a resident engine and routes generation events and command replies by identity.
 
-    Engines advertising `requests` use RUN/CANCEL and ASK envelopes. Released engines without that capability
-    retain the legacy client path so updating the Python server does not require replacing every installed engine.
+    Engines advertising `requests` (strata-q38, strata-ds41, strata-q36) use RUN/CANCEL and ASK envelopes. The
+    all-cards split engine (strata-split-N, src/split) does not: it uses the older GEN / BGEN lines and fixed batch
+    slots, which is the only reason the slot paths (generate_batched, pick_slot ...) remain.
     """
     silence_s = ENGINE_SILENCE_S         # #481: main() sets the config's engine_silence_s (survives restart())
     silent_note = None                   # why the server ended the engine itself (#481, close()): death_note says it
@@ -869,7 +869,6 @@ class StrataEngine:
     CONTROL_WAIT_S = 300.0               # how long vram() / session_file() wait for the control lines of a batch engine
     DRAIN_TIMEOUT_S = 300.0              # how long an interrupted request waits, with no line from its engine, for DONE / BADM
     QUARANTINE_S = 600.0                 # ... and how long a slot or the control lines stay held after that with no line
-    multi = 0                            # DeepSeek --parallel (READY ... multi=N): conversations the engine holds at once (batch = N too)
 
     # `last`: the figures of the engine's last DONE line.  With batch slots several requests run at once, each on its
     # own thread, so each one reads its own request's figures (Service.run records them); one at a time, the one dict.
@@ -1002,7 +1001,6 @@ class StrataEngine:
                 self.can_preempt = "preempt" in f[2:]
                 self.can_change_settings = "settings" in f[2:]
                 self.request_protocol = "requests" in f[2:]
-                self.multi = next((int(x[6:]) for x in f[2:] if x.startswith("multi=") and x[6:].isdigit()), 0)
                 break
         loading.set()
         if self.max_context <= 0:
@@ -1091,11 +1089,9 @@ class StrataEngine:
         # --batch: concurrent requests in the engine's batch slots (see generate_batched).  The engine says how many
         # it runs (INFO batch_slots=N: it may have fewer than asked, or none, when they do not fit).  Page-pool engines
         # expose their full step capacity (INFO request_capacity); --batch only seeds their scheduling.
-        asked = next((int(args[args.index(k) + 1]) for k in ("--batch", "--slots", "--parallel") if k in args), 0)
+        asked = next((int(args[args.index(k) + 1]) for k in ("--batch", "--slots") if k in args), 0)
         self.batch = int(self.info.get("request_capacity" if self.request_protocol else "batch_slots") or
                          (1 if self.request_protocol else 0))
-        if self.multi:                                  # DeepSeek --parallel: several requests at once, in its own protocol
-            self.batch = self.multi                     # (the server's parallel paths key on it: no FIFO, a request's own figures)
         if asked and self.batch != asked and not self.can_change_settings:
             print(f"[strata] parallel requests: {asked} asked, the engine runs {self.batch or 'one at a time'} "
                   "(its log says why)", flush=True)
@@ -1142,11 +1138,6 @@ class StrataEngine:
             self.arrivals = collections.deque(maxlen=64)   # monotonic times of the last requests that came for the control lines (STRATA_COALESCE_*)
             self.ctl_epoch = 0                          # how often the control lines were taken
             self.ctl = threading.Lock()                 # one admission or solo request on the control lines at a time
-        if "rid_lock" not in self.__dict__:
-            self.rid_lock = threading.Lock()
-            self.rid_n = 0                              # --parallel requests' ids (rid=): never reused, a restart goes on from here
-        self.rid_q: dict[int, queue.Queue] = {}         # this process's: rid -> that request's lines (T / PP / DONE / ERR, rid taken out)
-        self.multi_stat = ""                            # the engine's last STAT line over everything it wrote
         self._ctl_erred = False                         # #1059: the control lines ended on an ERR
         self._yielded = None                            # (slot, tokens read): the last request on them gave way
         self.wlock = threading.Lock()                   # stdin writes from several request threads
@@ -1167,8 +1158,6 @@ class StrataEngine:
         requests = getattr(self, "request_queues", {})
         request_lock = getattr(self, "request_lock", threading.Lock())
         slot_busy = self.slot_busy                      # this process's (a restart makes new ones)
-        rid_q = self.rid_q
-        multi = self.multi
         line = None
         for line in proc.stdout:
             if self.proc is proc:
@@ -1217,17 +1206,6 @@ class StrataEngine:
                 if sample is not None and self.proc is proc:
                     self.terminal_stage_sample = {**sample, "observed_monotonic": time.monotonic()}
                 continue
-            if multi:                                   # DeepSeek --parallel: `T <rid> <id>`, `PP <rid> ...`, `DONE <rid> ...`, `ERR <rid> ...`
-                head, _, rest = line.partition(" ")
-                if head in ("T", "PP", "DONE", "ERR") and rest[:1].isdigit():
-                    rid_s, _, tail = rest.partition(" ")
-                    rq = rid_q.get(int(rid_s))
-                    if rq is not None:                  # (a request that has ended: its late lines go nowhere)
-                        rq.put(head + (" " + tail if tail else "\n"))
-                    continue
-                if head == "STAT":                      # over everything the engine wrote, not one request's
-                    self.multi_stat = line
-                    continue
             if line.startswith(("BT ", "BDONE ")) and slot_q:   # --batch: a batch slot's own lines
                 try:
                     b = int(line.split()[1])
@@ -1251,8 +1229,6 @@ class StrataEngine:
             for target in requests.values():
                 target.put(None)
         for q in slot_q:
-            q.put(None)
-        for q in list(rid_q.values()):
             q.put(None)
 
     def death_note(self) -> str:
@@ -1722,7 +1698,7 @@ class StrataEngine:
     @staticmethod
     def restore_keys(sampling: dict) -> str:
         """`marks=<pos>,...`, `tail=<pos>` and `shared=<pos>`: the engine's restore points for this prompt
-        (Service.prepare puts them in `_restore` with STRATA_DS4_RESTORE_POINTS, only for the engines that read them).
+        (Service.prepare puts them in `_restore` with STRATA_DS4_RESTORE_POINTS, only for engines that read them).
         "" without: the line as before."""
         pts = sampling.get("_restore")
         if not isinstance(pts, dict):
@@ -3079,7 +3055,7 @@ class StrataEngine:
                 view[-1].update(request_id=r["request_id"], reused=r.get("reused"))
         return view
 
-    def generate(self, ids, max_new, sampling, cancel, embeddings=None, prefill_only=False):
+    def generate(self, ids, max_new, sampling, cancel, embeddings=None):
         """Yields token ids, and None as a heartbeat every 10 s while the engine is quiet (reading a long prompt):
         the HTTP layer turns it into an SSE comment, which keeps clients' watchdogs calm and notices a client that
         has gone.  A consumer that stops early (or `cancel`) makes the engine STOP, so it does not run to max_new."""
@@ -3090,21 +3066,12 @@ class StrataEngine:
         if getattr(self, "request_protocol", False):
             yield from self.generate_request(ids, max_new, sampling, cancel, embeddings)
             return
-        if getattr(self, "batch", 0) and not self.multi:
+        if getattr(self, "batch", 0):
             yield from self.generate_batched(ids, max_new, sampling, cancel, embeddings)
             return
         self.progress, self.progress_ms, self.reused = None, 0, 0
         self.prefill_tok_s_mean = None
-        # DeepSeek --parallel: the engine holds several conversations; this request is one of them (GEN ... rid=<id>), its
-        # lines come on a queue of their own and its STOP names it.  One at a time (self.multi 0): the one queue, as before.
-        rid, lines_q, stop_line = None, self.lines, "STOP\n"
-        if self.multi:
-            with self.rid_lock:
-                self.rid_n += 1
-                rid = self.rid_n
-            lines_q = queue.Queue()
-            self.rid_q[rid] = lines_q
-            stop_line = f"STOP {rid}\n"
+        lines_q = self.lines
         # logprobs: the engine writes "LP <logprob> [id:logprob ...]" right after each "T <id>" (the same
         # flush), read here before the token is yielded, so whoever takes the token finds its line in
         # lp_lines.  Not asked for = the deque stays empty and nothing on this path changes.
@@ -3112,22 +3079,12 @@ class StrataEngine:
         self.lp_lines = LPLines(cancel)
         carry = NO_LINE                  # a line read for a token's LP line, held until it is used
         # an image request takes the same sampling keys as text (#75: it used to decode greedily whatever was asked)
-        rid_key = f" rid={rid}" if rid is not None else ""
-        head = f"GENI {int(max_new)}{self.gen_keys(sampling)}{rid_key} {embeddings}" if embeddings else \
-            f"GEN {int(max_new)}{self.gen_keys(sampling)}{rid_key}"
-        if prefill_only:                                 # split serving (strata_server/split.py): read the prompt, make no token
-            if embeddings or int(max_new) != 0:
-                raise ValueError("prefill_only is a text prompt and max_new 0")
-            head = f"GEN 0 prefill=1{rid_key}"
+        head = f"GENI {int(max_new)}{self.gen_keys(sampling)} {embeddings}" if embeddings else \
+            f"GEN {int(max_new)}{self.gen_keys(sampling)}"
         try:
-            if rid is not None:                          # several requests write to the engine at once
-                self._send(f"{head} {','.join(str(int(t)) for t in ids)}")
-            else:
-                self.proc.stdin.write(f"{head} {','.join(str(int(t)) for t in ids)}\n")
-                self.proc.stdin.flush()
-        except (OSError, EngineDied):                    # the pipe is gone: the engine died (not the client)
-            if rid is not None:
-                self.rid_q.pop(rid, None)
+            self.proc.stdin.write(f"{head} {','.join(str(int(t)) for t in ids)}\n")
+            self.proc.stdin.flush()
+        except OSError:                                  # the pipe is gone: the engine died (not the client)
             raise EngineDied(f"the engine stopped unexpectedly (exit code {self.exit_code()})") from None
         done = False
         # #481: how long the engine may stay silent from here.  Until the first line: the request's first prompt
@@ -3215,7 +3172,7 @@ class StrataEngine:
             if not done:                                  # the consumer stopped early: stop the engine, drain to DONE
                 if self.can_stop:
                     try:
-                        self.proc.stdin.write(stop_line)
+                        self.proc.stdin.write("STOP\n")
                         self.proc.stdin.flush()
                     except OSError:
                         pass
@@ -3242,8 +3199,6 @@ class StrataEngine:
                         break
                     if not self.can_stop:
                         heard = time.monotonic()
-            if rid is not None:                           # this request's lines are over (a late one goes nowhere)
-                self.rid_q.pop(rid, None)
 
     @staticmethod
     def _swallow_trailing_done(lines_q, wait: float = 0.3) -> None:
@@ -3607,10 +3562,22 @@ def engine_args(cfg: dict, exe: str | None = None, *, announce: bool = True) -> 
     # so a setup run or the app rewriting "args" cannot undo them (#3216 #3215 #3270)
     if cfg.get("user_args"):
         args = user_args.merge(args, cfg["user_args"])
+    # #1322: a config with a "vision" section but without --vision in its args (written by an older setup run, or edited by
+    # hand) advertised images and then refused every picture ("this engine was started without --vision").  The section
+    # says images are wanted: start the engine with them, and keep the encoder's VRAM free as setup does for a GPU encoder
+    # (only when the config has no reserve of its own).
+    if isinstance(cfg.get("vision"), dict) and "--vision" not in args:
+        args.append("--vision")
+        note = "added --vision"
+        if cfg["vision"].get("gpu") and not {"--vram-reserve-mib", "--reserve-mib"} & set(args):
+            args += ["--vram-reserve-mib", "700"]
+            note += " and --vram-reserve-mib 700"
+        print(f'[strata] the config has a "vision" section but no --vision in its args: {note} (run setup again with '
+              "--vision to write them)", flush=True)
     if paged_launch.is_paged_engine(cfg):
         if layer_split_of(cfg) and "--layer-split" not in args:
             args += ["--layer-split", layer_split_value(cfg)]
-        args += parallel_args(cfg, args)
+        args += parallel_args(cfg, args) + pool_cores_args(cfg, args)
         return paged_launch.translate_args(cfg, args)
     # "drafting": auto | mtp | dflash2 | off (strata_common/drafting.py; the Models screen and `strata launch --drafting` write it): which drafter
     # guesses ahead. ONE drafter per run: DFlash2 alone (no --mtp, --draft-fallback none) or the MTP alone (no DFlash2 option). Auto is DFlash2 where the engine
@@ -3634,9 +3601,9 @@ def engine_args(cfg: dict, exe: str | None = None, *, announce: bool = True) -> 
         elif decision.flags:
             print(f"[strata] drafting: DFlash2 alone ({' '.join(decision.flags[:2])}, --draft-conf {args[args.index('--draft-conf') + 1] if '--draft-conf' in args else '-'})", flush=True)
     # A card that is short of VRAM for this start (a single request on a small card, or "parallel" 2 or more, every request slot a session of its own) gets work moved off
-    # the GPU, never a smaller context and never fewer requests (owner, 2026-11-02): a smaller KV window on CUDA, a smaller prompt chunk and reserve on Arc, and the
+    # the GPU, never a smaller context and never fewer requests (owner, 2026-11-02): a smaller KV window on CUDA, a smaller prompt chunk and reserve elsewhere, and the
     # engine sizes the rest; one plain note says it is slower (strata_common/vram_fit.py fit_start).  The person's own values are kept.  Nothing changes without one
-    # card's memory, on a layer split, or for DeepSeek.
+    # card's memory, or on a layer split.
     try:
         args, fit_parallel, fit_note = vram_fit.fit_start(cfg, args, drafting_vram_mib(cfg, backend, archs), backend)
     except Exception:                                        # noqa: BLE001 - an estimate that fails decides nothing; the engine still refuses what does not fit
@@ -3652,33 +3619,9 @@ def engine_args(cfg: dict, exe: str | None = None, *, announce: bool = True) -> 
         args, removed = draft_layer.strip(args)
         if removed:
             print(f'[strata] "mtp": false - starting without the draft layer ({" ".join(removed)} left out)', flush=True)
-    # #1322: a config with a "vision" section but without --vision in its args (written by an older setup run, or edited by
-    # hand) advertised images and then refused every picture ("this engine was started without --vision").  The section
-    # says images are wanted: start the engine with them, and keep the encoder's VRAM free as setup does for a GPU encoder
-    # (only when the config has no reserve of its own).
-    if isinstance(cfg.get("vision"), dict) and "--vision" not in args:
-        args.append("--vision")
-        note = "added --vision"
-        if cfg["vision"].get("gpu") and "--vram-reserve-mib" not in args:
-            args += ["--vram-reserve-mib", "700"]
-            note += " and --vram-reserve-mib 700"
-        print(f'[strata] the config has a "vision" section but no --vision in its args: {note} (run setup again with '
-              "--vision to write them)", flush=True)
     if layer_split_of(cfg) and "--layer-split" not in args:
         args += ["--layer-split", layer_split_value(cfg)]
-    # opt-in: an auto split runs on the first card alone when it holds every profiled expert and the KV
-    if layer_split_of(cfg) and cfg.get("split_skip_if_fits") and "--split-skip-if-fits" not in args:
-        args.append("--split-skip-if-fits")
-    # #533 (opt-in): "vram_elastic": true - the expert cache in segments, so POST /v1/vram can give VRAM back to other
-    # programs and take it back; "vram_segment_mib" sets the segment size (the engine's default: 512)
-    if cfg.get("vram_elastic") is True and "--vram-elastic" not in args:
-        args.append("--vram-elastic")
-        seg = cfg.get("vram_segment_mib")
-        if isinstance(seg, int) and not isinstance(seg, bool) and seg > 0 and "--vram-segment-mib" not in args:
-            args += ["--vram-segment-mib", str(seg)]
-    args += parallel_args(cfg, args)
-    args += pool_cores_args(cfg, args)
-    return learned_profile_args(cfg, args)
+    return args + parallel_args(cfg, args)
 
 
 PARALLEL_MAX = 8      # without a layer split the engine's batch window holds at most 8 rows (kVerifyNarrowT); --batch-mtp waves more through it
@@ -3697,16 +3640,15 @@ def parallel_flag_conflicts(cfg: dict) -> bool:
 def parallel_args(cfg: dict, args: list[str]) -> list[str]:
     """#465 (opt-in): "parallel": N in the config - up to N requests decode together; more wait their turn.  It reaches
     the engine as --batch N: the engine's batch slots, or a page-pool engine's first scheduling limit (it can change it
-    while it runs); the old DeepSeek engine takes --parallel N.  1 or absent: one request at a time, as before.  A value
-    the engine cannot use is said and passed on: the engine warns and adjusts (recommend, never force)."""
-    ds = (cfg.get("arch") or "") == "deepseek41" and not paged_launch.is_paged_engine(cfg)
+    while it runs).  1 or absent: one request at a time, as before.  A value the engine cannot use is said and passed
+    on: the engine warns and adjusts (recommend, never force)."""
     if cfg.get("split_engine_note") and "--batch" in args:
         # the all-cards split engine: its run config carries --batch N (its lanes); "parallel" (the Terminal's --parallel, the app's Concurrent requests) sets N
         n = cfg.get("parallel")
         if isinstance(n, int) and not isinstance(n, bool) and n >= 1:
             args[args.index("--batch") + 1] = str(min(n, SPLIT_MAX_LANES))
         return []
-    if "--batch" in args or "--slots" in args or (ds and "--parallel" in args):
+    if "--batch" in args or "--slots" in args:
         return []
     n = cfg.get("parallel")
     if n is None or n is False:
@@ -3717,23 +3659,6 @@ def parallel_args(cfg: dict, args: list[str]) -> list[str]:
         return []
     if n <= 1:
         return []
-    if ds:
-        # DeepSeek: --parallel N (the engine holds N conversations at once, each its own rings and KV in VRAM, taken out of the
-        # experts' room; their tokens are decoded together).  Not --batch: that is the Qwen engine's slots.
-        # An engine package from before this flag would stop at the start on it ("unknown option"): asked of the engine itself, and said.
-        try:
-            from strata_common import dsv41_flags
-            old_engine = dsv41_flags.takes_parallel(cfg.get("exe")) is False
-        except Exception:                                # noqa: BLE001 - a probe that fails decides nothing
-            old_engine = False
-        if old_engine:
-            print(f'[strata] "parallel": {n} - this DeepSeek engine ({cfg.get("exe")}) is from before --parallel, so it answers one request at a '
-                  "time. Update the engine (strata update) to answer several at once.", flush=True)
-            return []
-        if n > PARALLEL_MAX:
-            print(f'[strata] "parallel": {n} - the DeepSeek engine runs at most {PARALLEL_MAX} conversations at once; it will use '
-                  f"{PARALLEL_MAX}", flush=True)
-        return ["--parallel", str(min(n, PARALLEL_MAX))]
     # (on a layer split the pipelined groups each hold up to 8 slots - 16 in a HIP engine with wide windows - so more than 8 is
     # not a limit there: the engine says how many slots it runs, INFO batch_slots)
     if (n > PARALLEL_MAX and "--batch-mtp" not in args and os.environ.get("STRATA_BATCH_MTP", "0") in ("", "0")
@@ -3767,44 +3692,6 @@ def pool_cores_args(cfg: dict, args: list[str]) -> list[str]:
               "(the CPU workers keep their default placement)", flush=True)
         return []
     return ["--pool-cores", text]
-
-
-def profile_shape(path: str) -> tuple[int, int] | None:
-    """An expert profile's (layers, experts per layer), from its header (tools/make_profile.py's format), or None
-    when the file is missing, is not one or is shorter than the pairs its header promises."""
-    try:
-        with open(path, "rb") as f:
-            head = f.read(24)
-            size = os.fstat(f.fileno()).st_size
-    except OSError:
-        return None
-    if len(head) < 24 or head[:4] != b"STRP":
-        return None
-    _, nl, ne, _, n = struct.unpack("<5I", head[4:])
-    return (nl, ne) if size >= 24 + 4 * n else None
-
-
-def learned_profile_args(cfg: dict, args: list[str]) -> list[str]:
-    """#477 (opt-in): "expert_profile_save": "<path>" in the config has the engine (0.1.36+) save what its adaptive
-    tier learned there - on QUIT and every "expert_profile_save_every" minutes (10 by default, 0 = at QUIT only) -
-    and the next start begins from it instead of the config's --expert-profile, when it is a profile of the same
-    model (its header's layers and experts match); otherwise from the config's own, as before.  A relative path is
-    the engine's (the config's "cwd").  Without the key, the arguments are the config's, unchanged."""
-    save = cfg.get("expert_profile_save")
-    if not isinstance(save, str) or not save.strip() or "--expert-profile-save" in args:
-        return args
-    args = args + ["--expert-profile-save", save]
-    every = cfg.get("expert_profile_save_every")
-    if isinstance(every, (int, float)) and not isinstance(every, bool) and every >= 0:
-        args += ["--expert-profile-save-every", str(every)]
-    if "--expert-profile" in args[:-1]:
-        i = args.index("--expert-profile") + 1
-        here = cfg.get("cwd") or "."
-        learned = profile_shape(save if os.path.isabs(save) else os.path.join(here, save))
-        base = profile_shape(args[i] if os.path.isabs(args[i]) else os.path.join(here, args[i]))
-        if learned is not None and learned == base:
-            args[i] = save
-    return args
 
 
 def hip_visible(cfg: dict) -> list[int]:
@@ -4047,28 +3934,11 @@ def hip_auto_devices(cfg: dict, env: dict) -> list[int] | None:
     return visible
 
 
-DS41_SLOT_KEEP_DEFAULT = "1"      # the engine keeps a displaced conversation in RAM and in the slot folder (see below)
-DS41_SLOT_GB_DEFAULT = "2"        # the folder's cap in GB (a 6.5K-token conversation is about 17 MB)
-
-
-def deepseek_slot_env(env: dict, cfg: dict) -> None:
-    """DeepSeek-V4.1 only.  The engine sets a conversation aside when another request takes the model and takes it back
-    at its checkpoints (agents and sub-agents that take turns do not read their prompts again).  STRATA_DS4_SLOT_KEEP
-    switches it (the default above; a config's env or the shell wins); the folder is `ds4-slots` next to the run log, in
-    Strata's data folder (STRATA_DS4_SLOT_DIR names another), and the engine caps it (STRATA_DS4_SLOT_GB, 2 here, 16 in the engine) and
-    removes what is older than a week or not this model's.  On by default; STRATA_DS4_SLOT_KEEP=0 turns it off."""
-    env.setdefault("STRATA_DS4_SLOT_KEEP", DS41_SLOT_KEEP_DEFAULT)
-    env.setdefault("STRATA_DS4_SLOT_GB", DS41_SLOT_GB_DEFAULT)
-    log = cfg.get("log")
-    if "STRATA_DS4_SLOT_DIR" not in env and log:
-        env["STRATA_DS4_SLOT_DIR"] = str(Path(log).parent / "ds4-slots")
-
-
 # 0.2.10: the two parts that need the card's free VRAM are the ENGINE's own, never an environment variable of ours: the FP16 weight
 # cache (bit-exact; takes only VRAM beyond 3 GiB kept free) and no loan of cache slots (only when every expert is resident and the
 # prompt path's own buffers fit beside 3 GiB; KL 0.006, QUAL-PAR2).  STRATA_PF_W16_CACHE_MIB=0 and STRATA_AUTO_NOBORROW=0 turn them off.
 # (The parallel-request stack, the GDN prompt speedups, the Q8_0 hyper-connection read and the fp16 decode windows are the engine's own defaults now:
-# src/core/arch_defaults.cpp, generate.cpp, metal window.cpp.  Nothing here sets them.)
+# src/core/arch_defaults.cpp, generate.cpp.  Nothing here sets them.)
 
 
 def parallel_slots(cfg: dict) -> int:
@@ -4098,8 +3968,6 @@ def child_env(cfg: dict, *, offline: bool = False) -> dict:
         env["CUDA_VISIBLE_DEVICES"] = ",".join(str(i) for i in ordered_gpus(cfg))
     for k, v in (cfg.get("env") or {}).items():      # engine settings the config carries (AMD: the GEMM tuning table)
         env[str(k)] = str(v)
-    if (cfg.get("arch") or "") == "deepseek41":      # (only this engine reads these; Qwen's environment is untouched)
-        deepseek_slot_env(env, cfg)
     # Strict offline reaches children through the environment, because a tool subprocess or a model
     # loader is code this server does not own. Applied last so a profile's own `env` cannot remove
     # the policy by naming the same variable.

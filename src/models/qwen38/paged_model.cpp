@@ -487,10 +487,7 @@ int run_paged_engine(int argc, char** argv) {
         mc.d_res = mc.stage != nullptr ? mc.stage->d_res : m.d_res;
         mc.ver->set_dynamic_residency(true);
         mc.ver->set_batch_self_commit_default(true);
-#if !defined(STRATA_GPU_METAL)
-        // Metal's wait_commit does not fence a deferred batch graph.
         mc.ver->set_batch_commit_async(drafting && !m.multi_gpu);
-#endif
         if (has_drafter(m, mc))
             pool_experts = {mc.d_res + m.g.n_layers * m.g.n_expert, mc.cache->device_slot(0), mc.cache->slot_bytes()};
     }

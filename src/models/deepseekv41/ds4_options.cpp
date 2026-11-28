@@ -29,10 +29,7 @@ bool read_option(const std::string& a, const std::function<std::string(const cha
         for (int g : parse_ids(val("--gpus"))) o.gpus.push_back(g);
     } else if (a == "--max-context") o.max_context = std::atoll(val("--max-context").c_str());
     else if (a == "--vram-reserve-mib") o.reserve_mib = std::atoll(val("--vram-reserve-mib").c_str());
-    else if (a == "--vram-experts") {
-        o.vram_experts = std::atof(val("--vram-experts").c_str());
-        o.vram_experts_auto = false;
-    }
+    else if (a == "--vram-experts") o.vram_experts = std::atof(val("--vram-experts").c_str());
     else if (a == "--cpu-threads") o.cpu_threads = std::atoi(val("--cpu-threads").c_str());
     else if (a == "--expert-profile") o.profile = val("--expert-profile");
     else if (a == "--profile-readonly") o.profile_readonly = true;   // (read the placement, never write the counts back)

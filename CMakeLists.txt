@@ -2,9 +2,8 @@
 #
 # One project builds the engine for every backend: CUDA (STRATA_ENABLE_CUDA), HIP (STRATA_ENABLE_HIP; the layer-split
 # and DeepSeek engines are the STRATA_BUILD_SPLIT / STRATA_BUILD_DSV41 options), the CPU-only build, and the test
-# programs.  The Intel Arc (SYCL) engine is a separate project in sycl/ (STRATA_ENABLE_SYCL), and the Metal engine
-# one in metal/.  CMakePresets.json has the CPU check preset (`cmake --preset cpu-check`) and the compile-only
-# backend presets used by tools/check and the CI workflows; the release scripts in packaging/ pass their own flags.
+# programs.  CMakePresets.json has the CPU check preset (`cmake --preset cpu-check`) and the compile-only backend
+# presets used by tools/check and the CI workflows; the release scripts in packaging/ pass their own flags.
 #
 # The CUDA kernels need sm_80 or newer (tf32 mma, bf16 math) and the guard below refuses anything older: silently
 # building for a pre-Ampere arch would produce a binary that runs and is wrong about its own performance, which is
@@ -19,17 +18,6 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/backends/cpu.cmake)         # strata_k
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/backends/cuda.cmake)        # NVIDIA: toolchain, llama.cpp's MMQ kernels (strata_mmq, strata_kq)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/backends/hip.cmake)         # AMD: gfx906 compat, MMQ on HIP
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/strata_gpu_engine.cmake)    # the GPU engine both of them build
-# EXPERIMENTAL: the Intel Arc engine, the SYCL port in sycl/ (PR #423; icpx + oneMKL, docs/INTEL_ARC.md). It is its
-# own project that takes the unported sources from src/; with this on, nothing below is configured.
-option(STRATA_ENABLE_SYCL "EXPERIMENTAL: build the Intel Arc (SYCL) engine from sycl/ - docs/INTEL_ARC.md" OFF)
-if(STRATA_ENABLE_SYCL)
-  if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
-    message(FATAL_ERROR "STRATA_ENABLE_SYCL is a separate backend; leave STRATA_ENABLE_CUDA and STRATA_ENABLE_HIP off")
-  endif()
-  message(WARNING "STRATA_ENABLE_SYCL: the Intel Arc engine is experimental (community port, docs/INTEL_ARC.md)")
-  add_subdirectory(sycl)
-  return()
-endif()
 add_compile_definitions(STRATA_VERSION="${PROJECT_VERSION}")
 # issue #31: release builds keep a PDB beside the exe (not shipped in it), so a minidump from a stalled engine can
 # be read back to the exact source line
@@ -110,9 +98,7 @@ if(NOT STRATA_AMD_COMMUNITY_TUNING)
   add_compile_definitions(STRATA_AMD_COMMUNITY_DOT_OFF=1)
 endif()
 # The rows one verify / batch window holds (include/strata/common/kernels/window_limits.hpp): 8, the 0.2.7 window, or 16 (four pipelined
-# groups of 16 slots = 64 slots on a four-card split, docs/BATCHING.md).  Only the CUDA and HIP engines are built from
-# these sources with a wide window; the SYCL and Metal builds never read this variable and keep 8.  A window of up to
-# 8 rows runs the kernels it always ran, whichever is chosen (the wide instantiations are extra code).  "auto" = 16 for
+# groups of 16 slots = 64 slots on a four-card split, docs/BATCHING.md).  A window of up to 8 rows runs the kernels it always ran, whichever is chosen (the wide instantiations are extra code).  "auto" = 16 for
 # the HIP engines (a HIP code object loads on first use, so the extra kernels cost nothing until a wide window forms)
 # and 8 for CUDA, which loads every kernel at start (CUDA_MODULE_LOADING=EAGER: the wide kernels would take VRAM from
 # the expert cache of every card); -DSTRATA_WINDOW_MAX_T=16 builds the wide CUDA engine.
@@ -214,10 +200,6 @@ if(STRATA_BUILD_CONVERSATION_TESTS)
                  src/common/state/conversation_file.cpp)
   target_include_directories(conversation_file_test PRIVATE include)
   add_test(NAME conversation_file_test COMMAND conversation_file_test)
-  add_executable(session_save_reclaim_test src/common/state/session_save_reclaim_test.cpp
-                 src/common/state/conversation_file.cpp)
-  target_include_directories(session_save_reclaim_test PRIVATE include)
-  add_test(NAME session_save_reclaim_test COMMAND session_save_reclaim_test)
   add_executable(token_listing_test src/common/state/token_listing_test.cpp)
   target_include_directories(token_listing_test PRIVATE include)
   add_test(NAME token_listing_test COMMAND token_listing_test)
@@ -272,9 +254,6 @@ target_link_libraries(strata-dequant PRIVATE strata_artifact)
 # this file is now nothing but the CLI entry point, and its inherited guard spells that as a "selftest"
 target_compile_definitions(strata-dequant PRIVATE STRATA_DEQUANT_SELFTEST)
 if(STRATA_BUILD_TESTS)
-  add_executable(batch_telemetry_test src/models/qwen38/batch_telemetry_test.cpp)
-  target_include_directories(batch_telemetry_test PRIVATE include)
-  add_test(NAME batch_telemetry_test COMMAND batch_telemetry_test)
   add_executable(logit_bias_test src/common/sample/logit_bias_test.cpp)
   target_include_directories(logit_bias_test PRIVATE include)
   add_test(NAME logit_bias_test COMMAND logit_bias_test)
@@ -297,10 +276,6 @@ if(STRATA_BUILD_TESTS)
   add_executable(model_family_test tests/core/model_family_test.cpp)
   target_link_libraries(model_family_test PRIVATE strata_artifact)
   add_test(NAME model_family_test COMMAND model_family_test)
-  # how --batch cuts a prompt read into pieces (a layer split with no slot decoding must still reach a BYIELD)
-  add_executable(batch_read_test tests/program/batch_read_test.cpp)
-  target_include_directories(batch_read_test PRIVATE include)
-  add_test(NAME batch_read_test COMMAND batch_read_test)
   # the model's geometry from its metadata, and the check against the kernels' compiled shape (synthetic)
   add_executable(gguf_geometry_test tests/core/gguf_geometry_test.cpp)
   target_link_libraries(gguf_geometry_test PRIVATE strata_artifact)
@@ -340,11 +315,6 @@ if(STRATA_BUILD_TESTS)
   target_include_directories(split_walk_test PRIVATE include)
   add_test(NAME split_walk_test COMMAND split_walk_test)
 
-  # the prompt planner's host-memory model (#2824): header-only, no GPU
-  add_executable(prefill_plan_test tests/program/prefill_plan_test.cpp)
-  target_include_directories(prefill_plan_test PRIVATE include)
-  add_test(NAME prefill_plan_test COMMAND prefill_plan_test)
-
   # the default CPU prefill share is not armed when every expert is resident (#1595): header-only rule, no GPU
   add_executable(share_rules_test tests/prefill/share_rules_test.cpp)
   target_include_directories(share_rules_test PRIVATE include)
@@ -377,11 +347,6 @@ if(STRATA_BUILD_TESTS)
   add_executable(mmq_ids_margin_test tests/prefill/mmq_ids_margin_test.cpp)
   target_include_directories(mmq_ids_margin_test PRIVATE include)
   add_test(NAME mmq_ids_margin_test COMMAND mmq_ids_margin_test)
-
-  # PR #4844: the adaptive tier's copy-in range across serial, pipelined and drained rounds (header-only, no GPU)
-  add_executable(adaptive_range_test tests/program/adaptive_range_test.cpp)
-  target_include_directories(adaptive_range_test PRIVATE include)
-  add_test(NAME adaptive_range_test COMMAND adaptive_range_test)
 
   # P0.1 (lite): STRATA_MANIFEST, the machine-readable record of the selected paths, tensor formats, engine and budgets (header-only, no GPU)
   add_executable(run_manifest_test tests/core/run_manifest_test.cpp)

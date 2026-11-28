@@ -66,14 +66,12 @@ class Issue3298MtpDepth(unittest.TestCase):
         self.assertEqual(files_present({"args": ["--mtp", str(self.root / "gone")]}), [str(self.root / "gone")])
 
 
-class Issue3403MacBuildTools(unittest.TestCase):
-    """The Mac setup compiles without setup.cmake_build(), so cmake and ninja must be installed for it too."""
+class Issue3403BuildTools(unittest.TestCase):
+    """cmake and ninja are installed (from pip) when a compile needs them and they are missing."""
 
-    def test_missing_build_tools_are_installed_before_the_mac_compile(self):
+    def test_missing_build_tools_are_installed_once(self):
         from unittest import mock
         import setup
-        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "metal"))
-        import setup_mac as M
         installed = {"cmake": None, "ninja": None}
 
         def find(name):
@@ -89,13 +87,6 @@ class Issue3403MacBuildTools(unittest.TestCase):
             self.assertEqual(pi.call_count, 1)
             setup.ensure_build_tools()                       # present now: nothing more is installed
             self.assertEqual(pi.call_count, 1)
-
-    def test_both_mac_builds_ask_for_the_tools_first(self):
-        import inspect
-        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "metal"))
-        import setup_mac as M
-        for fn in (M.build_engine, M.build_vision):
-            self.assertIn("S.ensure_build_tools()", inspect.getsource(fn), fn.__name__)
 
 
 @unittest.skipUnless(sys.platform == "win32", "ACLs are Windows only")
@@ -491,7 +482,5 @@ class DoctorAndTheDrafter(unittest.TestCase):
             self.assertEqual(self.report(drafting="dflash2")["status"], "optional_missing")
             self.assertEqual(self.report(drafting="mtp")["status"], "missing", "the MTP is chosen: its layer is required")
             self.assertEqual(self.report(mtp=False)["status"], "missing", "unchanged for a config that switched the layer off by hand")
-        with mock.patch.object(drafting, "detect_hardware", return_value=("sycl", [])):
-            self.assertEqual(self.report()["status"], "optional_missing", "Intel is DFlash2 too")
         with mock.patch.object(drafting, "detect_hardware", return_value=("cpu", [])):
             self.assertEqual(self.report()["status"], "missing", "an engine without the code stays on the MTP")

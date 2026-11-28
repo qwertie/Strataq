@@ -58,18 +58,6 @@
 #include "ggml.h"   // --mtp-q4: the head rows' and projections' formats, dequantized and requantized at load
 #endif
 
-#if defined(STRATA_GPU_METAL)
-// The Metal backend's MTP drafter (metal/src/engine/window.cpp, beside the decode window it reads): load, prefill and
-// draft hand over to it; bind has nothing to bind there.
-namespace strata::metal_engine {
-bool mtp_load(const std::string& rt_dir, int max_t, std::string& err);
-void mtp_bind_state(strata::core::QsaState& st);
-bool mtp_prefill(const int32_t* next_tokens, int64_t n, int64_t cell0, std::string& err);
-bool mtp_draft(int T, const int32_t* tokens, int64_t p, int a, int max_steps, int32_t* drafts, float* probs, float min_p,
-               int* n_drafts, std::string& err);
-}  // namespace strata::metal_engine
-#endif
-
 namespace strata::core {
 namespace {
 
@@ -292,15 +280,6 @@ bool MtpDrafter::make_q4_head(std::string& err) {
 
 bool MtpDrafter::load(const std::string& rt_dir, const ModelGeometry& g, SessionState& ss, int max_t, std::string& err,
                       int64_t window, const MtpDrafter* shared) {
-#if defined(STRATA_GPU_METAL)
-    (void) window; (void) shared;
-    g_ = &g;
-    ss_ = &ss;
-    max_t_ = max_t;
-    if (!strata::metal_engine::mtp_load(rt_dir, max_t, err)) return false;
-    strata::metal_engine::mtp_bind_state(st_);   // the parked conversation's draft K/V is the window's own buffers
-    return true;
-#endif
     cudaGetDevice(&device_);   // a layer split's last stage on another GPU: the drafter lives there
     g_ = &g;
     ss_ = &ss;
@@ -538,7 +517,7 @@ bool MtpDrafter::load(const std::string& rt_dir, const ModelGeometry& g, Session
     // --pipeline-windows 2 (the forcing graphs): the chain shares its card with stage 1's windows and the next launch
     // on stage 0 waits for it, so its stream gets the highest priority there (STRATA_MTP_PRIORITY=0: the default)
     bool prio = false;
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && !defined(STRATA_GPU_METAL)   // (HIP, Metal: the default priority)
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906)   // (HIP: the default priority)
     static const bool hi_prio = [] { const char* v = std::getenv("STRATA_MTP_PRIORITY"); return v == nullptr || std::atoi(v) != 0; }();
     int prio_lo = 0, prio_hi = 0;
     if (force_on_ && hi_prio && cudaDeviceGetStreamPriorityRange(&prio_lo, &prio_hi) == cudaSuccess)
@@ -831,10 +810,6 @@ void draft_head_hint(int64_t n_tokens, int64_t row_bytes) {
 
 bool MtpDrafter::bind(const WeightTable& wt, const NativeHead* head, const float* window_R, std::string& err,
                       const MtpDrafter* shared) {
-#if defined(STRATA_GPU_METAL)
-    (void) wt; (void) head; (void) window_R; (void) err; (void) shared;
-    return true;
-#endif
     const OnDevice on_device(device_);
     wt_ = &wt;
     head_ = head;
@@ -1009,9 +984,6 @@ MtpProf g_mp;
 // STRATA_VERIFY_NODES=1 also lists the draft graphs' nodes (kernel names on HIP; counts on CUDA)
 void mtp_list_nodes(cudaGraph_t graph, const char* what) {
     if (std::getenv("STRATA_VERIFY_NODES") == nullptr || graph == nullptr) return;
-#if defined(STRATA_GPU_METAL)
-    (void) what;    // Metal has no graph nodes to list
-#else
 #if defined(STRATA_USE_HIP)
     using NodeT = hipGraphNode_t;
     using NodeTypeT = hipGraphNodeType;
@@ -1053,7 +1025,6 @@ void mtp_list_nodes(cudaGraph_t graph, const char* what) {
     std::fprintf(stderr, "strata mtp: the %s graph has %zu nodes:", what, nn);
     for (auto& k : kinds) std::fprintf(stderr, "\n %4d x %.110s", k.second, k.first.c_str());
     std::fprintf(stderr, "\n");
-#endif
 }
 
 bool mtp_qfuse_hc_on() {
@@ -1655,10 +1626,6 @@ bool MtpDrafter::reserve_prefill(int64_t n, std::string& err) {
 
 bool MtpDrafter::prefill(const float* R_rows, const int32_t* next_tokens, int64_t n, int64_t cell0, std::string& err,
                          bool sync) {
-#if defined(STRATA_GPU_METAL)
-    (void) R_rows; (void) sync;   // the rows are the decode window's own (the Metal drafter reads them in place)
-    return strata::metal_engine::mtp_prefill(next_tokens, n, cell0, err);
-#endif
     const OnDevice on_device(device_);
     const Clock::time_point t0 = Clock::now();
     const int64_t HCN = g_->hc * g_->n_embd;
@@ -1783,21 +1750,6 @@ bool MtpDrafter::draft(int T, const int32_t* tokens, int64_t p, int a, int32_t* 
                        float* probs, float min_p, int* n_drafts, DraftResult* result) {
     if (result) { *result = {}; if (n_drafts) *n_drafts = 0; }
     if (!decode_ready(err)) return false;   // the steps read the 512 experts (record_rest)
-#if defined(STRATA_GPU_METAL)
-    {
-        if (T < 1 || T > max_t_ || a < 0 || a >= T) { err = "mtp: draft arguments out of range"; return false; }
-        const int max_steps = (int) std::min<int64_t>(std::min(max_t_ - 1, max_drafts_), (int64_t) 1 << 30);
-        const Clock::time_point t0 = Clock::now();
-        int n = 0;
-        if (!strata::metal_engine::mtp_draft(T, tokens, p, a, max_steps, drafts, probs, min_p, &n, err)) return false;
-        for (int j = n; j < max_t_ - 1; ++j) { drafts[j] = 0; if (probs) probs[j] = 0.0f; }
-        if (n_drafts) *n_drafts = n;
-        if (result) *result = {n, max_steps};
-        ms_draft += ms_since(t0);
-        ++rounds;
-        return true;
-    }
-#endif
     const OnDevice on_device(device_);
     if (T < 1 || T > max_t_ || a < 0 || a >= T) { err = "mtp: draft arguments out of range"; return false; }
     if (chain_live_) { err = "mtp: a pipelined chain is still in flight"; return false; }
@@ -2097,13 +2049,6 @@ bool MtpDrafter::draft_first(int T, const float* R_row, int32_t token, int64_t c
                              float* probs, float min_p, int* n_drafts, DraftResult* result) {
     if (result) { *result = {}; if (n_drafts) *n_drafts = 0; }
     if (!decode_ready(err)) return false;   // the first round's steps read the 512 experts
-#if defined(STRATA_GPU_METAL)
-    {   // the decode window's row 0 is the residual (the window that just ran)
-        (void) R_row;
-        std::vector<int32_t> toks((size_t) T, token);
-        return draft(1, toks.data(), cell, 0, drafts, err, probs, min_p, n_drafts, result);
-    }
-#endif
     const OnDevice on_device(device_);
     // row 0 is the real pair; rows 1.. repeat it and only write cells the next round overwrites
     const int64_t HCN = g_->hc * g_->n_embd;

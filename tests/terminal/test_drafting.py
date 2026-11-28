@@ -41,9 +41,9 @@ def serving_dflash2():
 
 class AutoAndTheBackends(unittest.TestCase):
     def test_auto_is_dflash2_where_the_engine_has_it(self):
-        """Owner 2026-11-02: DFlash2 is the primary drafter on every system whose engine has it (CUDA, HIP, Metal, Intel SYCL since the DF2-SYCL engine)."""
-        self.assertEqual(drafting.DFLASH2_BACKENDS, ("cuda", "hip", "metal", "sycl"))
-        for backend in ("cuda", "hip", "metal", "sycl"):
+        """Owner 2026-11-02: DFlash2 is the primary drafter on every system whose engine has it (CUDA, HIP)."""
+        self.assertEqual(drafting.DFLASH2_BACKENDS, ("cuda", "hip"))
+        for backend in ("cuda", "hip"):
             for family in ("qwen", "gyro", "unsloth"):
                 self.assertEqual(drafting.choice_of("auto", family=family, backend=backend), "dflash2", (backend, family))
         self.assertEqual(drafting.choice_of("auto", family="qwen", backend=None), "mtp", "an unknown computer is the MTP")
@@ -51,18 +51,10 @@ class AutoAndTheBackends(unittest.TestCase):
         for family in ("coder", "swift", "nvfp4", "deepseek41"):
             self.assertEqual(drafting.choice_of("auto", family=family, backend="cuda"), "mtp", family)
 
-    def test_intel_runs_dflash2_and_a_build_without_the_code_does_not(self):
-        self.assertTrue(drafting.hardware_support("sycl", ["8086"]).can_run)
-        with mock.patch.object(drafting, "DFLASH2_BACKENDS", ("cuda", "hip", "metal")):
-            self.assertEqual(drafting.choice_of("auto", family="qwen", backend="sycl"), "mtp")
-            self.assertFalse(drafting.hardware_support("sycl").can_run)
-
     def test_the_choice_is_the_choice(self):
-        for backend in ("cuda", "sycl"):
-            self.assertEqual(drafting.choice_of("mtp", family="qwen", backend=backend), "mtp")
-            self.assertEqual(drafting.choice_of("off", family="qwen", backend=backend), "off")
+        self.assertEqual(drafting.choice_of("mtp", family="qwen", backend="cuda"), "mtp")
+        self.assertEqual(drafting.choice_of("off", family="qwen", backend="cuda"), "off")
         self.assertEqual(drafting.choice_of("dflash2", family="qwen", backend="cuda"), "dflash2")
-        self.assertEqual(drafting.choice_of("dflash2", family="qwen", backend="sycl"), "dflash2")
         self.assertEqual(drafting.choice_of("dflash2", family="qwen", backend="cpu"), "mtp", "named, but the engine has none")
         self.assertEqual(drafting.choice_of("dflash2", family="coder", backend="cuda"), "mtp")
 
@@ -175,14 +167,6 @@ class Decisions(unittest.TestCase):
             self.assertFalse(drafting.needs_pack("dflash2", model_name=GYRO, data_dir=self.data, backend="cuda"))
             self.assertEqual(self.decide("auto").note, "")
             self.assertEqual(self.decide("auto").drafter, "mtp")
-
-    def test_intel_is_dflash2_and_fetches_its_pack(self):
-        self.assertTrue(drafting.needs_pack("auto", model_name=GYRO, data_dir=self.data, backend="sycl"))
-        d = drafting.decide("auto", model_name=GYRO, data_dir=self.data, backend="sycl")
-        self.assertEqual(d.drafter, "mtp", "the pack is not downloaded yet: the MTP until it is")
-        d = drafting.decide("auto", model_name=GYRO, data_dir=self.data, backend="cpu")
-        self.assertEqual((d.drafter, d.note), ("mtp", ""))
-        self.assertFalse(drafting.needs_pack("auto", model_name=GYRO, data_dir=self.data, backend="cpu"))
 
 
 class EngineArguments(unittest.TestCase):
@@ -344,34 +328,6 @@ class EngineArguments(unittest.TestCase):
         d = self.apply(c)
         self.assertEqual((d.drafter, d.note, c["args"]), ("mtp", drafting.NOT_SUPPORTED, self.args))
 
-    def test_intel_gets_its_own_confidence_not_the_cuda_slot_steps(self):
-        self.layer()
-        self.pack()
-        for vram in (None, 8000, 24000, 96000):
-            c = self.cfg()
-            d = drafting.apply(c, data_dir=self.data, backend="sycl", archs=[], vram_mib=vram)
-            a = c["args"]
-            self.assertEqual((d.drafter, a[a.index("--draft-conf") + 1], a[a.index("--spec") + 1], "--mtp" in a, a[a.index("--draft-fallback") + 1]), ("dflash2", "0.6", "6", False, "none"), vram)
-        c = self.cfg(user_args=["--draft-conf", "0.5"], args=[*self.args, "--draft-conf", "0.5"])
-        drafting.apply(c, data_dir=self.data, backend="sycl", archs=[], vram_mib=8000)
-        self.assertEqual(c["args"][c["args"].index("--draft-conf") + 1], "0.5", "the person's own value stays")
-        c = self.cfg()
-        drafting.apply(c, data_dir=self.data, backend="cuda", archs=["sm_120"], vram_mib=8000)
-        self.assertEqual(c["args"][c["args"].index("--draft-conf") + 1], "0.8", "CUDA keeps its slot steps")
-
-    def test_a_mac_gets_its_own_confidence_not_the_cuda_slot_steps(self):
-        """Metal maps every expert: the --expert-cache 64 the Mac setup writes is a slot count of 83 to the CUDA steps (0.8), which was not measured on a Mac; M5 Max measured 0.5."""
-        self.layer()
-        self.pack()
-        for vram in (None, 8000, 96000):
-            c = self.cfg()
-            d = drafting.apply(c, data_dir=self.data, backend="metal", archs=[], vram_mib=vram)
-            a = c["args"]
-            self.assertEqual((d.drafter, a[a.index("--draft-conf") + 1], a[a.index("--spec") + 1], "--mtp" in a, a[a.index("--draft-fallback") + 1]), ("dflash2", "0.5", "6", False, "none"), vram)
-        c = self.cfg(user_args=["--draft-conf", "0.4"], args=[*self.args, "--draft-conf", "0.4"])
-        drafting.apply(c, data_dir=self.data, backend="metal", archs=[])
-        self.assertEqual(c["args"][c["args"].index("--draft-conf") + 1], "0.4", "the person's own value stays")
-
     def test_off_is_the_draft_layers_own_switch(self):
         c = self.cfg(drafting="off")
         d = self.apply(c)
@@ -380,44 +336,6 @@ class EngineArguments(unittest.TestCase):
         for flag in ("--mtp", "--spec-min-p", "--batch-mtp", "--draft"):
             self.assertNotIn(flag, c["args"])
         self.assertEqual(c["args"][c["args"].index("--spec") + 1], "4", "prompt lookup keeps its windows")
-
-    def test_the_server_applies_it_at_every_start(self):
-        from strata_common.engine_client import engine_args
-        self.pack()
-        self.layer()
-        with mock.patch("strata_common.engine_client.drafting_vram_mib", return_value=None), mock.patch.object(drafting, "data_dir_of", return_value=self.data):
-            for kw in ({"drafting": "dflash2"}, {}):          # chosen, and Auto
-                args = engine_args(self.cfg(**kw))
-                self.assertNotIn("--mtp", args)
-                self.assertEqual(args[args.index("--draft") + 1], "dflash2")
-                self.assertEqual(args[args.index("--draft-fallback") + 1], "none")
-            args = engine_args(self.cfg(drafting="mtp"))
-            self.assertEqual(args, self.args)
-            self.assertEqual(engine_args(self.cfg(parallel=4))[:len(self.args)], self.args, "Auto with several requests: the MTP alone")
-            self.assertEqual(drafting.take_note(), drafting.NOT_HERE, "the engine that starts next is told why")
-            self.assertEqual(engine_args(self.cfg(drafting="mtp", parallel=4))[:len(self.args)], self.args, "the MTP chosen: unchanged")
-            self.assertEqual(drafting.take_note(), "")
-            # DFlash2 chosen by name with a number of requests the person chose: DFlash2 with that many, no note
-            named = engine_args(self.cfg(drafting="dflash2", parallel=4))
-            self.assertNotIn("--mtp", named)
-            self.assertEqual((named[named.index("--draft") + 1], named[named.index("--draft-fallback") + 1], named[named.index("--batch") + 1]), ("dflash2", "none", "4"))
-            self.assertEqual(drafting.take_note(), "")
-            one = engine_args(self.cfg(drafting="dflash2", parallel=1))
-            self.assertNotIn("--batch", one)
-            self.assertEqual(one[one.index("--draft") + 1], "dflash2")
-        # a 16 GB card holds about 3,700 slots with the drafter on: the server passes its memory and the confidence follows (drafting.CONF_STEPS)
-        with mock.patch("strata_common.engine_client.drafting_vram_mib", return_value=16384.0), mock.patch.object(drafting, "data_dir_of", return_value=self.data):
-            args = engine_args(self.cfg(drafting="dflash2"))
-            self.assertIn(args[args.index("--draft-conf") + 1], ("0.7", "0.35"))
-            args = engine_args(self.cfg(drafting="dflash2", args=[*self.args, "--expert-cache", "1000"]))
-            self.assertEqual(args[args.index("--draft-conf") + 1], "0.8", "the cache the person asked for decides, not the card")
-        with mock.patch.object(drafting, "ENGINE_SERVES_DFLASH2", False):
-            self.assertEqual(engine_args(self.cfg()), self.args, "the engine cannot serve it: nothing changes")
-            off = engine_args(self.cfg(drafting="off"))
-            self.assertNotIn("--mtp", off)
-            drafting.take_note()
-            engine_args(self.cfg(drafting="dflash2"))
-            self.assertEqual(drafting.take_note(), drafting.NOT_SERVED)
 
     def test_data_folder_of_an_argument_list(self):
         self.assertEqual(drafting.data_dir_of(["--pack", "/d/packs/x"]), Path("/d"))
@@ -435,7 +353,7 @@ class EngineArguments(unittest.TestCase):
 class UnslothAndTheOtherFlashNextFiles(unittest.TestCase):
     """DF2-METAL found that Auto never picked DFlash2 for Unsloth's quantizations: they are the same Qwen3.8-Flash-Next weights and the DFlash2 numbers (Strix, R9700,
     M5 Max) were measured on UD-Q4_K_XL. Swift (UkisAI's fine-tune) and Coder (ISTA-DASLab's coding version) are fine-tunes with no acceptance numbers: the MTP.
-    The names are the ones setup.py and metal/setup_mac.py write: f"{family name}-{model.lower()}"."""
+    The names are the ones setup.py writes: f"{family name}-{model.lower()}"."""
 
     UNSLOTH = ("qwen3.8-flash-next-unsloth-ud-q4_k_xl", "qwen3.8-flash-next-unsloth-ud-iq4_xs", "qwen3.8-flash-next-unsloth-ud-q5_k_xl",
                "qwen3.8-flash-next-unsloth-ud-q6_k_xl", "qwen3.8-flash-next-unsloth-q8_0")
@@ -443,7 +361,7 @@ class UnslothAndTheOtherFlashNextFiles(unittest.TestCase):
                   "qwen3.8-flash-next-gyro-gyro-s", "qwen3.8-flash-next-gyro-gyro-m")
     OTHERS = ("qwen3.8-flash-next-coder-iq1_m", "qwen3.8-flash-next-nvfp4-nvfp4", "qwen3.8-flash-next-nvfp4-nvfp4-nvidia", "qwen3.8-flash-next-nvfp4-nvfp4-qad",
               "swift-1.5-iq2_xs", "swift-1.5-q4_0", "qwen3.6-35b-a3b-ud-q4_k_xl", "deepseek-v4.1-flash", "qwen3.8-flash-next-unsloth", "qwen3.8-flash-next-unslothx-q8_0")
-    HARDWARE = (("cuda", ["sm_120"]), ("hip", ["gfx1151"]), ("metal", None), ("sycl", ["8086"]))
+    HARDWARE = (("cuda", ["sm_120"]), ("hip", ["gfx1151"]))
 
     def test_the_names_the_setups_write(self):
         for name in self.UNSLOTH + self.FLASH_NEXT:
@@ -457,14 +375,12 @@ class UnslothAndTheOtherFlashNextFiles(unittest.TestCase):
         self.assertEqual(drafting.SUPPORTED_FAMILIES, ("qwen", "gyro", "unsloth"))
 
     def test_the_names_are_the_ones_setup_writes(self):
-        """Read from the code, not from memory: the family names and the way setup.py and metal/setup_mac.py make the run config's model_name."""
+        """Read from the code, not from memory: the family names and the way setup.py makes the run config's model_name."""
         setup = "".join((ROOT / f).read_text(encoding="utf-8") for f in ("setup.py", "strata_control/setup_config.py", "strata_common/catalog.py"))    # (the run config's construction moved to the setup seam, the families to the catalog)
-        mac = (ROOT / "metal" / "setup_mac.py").read_text(encoding="utf-8")
         self.assertIn('"name": "qwen3.8-flash-next-unsloth"', setup)
         self.assertIn('"name": "qwen3.8-flash-next-coder"', setup)
         self.assertIn('"name": "qwen3.8-flash-next-nvfp4"', setup)
-        self.assertGreaterEqual(setup.count("\"model_name\": f\"{fam['name']}-{model.lower()}\""), 3)
-        self.assertIn("f\"{fam['name']}-{model.lower()}\"", mac)
+        self.assertGreaterEqual(setup.count("\"model_name\": f\"{fam['name']}-{model.lower()}\""), 2)
         for model in ("UD-IQ4_XS", "UD-Q4_K_XL", "UD-Q5_K_XL", "UD-Q6_K_XL", "Q8_0"):
             self.assertIn(f'"{model}": {{"about"', setup)
             self.assertTrue(drafting.supported_model(f"qwen3.8-flash-next-unsloth-{model.lower()}"), model)
@@ -635,47 +551,6 @@ class TheInstalledEngineDecidesTheFlags(unittest.TestCase):
             for flag in ("--draft", "--draft-model", "--draft-fallback", "--draft-conf", "--mtp-draft-vocab"):
                 self.assertNotIn(flag, args, (mode, flag))
             self.assertEqual(args[args.index("--mtp") + 1], str(self.mtp), "the MTP, as the config had it")
-
-    def test_the_server_gives_the_engine_program_to_the_drafting_rule(self):
-        from strata_common.engine_client import engine_args
-        old, new = self.exe("old.exe", self.OLD), self.exe("new.exe", self.NEW)
-        cfg = {"model_name": GYRO, "args": list(self.args), "drafting": "auto"}
-        with mock.patch("strata_common.engine_client.drafting_vram_mib", return_value=None), mock.patch.object(drafting, "data_dir_of", return_value=self.data):
-            a_old, a_new, a_none = engine_args(cfg, str(old)), engine_args(cfg, str(new)), engine_args(cfg)
-        self.assertEqual(a_old[a_old.index("--mtp") + 1], str(self.mtp))
-        self.assertNotIn("--mtp-draft-vocab", a_old)
-        self.assertIn("--mtp-draft-vocab", a_new)
-        self.assertIn("--mtp-draft-vocab", a_none, "no program given (a test, a tool): the usual form")
-        # "mtp": false does not take the vocabulary folder out of a DFlash2 start
-        off = {"model_name": GYRO, "args": list(self.args), "drafting": "dflash2", "mtp": False}
-        with mock.patch("strata_common.engine_client.drafting_vram_mib", return_value=None), mock.patch.object(drafting, "data_dir_of", return_value=self.data):
-            a = engine_args(off, str(old))
-        self.assertEqual(a[a.index("--mtp") + 1], str(self.mtp))
-
-    def test_the_retry_arguments_exist_only_for_an_auto_start_that_picked_dflash2(self):
-        from strata_common.engine_client import mtp_retry_args
-        old = str(self.exe("old.exe", self.OLD))
-        base = {"model_name": GYRO, "args": list(self.args)}
-        with mock.patch("strata_common.engine_client.drafting_vram_mib", return_value=None), mock.patch.object(drafting, "data_dir_of", return_value=self.data):
-            alt = mtp_retry_args({**base, "drafting": "auto"}, old, ["--effort", "x"])
-            self.assertIsNotNone(alt)
-            self.assertEqual(alt[:len(self.args)], self.args, "the MTP, as the config had it")
-            self.assertNotIn("--draft", alt)
-            self.assertEqual(alt[-2:], ["--effort", "x"], "what the start adds goes along")
-            self.assertIsNotNone(mtp_retry_args(dict(base), old), "no choice saved means Auto")
-            self.assertIsNone(mtp_retry_args({**base, "drafting": "dflash2"}, old), "named by the person: it fails with its reason")
-            self.assertIsNone(mtp_retry_args({**base, "drafting": "mtp"}, old), "nothing to fall back from")
-            self.assertIsNone(mtp_retry_args({**base, "drafting": "off"}, old))
-            self.assertIsNone(mtp_retry_args({"model_name": "qwen3.6-35b-a3b", "args": list(self.args), "drafting": "auto"}, old), "another model has no DFlash2")
-            # no MTP layer on this computer: the other start would be DFlash2 again, so there is nothing to retry with
-            for name in ("experts.bin", "draft_vocab.bin"):
-                (self.mtp / name).unlink()
-            self.assertIsNone(mtp_retry_args({**base, "drafting": "auto"}, old))
-        # the lines and the note of the real start are not touched by working the retry out
-        drafting.take_note()
-        with mock.patch("strata_common.engine_client.drafting_vram_mib", return_value=None), mock.patch.object(drafting, "data_dir_of", return_value=self.data):
-            mtp_retry_args({**base, "drafting": "auto"}, old)
-        self.assertEqual(drafting.take_note(), "")
 
     def test_the_no_drafter_retry_exists_for_an_auto_start_with_a_drafter_and_never_swaps_in_the_mtp(self):
         """A start that ended for lack of graphics memory is repeated with no drafter (multi-card walk): DFlash2 -> MTP would take MORE memory from a card that is short."""
@@ -861,7 +736,7 @@ class FetchAndPack(unittest.TestCase):
         self.assertEqual(self.steps[0][0], "The DFlash2 drafter is ready.")
 
     def test_a_fresh_install_that_selected_only_dflash2_has_everything_the_engine_needs(self):
-        """No MTP layer was ever downloaded (no mtp folder at all): the pack comes with the draft vocabulary, and the engine arguments carry
+        """No MTP layer was ever downloaded (no mtp folder at all): the pack comes with the draft vocabulary, and the drafter's arguments carry
         --mtp-draft-vocab for it and no --mtp."""
         self.assertFalse((self.data / "mtp").exists())
         self.assertFalse(drafting.vocab_target(self.data).exists())
@@ -881,12 +756,6 @@ class FetchAndPack(unittest.TestCase):
         self.assertEqual(a[a.index("--mtp-draft-vocab") + 1], str(vocab))
         self.assertEqual(a[a.index("--draft-model") + 1], str(drafting.pack_path(self.data)))
         self.assertEqual(a[a.index("--draft-fallback") + 1], "none")
-        # and through the server, as a start builds it
-        from strata_common.engine_client import engine_args
-        with mock.patch("strata_common.engine_client.drafting_vram_mib", return_value=None), mock.patch.object(drafting, "data_dir_of", return_value=self.data):
-            served = engine_args({"model_name": GYRO, "args": list(args)})
-        self.assertNotIn("--mtp", served)
-        self.assertTrue(Path(served[served.index("--mtp-draft-vocab") + 1]).is_file())
 
     def test_the_vocabulary_is_provided_once_and_never_overwritten(self):
         out = drafting.provide_vocab(self.data)
@@ -1020,10 +889,6 @@ class TheAppAsksControl(unittest.TestCase):
 class TheDownloadPlanListsIt(unittest.TestCase):
     """`strata launch --plan --drafting dflash2` adds the drafter to the download when it would be used."""
 
-    def setUp(self):
-        from tests.terminal.launch_support import not_intel
-        not_intel(self)
-
     def test_the_plan_line_and_the_part(self):
         from tests.terminal.launch_support import HW_12, Home, catalog
         from strata_cli.launch.runner import Runner
@@ -1059,10 +924,9 @@ class ControlReportsWhetherTheEngineServesIt(unittest.TestCase):
 
 
 def qwen38_engine_source():
-    """Gets the source of the Qwen3.8 engine's main program and of its loader (src/models/qwen38/model.cpp), which
-    together hold the messages drafting.py looks for in the engine program."""
-    return "".join((ROOT / path).read_text(encoding="utf-8") for path in ("src/program/generate.cpp",
-                                                                           "src/models/qwen38/model.cpp"))
+    """Gets the source of the Qwen3.8 loader (src/models/qwen38/model.cpp), which holds the messages drafting.py looks
+    for in the engine program."""
+    return (ROOT / "src/models/qwen38/model.cpp").read_text(encoding="utf-8")
 
 
 if __name__ == "__main__":

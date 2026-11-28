@@ -138,14 +138,14 @@ class SetupRerun(unittest.TestCase):
 
 class Start(unittest.TestCase):
     def test_every_start_puts_the_persons_options_over_the_generated_ones(self):
-        cfg = {"args": ["--pack", "/p", "--vram-reserve-mib", "1536", "--spec", "4"],
-               "user_args": ["--vram-reserve-mib", "0"] + CVEC}
+        cfg = {"args": ["--pack", "/p", "--vram-reserve-mib", "1536", "--rows", "8"],
+               "user_args": ["--vram-reserve-mib", "0", "--rows", "4"]}
         with contextlib.redirect_stdout(io.StringIO()):
             args = engine_args(cfg)
         self.assertEqual(value(args, "--vram-reserve-mib"), "0")
         self.assertEqual(args.count("--vram-reserve-mib"), 1)
-        self.assertEqual(args[args.index("--control-vector-scaled"):][:9], CVEC)
-        self.assertEqual(cfg["args"][3], "1536")                                           # the config in memory is untouched
+        self.assertEqual(value(args, "--rows"), "4")
+        self.assertEqual(cfg["args"][3], "1536")                                          # the config in memory is untouched
 
     def test_the_settings_page_records_the_reserve_as_the_persons(self):
         cfg = {"args": ["--pack", "/p", "--vram-reserve-mib", "1536"], "args_written": ["--pack", "/p", "--vram-reserve-mib", "1536"]}

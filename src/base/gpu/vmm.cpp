@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && !defined(STRATA_GPU_METAL)
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906)
 #include <cuda.h>
 #include <cuda_runtime.h>
 
@@ -142,7 +142,7 @@ bool VmmRange::unmap_at(uint64_t offset, uint64_t bytes) {
 #else  // not CUDA
 // HIP (ROCm 6+): the same elastic range through hipMemAddressReserve / hipMemCreate / hipMemMap / hipMemSetAccess.  Available
 // only where the device reports virtual memory management support (STRATA_HIP_VMM=0 turns it off): --kv-grow stays off
-// otherwise, as before.  Everything else (Metal, gfx906, ROCm older than 6): no virtual memory, the elastic K/V stays off.
+// otherwise, as before.  Everything else (gfx906, ROCm older than 6): no virtual memory, the elastic K/V stays off.
 #if defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906)
 #include <hip/hip_runtime.h>
 #include <hip/hip_version.h>

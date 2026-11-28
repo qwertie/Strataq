@@ -304,21 +304,6 @@ def _default_app_pubkey() -> str:
     return json.loads(conf.read_text(encoding="utf-8"))["plugins"]["updater"]["pubkey"]
 
 
-def _check_mac_archive(archive: Path) -> None:
-    """A Mac updater archive is a gzip tar with exactly one top-level ``<Name>.app`` folder (what Tauri's bundler makes)."""
-    try:
-        with tarfile.open(archive, "r:gz") as tar:
-            tops = {m.name.lstrip("./").split("/", 1)[0] for m in tar.getmembers() if m.name.lstrip("./")}
-            names = set(tar.getnames())
-    except (tarfile.TarError, OSError) as exc:
-        raise SystemExit(f"{archive.name} is not a readable .tar.gz ({exc})")
-    if len(tops) != 1 or not next(iter(tops)).endswith(".app"):
-        raise SystemExit(f"{archive.name} must hold one <Name>.app folder at its root; found {sorted(tops)[:5]}")
-    app = next(iter(tops))
-    if not any(n.lstrip("./") == f"{app}/Contents/Info.plist" for n in names):
-        raise SystemExit(f"{archive.name} has no {app}/Contents/Info.plist")
-
-
 def set_app_platform(app_json: Path, *, target: str, archive: Path, signature_file: Path, url: str, version: str | None = None,
                      notes: str | None = None, pub_date: str | None = None, pubkey: str | None = None,
                      now: dt.datetime | None = None) -> dict:
@@ -331,8 +316,6 @@ def set_app_platform(app_json: Path, *, target: str, archive: Path, signature_fi
     if target not in TAURI_TARGET_NAMES:
         raise SystemExit(f"unknown target {target!r}; use one of {', '.join(TAURI_TARGET_NAMES)}")
     archive, signature_file = Path(archive), Path(signature_file)
-    if target.startswith("darwin-"):
-        _check_mac_archive(archive)
     signature = signature_file.read_text(encoding="utf-8").strip()
     try:
         with archive.open("rb") as stream:
@@ -376,7 +359,7 @@ def main(argv: list[str] | None = None) -> int:
     pd.add_argument("pack", type=Path)
     pd.add_argument("--out", type=Path, required=True)
     pd.add_argument("--version", required=True)
-    pd.add_argument("--backends", required=True, help="comma-separated engine families it was measured on, e.g. metal")
+    pd.add_argument("--backends", required=True, help="comma-separated engine families it was measured on, e.g. cuda,hip")
     pd.add_argument("--url-prefix", default="", help='"" for flat GitHub release assets')
     pd.add_argument("--base", default="")
     pd.add_argument("--licence", default="")
@@ -405,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
     bf.add_argument("--expires-days", type=int)
     sa = sub.add_parser("set-app-platform", help="add one signed app installer to the Tauri updater json")
     sa.add_argument("--app-json", type=Path, required=True, help="the file to create or patch (what build-feed --app-json takes)")
-    sa.add_argument("--target", required=True, help="darwin-aarch64, darwin-x86_64, windows-x86_64 or linux-x86_64")
+    sa.add_argument("--target", required=True, help="windows-x86_64 or linux-x86_64")
     sa.add_argument("--archive", type=Path, required=True)
     sa.add_argument("--sig", type=Path, required=True, help="the .sig file made by tauri signer sign")
     sa.add_argument("--url", help="where the archive is published (default: the latest GitHub release)")

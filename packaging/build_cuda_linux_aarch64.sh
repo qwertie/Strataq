@@ -6,8 +6,9 @@
 #
 # Run it on the Spark (arm64 Linux, CUDA 13.0 toolkit, a Python 3 venv with requirements.txt and requirements-build.txt, cmake and
 # ninja on PATH; PYTHON=<that python>).  It runs spark/build_engine.sh, then makes two packages in $OUT (default ./out-engine-cuda13-aarch64):
-#   <ver>-linux-aarch64-cuda-cuda13/       strata, libstrata_kq.so, strata-vision, strata-dsv41 and the CUDA libraries  (feed member "engine")
-#   dsv41/<ver>-linux-aarch64-cuda-cuda13/ strata-dsv41 and the CUDA libraries                                         (feed member "dsv41")
+#   <ver>-linux-aarch64-cuda-cuda13/       strata-q38, strata-q36, libstrata_kq.so, strata-vision, strata-ds41 and the CUDA libraries
+#                                          (feed member "engine")
+#   dsv41/<ver>-linux-aarch64-cuda-cuda13/ strata-ds41 and the CUDA libraries (feed member "dsv41")
 # Nothing is signed or uploaded: sign with packaging/feed_tool.py (sign-package, then pack-engine; --prefix strata-dsv41 for the second).
 #
 # PKGVER is the package version (default: the version in CMakeLists.txt); COMMIT names the source commit in the build id and is required
@@ -26,24 +27,23 @@ cd "$repo"
 ver=${PKGVER:-$(sed -n 's/^[[:space:]]*project([^)]*VERSION[[:space:]]*\([0-9][0-9.]*\).*/\1/p' CMakeLists.txt | head -1)}
 commit=${COMMIT:-$(git rev-parse HEAD 2>/dev/null || true)}
 [ -n "$commit" ] || { echo "build_cuda_linux_aarch64.sh: set COMMIT=<hex> (no .git here)" >&2; exit 2; }
-export COMMIT=$commit
 stage=$(mktemp -d "${TMPDIR:-/tmp}/strata-engine-stage.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
 OUT=$stage/engine BUILD_VISION=${BUILD_VISION:-1} BUILD_DSV41=1 sh spark/build_engine.sh
 cudafull=$(sed -n 's/.*"cuda": "\([^"]*\)".*/\1/p' "$stage/engine/BUILD.json")
 id="release-${ver}-cuda13-${cudafull}-aarch64-$(printf '%s' "$commit" | cut -c1-12)"
 mkdir -p "$out/dsv41"
-# the Qwen engine package: strata and the DeepSeek engine beside it (as the Linux x86_64 cuda13 package carries it)
+# the Qwen engine package: strata-q38 and strata-q36, with the DeepSeek engine beside them
 "$py" packaging/package_engine.py --src "$stage/engine" --backend cuda --version "$ver" --out "$out" --arch sm_121 --arch compute_121 \
     --min-driver nvidia=$mindriver --variant cuda13 --platform linux-aarch64 --build-id "$id" --require-dsv41 \
     --include SYSTEM-LIBS.txt --include 'libstrata_kq*'
 # the DeepSeek package on its own: its program, BUILD.json and the same CUDA libraries
 ds=$stage/dsv41
 mkdir -p "$ds"
-cp "$stage/engine/strata-dsv41" "$stage/engine/BUILD.json" "$stage/engine/SYSTEM-LIBS.txt" "$ds/"
+cp "$stage/engine/strata-ds41" "$stage/engine/BUILD.json" "$stage/engine/SYSTEM-LIBS.txt" "$ds/"
 for f in "$stage"/engine/*.so.*; do cp "$f" "$ds/"; done
 "$py" packaging/package_engine.py --src "$ds" --backend cuda --version "$ver" --out "$out/dsv41" --arch sm_121 --arch compute_121 \
-    --min-driver nvidia=$mindriver --variant cuda13 --platform linux-aarch64 --build-id "$id" --entrypoint strata-dsv41 \
+    --min-driver nvidia=$mindriver --variant cuda13 --platform linux-aarch64 --build-id "$id" --entrypoint strata-ds41 \
     --include SYSTEM-LIBS.txt
 for d in "$out"/*/ "$out"/dsv41/*/; do
   [ -f "$d/engine-component.json" ] || continue

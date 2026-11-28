@@ -1,8 +1,7 @@
-"""strata_common/vram_fit.py: the fit math with mock card sizes, and its use in setup (sycl/setup_intel.py) and strata launch."""
+"""strata_common/vram_fit.py: the fit math with mock card sizes, and its use in strata launch."""
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 import unittest
 from pathlib import Path
@@ -22,17 +21,6 @@ class Measured(unittest.TestCase):
     def test_the_session_matches_the_engines_three_numbers(self):
         for ctx, mib in ((8192, 234), (16384, 347), (32768, 573)):
             self.assertAlmostEqual(V.session_mib(ctx), mib, delta=8)
-
-    def test_the_default_does_not_start_and_the_estimate_says_how_short(self):
-        self.assertAlmostEqual(self.slack(32768, 300, "auto"), -747, delta=40)     # engine: about 748 MiB more
-        self.assertAlmostEqual(self.slack(16384, 300, "auto"), -497, delta=40)     # 497
-        self.assertAlmostEqual(self.slack(8192, 100, "auto"), -171, delta=40)      # 171
-
-    def test_the_known_good_start_has_room_for_its_slots(self):
-        self.assertAlmostEqual(self.slack(8192, 100, 1024), 412 * V.SLOT_MIB, delta=60)    # 412 slots
-        self.assertAlmostEqual(self.slack(32768, 100, 1024), 107 * V.SLOT_MIB, delta=60)   # 107 slots
-        self.assertAlmostEqual(self.slack(8192, 100, 512), 683 * V.SLOT_MIB, delta=60)     # 683 slots
-        self.assertAlmostEqual(self.slack(8192, 100, 256), 820 * V.SLOT_MIB, delta=60)     # 820 slots
 
     def test_gyro_s_default_fits_as_it_did(self):
         self.assertTrue(V.fits("Gyro-S", 8.0, 32768, "int8", 300, "auto", "intel"))        # 410 slots measured
@@ -94,59 +82,6 @@ class Plan(unittest.TestCase):
         self.assertTrue(V.plan("Qwen3.8-Flash-Next-IQ3_XXS", 6.0, 131072, "int8", 300, "auto", "intel").changed)
 
 
-class SetupIntel(unittest.TestCase):
-    @staticmethod
-    def mod():
-        spec = importlib.util.spec_from_file_location("setup_intel_fit", ROOT / "sycl" / "setup_intel.py")
-        m = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(m)
-        return m
-
-    def cfg(self, m, native="Gyro-M-TQ2_0.gguf", extra=()):
-        base = m.MOUNT
-        return {"exe": "x", "cwd": "y", "args": ["--pack", str(base / "d" / "pack"), "--native", str(base / "d" / native),
-                                                 "--expert-cache", "auto", "--prefill", "auto", "--max-context", "32768",
-                                                 "--kv", "int8", "--vram-reserve-mib", "300", *extra]}
-
-    def val(self, c, flag):
-        return c["args"][c["args"].index(flag) + 1]
-
-    def run_it(self, m, cfg, vram, drv="i915", **kw):
-        notes = []
-        c = m.to_sycl(cfg, m.ROOT / "build-sycl" / "strata", 64.0, {}, vram, drv, "56a1", fit_notes=notes, **kw)
-        return c, notes
-
-    def test_gyro_m_on_the_a750_gets_a_config_that_starts_and_one_line(self):
-        m = self.mod()
-        c, notes = self.run_it(m, self.cfg(m), 8.0, auto_reserve=True)
-        self.assertEqual(self.val(c, "--max-context"), "32768")           # the context is the person's: it stays
-        self.assertEqual(self.val(c, "--vram-reserve-mib"), "300")
-        self.assertEqual(self.val(c, "--prefill"), "512")
-        self.assertEqual(c["args"].count("--vram-reserve-mib"), 1)
-        self.assertEqual(len(notes), 1)
-        self.assertIn("Gyro-M on this 8 GB card: short of GPU memory", notes[0])
-
-    def test_a_reserve_the_user_asked_for_is_kept(self):
-        m = self.mod()
-        c, notes = self.run_it(m, self.cfg(m), 8.0, auto_reserve=False)
-        self.assertEqual(self.val(c, "--vram-reserve-mib"), "300")
-        self.assertEqual(self.val(c, "--max-context"), "32768")
-
-    def test_a_context_the_user_asked_for_is_kept(self):
-        m = self.mod()
-        c, notes = self.run_it(m, self.cfg(m), 8.0, auto_reserve=True, ctx_asked=True)
-        self.assertEqual(self.val(c, "--max-context"), "32768")
-
-    def test_configs_that_fit_are_byte_identical(self):
-        m = self.mod()
-        for vram, drv in ((8.0, "i915"), (12.0, "xe"), (16.0, "i915"), (24.0, "xe"), (32.0, "xe")):
-            for native in ("a.gguf", "Gyro-S-TQ1_0.gguf"):
-                off, _ = self.run_it(m, self.cfg(m, native), vram, drv, fit=False)
-                on, notes = self.run_it(m, self.cfg(m, native), vram, drv, auto_reserve=True)
-                self.assertEqual(off, on, (vram, drv, native))
-                self.assertEqual(notes, [])
-
-
 FN = "qwen3.8-flash-next-iq3_xxs"
 
 
@@ -172,40 +107,11 @@ class SlotSessions(unittest.TestCase):
         self.assertEqual(a, V.slack_mib(FN, 8.0, 8192, "int8", 700, "auto", "intel", 1))
         self.assertEqual(V.needed_mib(), V.needed_mib(FN, 1))
 
-    def test_the_engines_own_minimum_is_the_threshold(self):
-        self.assertAlmostEqual(V.needed_mib(FN, 2, "intel"), V.SLOT_RUN_MIN * V.SLOT_SLOTTED_MIB + V.MARGIN_MIB, delta=0.01)    # one slot and the margin, not 128 slots
-        self.assertGreater(V.needed_mib(FN, 0), 128 * 1.2)                                                                          # a single request keeps its old rule
-
-    def test_an_8gb_arc_with_two_requests_and_the_refused_reserve_reads_prompts_in_smaller_chunks(self):
-        # 8192 with a 1024 MiB reserve is the start the engine refused (the estimate says 137 MiB short; the engine 99)
-        self.assertLess(V.slack_mib(FN, 8.0, 8192, "int8", 1024, "auto", "intel", 2), 0)
-        f = V.plan(FN, 8.0, 8192, "int8", 1024, "auto", "intel", title=FN, reserve_fixed=True, slots=2)
-        self.assertTrue(f.changed and f.fits)
-        self.assertEqual((f.ctx, f.slots, f.reserve_mib, f.prefill), (8192, 2, 1024, "1024"))      # the context and the 2 requests stay
-        self.assertGreaterEqual(f.slack_mib, V.needed_mib(FN, 2, "intel"))
-        self.assertIn(V.NOTE_SLOW, f.line)
-
-    def test_an_8gb_arc_whose_start_the_engine_runs_is_not_touched(self):
-        # a 700 MiB reserve at 8192 leaves the cache about 84 slots: the engine runs it
-        f = V.plan(FN, 8.0, 8192, "int8", 700, "auto", "intel", title=FN, reserve_fixed=True, prefill_fixed=True, slots=2)
-        self.assertFalse(f.changed)
-        self.assertEqual((f.ctx, f.slots), (8192, 2))
-
-    def test_not_even_every_knob_fits_then_the_start_goes_as_far_as_it_can_with_the_same_requests(self):
-        f = V.plan(FN, 6.0, 8192, "int8", 1500, "auto", "intel", title=FN, reserve_fixed=True, slots=2)
-        self.assertEqual((f.ctx, f.slots), (8192, 2))
-        self.assertEqual(f.prefill, "256")
-        self.assertFalse(f.fits)
-
     def test_a_12gb_card_keeps_128k_with_streamed_kv(self):
         # setup writes --kv-resident 32768 at 128K: each of the 3 sessions keeps about 750 MiB (measured), not 1.9 GB
-        for vendor in ("intel", "cuda"):
-            f = V.plan(FN, 12.0, 131072, "int8", 700, "auto", vendor, title=FN, reserve_fixed=True, prefill_fixed=True, slots=2, kv_resident=32768)
-            self.assertFalse(f.changed, vendor)
-            self.assertEqual((f.ctx, f.slots), (131072, 2))
-        self.assertGreater(V.slack_mib(FN, 12.0, 131072, "int8", 700, "auto", "intel", 2, 32768), 2000)
-        # charging each slot the whole 128K would have lowered it (the mistake of 2a1042877)
-        self.assertLess(V.slack_mib(FN, 12.0, 131072, "int8", 700, "auto", "intel", 2, 0), 0)
+        f = V.plan(FN, 12.0, 131072, "int8", 700, "auto", "cuda", title=FN, reserve_fixed=True, prefill_fixed=True, slots=2, kv_resident=32768)
+        self.assertFalse(f.changed)
+        self.assertEqual((f.ctx, f.slots), (131072, 2))
 
     def test_a_card_with_no_measured_figure_is_left_to_the_engine(self):
         f = V.plan(FN, 8.0, 8192, "int8", 1024, "auto", "other", title=FN, reserve_fixed=True, prefill_fixed=True, slots=2)
@@ -228,14 +134,6 @@ class FitStart(unittest.TestCase):
         c = {"model_name": FN, "parallel": 2}
         c.update(kw)
         return c
-
-    def test_an_8gb_arc_reads_prompts_in_smaller_chunks_and_keeps_context_and_requests(self):
-        args, par, note = V.fit_start(self.cfg(), list(self.ARGS), 8192, "sycl")
-        self.assertEqual(args[args.index("--max-context") + 1], "8192")
-        self.assertEqual(args[args.index("--prefill") + 1], "1024")
-        self.assertIsNone(par)                                 # still 2 requests at once
-        self.assertIn(V.NOTE_SLOW, note)
-        self.assertEqual(self.ARGS[self.ARGS.index("--prefill") + 1], "auto")           # the input is not touched
 
     def test_the_persons_own_reserve_and_chunk_are_kept(self):
         args, par, note = V.fit_start(self.cfg(user_args=["--vram-reserve-mib", "1024"]), list(self.ARGS), 8192, "sycl")
@@ -260,13 +158,6 @@ class FitStart(unittest.TestCase):
         self.assertEqual(V.fit_start(self.cfg(), list(self.ARGS), 8192, "metal"), (self.ARGS, None, ""))
         self.assertEqual(V.fit_start(self.cfg(layer_split="auto"), list(self.ARGS), 8192, "sycl"), (self.ARGS, None, ""))
         self.assertEqual(V.fit_start(self.cfg(arch="deepseek41"), list(self.ARGS), 8192, "sycl"), (self.ARGS, None, ""))
-
-    def test_a_start_that_cannot_fit_keeps_its_requests_and_its_context(self):
-        tight = [a if a != "1024" else "1500" for a in self.ARGS]
-        args, par, note = V.fit_start(self.cfg(), tight, 8192, "sycl")
-        self.assertIsNone(par)
-        self.assertEqual(args[args.index("--max-context") + 1], "8192")
-        self.assertIn(V.NOTE_SLOW, note)
 
     def test_no_context_in_the_args_is_never_added(self):
         no_ctx = list(self.ARGS)

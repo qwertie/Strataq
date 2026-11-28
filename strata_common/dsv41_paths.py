@@ -1,4 +1,4 @@
-"""Where the DeepSeek engine package (strata-dsv41) is installed and which saved run configs name it: local only, no network, no download.
+"""Where the DeepSeek engine package (strata-ds41) is installed and which saved run configs name it: local only, no network, no download.
 
 A saved profile's run config names the DeepSeek engine by a plain path into ``engine-dsv41/<version>-<platform>-<backend>[-<variant>]/``.  When an
 engine update (the explicit `strata update`, the app's "Update engine", or `strata launch`) replaces that package, the old folder goes and the run
@@ -17,7 +17,9 @@ import shutil
 import subprocess
 from pathlib import Path
 
-NAME = "strata-dsv41"
+from strata_common import cfg_paths
+
+NAME = "strata-ds41"          # the package's program (its archives keep the name strata-dsv41-*)
 DIR = "engine-dsv41"
 #: A file in engine-dsv41/ holding the folder name of the package the person chose in Settings > Engine (or `strata components use`).  Without it the
 #: newest installed package of a kind is the one that runs.  An explicit update clears it.  Read by every place that picks a package (`chosen`,
@@ -42,15 +44,16 @@ def kind_of(folder_name: str) -> str:
 
 def engine_root(exe) -> Path | None:
     """The engine-dsv41 folder a plain run-config `exe` lies in, or None: a component reference, another engine, or an engine of your own
-    (STRATA_DSV41_EXE)."""
+    (STRATA_DSV41_EXE).  A config saved before strata-ds41 names strata-dsv41, which the start replaces with strata-ds41
+    (paged_launch.get_current_engine_path)."""
     if not isinstance(exe, str) or not exe or exe.startswith("@") or os.environ.get("STRATA_DSV41_EXE"):
         return None
     root = Path(exe).parent.parent
-    return root if root.name == DIR and Path(exe).name == exe_name() else None
+    return root if root.name == DIR and Path(exe).stem in (NAME, "strata-dsv41") else None
 
 
 def installed(root: Path, kind: str | None = None) -> list[Path]:
-    """The strata-dsv41 programs installed in `root` (engine-dsv41/), oldest first; only packages of `kind` when it is given."""
+    """The strata-ds41 programs installed in `root` (engine-dsv41/), oldest first; only packages of `kind` when it is given."""
     try:
         folders = [d for d in Path(root).iterdir() if d.is_dir() and (d / exe_name()).is_file() and (kind is None or kind_of(d.name) == kind)]
     except OSError:
@@ -84,7 +87,7 @@ def set_pin(root, name: str | None) -> None:
 
 
 def chosen(root, kind: str | None = None) -> Path | None:
-    """The strata-dsv41 a start uses from `root`: the package the person chose (when it is of `kind`, if given), else the newest of `kind`."""
+    """The strata-ds41 a start uses from `root`: the package the person chose (when it is of `kind`, if given), else the newest of `kind`."""
     pin = pinned(root)
     if pin and (kind is None or kind_of(pin) == kind):
         return Path(root) / pin / exe_name()
@@ -149,7 +152,7 @@ def prune(root: Path, keep: Path) -> list[str]:
 
 
 def repoint(config, exe) -> bool:
-    """Make the run config `config` name `exe` (a strata-dsv41 in an engine-dsv41 folder) and that package's library folders, nothing else
+    """Make the run config `config` name `exe` (a strata-ds41 in an engine-dsv41 folder) and that package's library folders, nothing else
     changed; True when the file changed."""
     config = Path(config)
     cfg = json.loads(config.read_text(encoding="utf-8-sig"))
@@ -257,20 +260,21 @@ def repoint_all(configs, exe) -> int:
 
 
 def test_start(exe, timeout: float = 120.0) -> tuple[bool, str]:
-    """`strata-dsv41 --version` runs from its own folder (the package's library folders first on the path) and names itself: it needs no graphics
-    card and no model."""
+    """Checks that the engine starts: run from its own folder (the package's library folders first on the path) with no
+    arguments, strata-ds41 loads its libraries and refuses to go on without --pack, naming itself.  It needs no graphics
+    card and no model.  Returns (True, the refusal line) or (False, why)."""
     env = dict(os.environ)
     dirs = [d for d in lib_dirs(exe) if Path(d).is_dir()]
     var = "PATH" if os.name == "nt" else "LD_LIBRARY_PATH"
     if dirs:
         env[var] = os.pathsep.join(dirs + ([env[var]] if env.get(var) else []))
     try:
-        done = subprocess.run([str(exe), "--version"], capture_output=True, text=True, errors="replace", timeout=timeout, cwd=str(Path(exe).parent), env=env,
+        done = subprocess.run([str(exe)], capture_output=True, text=True, errors="replace", timeout=timeout, cwd=str(Path(exe).parent), env=env,
                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except (OSError, subprocess.SubprocessError) as exc:
         return False, f"it could not be started ({exc})"
-    first = ((done.stdout or "").strip().splitlines() or [""])[0]
-    if done.returncode != 0 or not first.startswith(NAME):
-        tail = ((done.stderr or "").strip().splitlines() or [first or f"exit {done.returncode}"])[-1]
-        return False, f"it did not start correctly ({tail[:160]})"
-    return True, first
+    lines = ((done.stdout or "") + (done.stderr or "")).strip().splitlines()
+    refusal = next((line for line in lines if line.startswith(f"{NAME}: --pack")), None)
+    if refusal is None:
+        return False, f"it did not start correctly ({(lines or [f'exit {done.returncode}'])[-1][:160]})"
+    return True, refusal

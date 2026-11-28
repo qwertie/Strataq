@@ -194,7 +194,7 @@ def fake_prebuilt(calls):
         eng.mkdir(exist_ok=True)
         (eng / "BUILD.json").write_text(json.dumps({"version": "0.1.39", "source": "release", "archs": [86], "ptx": True,
                                                     "cuda": "12.9" if toolkit == 12 else "13.0", "vision": "gpu"}))
-        (eng / setup.EXE).write_bytes(b"")
+        (eng / setup.Q38EXE).write_bytes(b"")
         (eng / setup.VEXE).write_bytes(b"")                    # pictures are on by default: the engine carries the reader
         return eng
     return get
@@ -218,7 +218,7 @@ class Install(unittest.TestCase):
         self.assertEqual(code, 0, out[-3000:])
         self.assertEqual((calls, libs), ([12], [12]))
         self.assertEqual(cfg["cuda"], 12)
-        self.assertEqual(cfg["exe"], "<T>/engine-cuda12/<EXE>")
+        self.assertEqual(cfg["exe"], "<T>/engine-cuda12/<Q38EXE>")
         self.assertIn("sm_70 is older than CUDA 13 supports", out)
         self.assertIn("experimental", out)
 
@@ -258,7 +258,7 @@ class Install(unittest.TestCase):
         self.assertEqual(code, 0, out[-3000:])
         self.assertEqual((calls, libs), ([13], [13]))
         self.assertNotIn("cuda", cfg)
-        self.assertEqual(cfg["exe"], "<T>/engine/<EXE>")
+        self.assertEqual(cfg["exe"], "<T>/engine/<Q38EXE>")
         self.assertIn("choose it with --gpu 1", out)
         skip = ("gpu", "gpus_asked", "lib_dirs")       # one card vs two; the fake engine's library folders
         self.assertEqual({k: v for k, v in cfg.items() if k not in skip}, {k: v for k, v in cfg0.items() if k not in skip})
@@ -309,7 +309,7 @@ class Start(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             cfg_path = root / "strata-iq3_xxs.json"
-            cfg = {"exe": str(root / "engine" / setup.EXE), "args": [], "lib_dirs": ["<cu13>"]}
+            cfg = {"exe": str(root / "engine" / setup.Q38EXE), "args": [], "lib_dirs": ["<cu13>"]}
             calls = []
             with mock.patch.object(setup, "ROOT", root), \
                     mock.patch.object(setup, "get_prebuilt", fake_prebuilt(calls)), \

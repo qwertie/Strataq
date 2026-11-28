@@ -84,9 +84,6 @@ def add_parsers(sp: argparse._SubParsersAction) -> list[argparse.ArgumentParser]
     g.add_argument("--family", metavar="NAME", help="the model family when a size is offered by several (qwen, swift, coder, ...)")
     g.add_argument("--dsv41-package", metavar="FILE", help="DeepSeek: the engine package you downloaded from the release page (.tar.gz or .zip); "
                                                           "it is checked and installed instead of being fetched")
-    g.add_argument("--engine", choices=("original", "new"),
-                   help="Qwen3.8 and DeepSeek: the original engine (strata, strata-dsv41) or the new one "
-                        "(strata-q38, strata-ds41; the default when the installed engine has it)")
     g.add_argument("--model-path", metavar="PATH", help="use model files you already have: a folder of shards or one .gguf file")
     g.add_argument("--data-dir", metavar="DIR", help="where downloaded model files are stored (default: Strata's data folder)")
     g.add_argument("--move-data", action="store_true",
@@ -115,9 +112,9 @@ def add_parsers(sp: argparse._SubParsersAction) -> list[argparse.ArgumentParser]
                         "of graphics memory or less, and on a single Radeon RX 9000 / AI PRO R9700 card, or several that hold half of the experts), full uses all 6")
     g.add_argument("--full-quality", action="store_true", help="DeepSeek: all 6 experts per word (the same as --speed full), for scripts")
     g.add_argument("--gpu", metavar="LIST", help="graphics card numbers to use, e.g. 0 or 0,1 (default: the engine's choice)")
-    g.add_argument("--backend", metavar="nvidia|amd|intel|auto",
+    g.add_argument("--backend", metavar="nvidia|amd|auto",
                    help="which make of graphics card the engine uses on a PC that has cards of more than one make (default: auto = NVIDIA first, "
-                        "then AMD, then Intel). Your choice is remembered for the next launch, update and app; 'auto' forgets it")
+                        "then AMD). Your choice is remembered for the next launch, update and app; 'auto' forgets it")
     g.add_argument("--gpu-roles", metavar="LIST", help="a role for each graphics card: main, helper or off, e.g. 1=main,0=helper (cards you do not name are off). "
                    "Main does the last steps of every answer; a helper holds part of the model")
     g.add_argument("--tune", type=_choice("a tuning mode", S.TUNE_MODES), metavar="quick|thorough|skip", help="find the fastest settings first (default: skip here; the guided screens suggest quick the first time)")
@@ -220,8 +217,6 @@ def settings_from_args(a: argparse.Namespace, catalog=None) -> tuple[S.LaunchSet
         s.name = s.name or a.preset
     if getattr(a, "dsv41_package", None):
         s.dsv41_package = str(Path(a.dsv41_package).expanduser())
-    if getattr(a, "engine", None):
-        s.engine = a.engine
     if a.model_path:
         s.model_path = str(Path(a.model_path).expanduser())
         if not a.model:
@@ -298,9 +293,6 @@ def settings_from_args(a: argparse.Namespace, catalog=None) -> tuple[S.LaunchSet
         s.extra = {**s.extra, **S.settings_from_pairs(a.set)}
     if a.dspark:
         s.extra = {**s.extra, "--dspark": a.dspark}
-        if a.dspark == "on" and sys.platform == "darwin":
-            notices.append(S.Notice("warn", "DeepSeek's drafter (DSpark) is not supported on a Mac yet, so --dspark on will probably stop the engine.",
-                                    "Leave it out: on a Mac the drafter is off and answers are as fast without it."))
     if a.pool_cores:
         text = a.pool_cores.replace(" ", "")
         if not re.fullmatch(r"\d+(-\d+(:\d+)?)?(,\d+(-\d+(:\d+)?)?)*", text):
@@ -352,27 +344,6 @@ def _parallel_lines(info: dict | None) -> None:
             _say("      " + w)
 
 
-def _broken_nvidia_note(comp) -> str | None:
-    """A PC with an NVIDIA card whose driver does not answer (nvidia-smi fails: a driver and library out of step after an update) and working
-    Intel Arc cards: the engine choice says NVIDIA (the card is there), so the launch would try the NVIDIA engine and fail. Say what is wrong and
-    the one next step. Warn only."""
-    try:
-        from strata_common import engine_component as ec
-        backend, how = ec.detect_backend()
-        if backend != "cuda" or how in ("environment", "saved choice"):
-            return None
-        if any(str(c.get("vendor")) == "nvidia" for c in comp.gpus) or "cuda" not in ec.gpu_makes_present():
-            return None
-        arc = [c for c in comp.gpus if str(c.get("vendor")) == "intel"]
-        if not arc:
-            return None
-    except Exception:                                    # noqa: BLE001 - a hint only
-        return None
-    return ("This PC has an NVIDIA card, but its driver does not answer (nvidia-smi fails), so the NVIDIA engine cannot start. "
-            f"The Intel Arc card{'s' if len(arc) > 1 else ''} here work: add --backend intel to use {'them' if len(arc) > 1 else 'it'} "
-            "(it is remembered), or repair the NVIDIA driver.")
-
-
 def apply_defaults(s: S.LaunchSettings, catalog) -> tuple[S.LaunchSettings, list[S.Notice]]:
     """Fill what was left open with the recommendation for this computer, and collect warnings (never errors for a bad fit)."""
     notices: list[S.Notice] = []
@@ -394,12 +365,9 @@ def apply_defaults(s: S.LaunchSettings, catalog) -> tuple[S.LaunchSettings, list
                                             "`strata launch --backend auto` goes back to the PC's own choice.", ""))
     except Exception:                                    # noqa: BLE001
         pass
-    broken = _broken_nvidia_note(comp)
-    if broken:
-        notices.append(S.Notice("warn", broken, ""))
     if s.family and s.model:
         if s.context is None:
-            s.context = catalog.max_context(s.family, s.model, hw)
+            s.context = catalog.max_context(s.family, s.model)
         from strata_common import gpu_fit as _gf
         _q4 = _gf.strix_q4_stall_note(s.model, comp.gpus)       # REMOVE with the Strix stall fix (gpu_fit.STRIX_Q4_NOTE)
         if _q4:
@@ -534,9 +502,6 @@ def gpu_notices(s: S.LaunchSettings, comp) -> list[S.Notice]:
     note = comp.other_vendor_note
     if note:
         out.append(S.Notice("warn", note, ""))
-    new_card = comp.new_card_note
-    if new_card:
-        out.append(S.Notice("warn", new_card[0], new_card[1]))
     if s.family == "deepseek41" and comp.rx7000_card:
         out.append(S.Notice("warn", DEEPSEEK_RX7000_NOTE, "If something fails, tell us at https://github.com/Niko1221/Strata/issues (attach the engine log)."))
     return out
@@ -863,11 +828,11 @@ def run_launch(a: argparse.Namespace) -> int:
                 if not a.plan:
                     _ec.save_backend(None)
                 os.environ.pop(_ec.ENV_BACKEND, None)
-                backend_note = "The engine make is chosen by the PC again (NVIDIA first, then AMD, then Intel)." if not a.plan else None
+                backend_note = "The engine make is chosen by the PC again (NVIDIA first, then AMD)." if not a.plan else None
             else:
                 family = _ec.clean_backend_name(word)
                 if not family:
-                    return fail(f"'{a.backend}' is not a make of graphics card Strata knows. Use nvidia, amd, intel or auto.", 2)
+                    return fail(f"'{a.backend}' is not a make of graphics card Strata knows. Use nvidia, amd or auto.", 2)
                 os.environ[_ec.ENV_BACKEND] = family          # this launch and everything it starts
                 made = _ec.MAKE_NAMES[family]
                 if a.plan:

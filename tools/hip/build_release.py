@@ -7,8 +7,8 @@ dist/strata-windows-x64-hip.zip (tools/hip/package_windows.py).
 
 Run it with Strata's own Python (the .venv START-HERE.bat makes): ROCm's wheels (~10 GB) are installed into that
 environment unless ROCM_PATH names a TheRock root you already have (`rocm-sdk path --root`).  --tests also builds the
-HIP unit tests (ctest in the build folder; they need an AMD GPU).  The build folder also holds strata-dsv41.exe and
-strata-ds41.exe for the DeepSeek package (packaging/README.md).  Settings (environment variables, all optional):
+HIP unit tests (ctest in the build folder; they need an AMD GPU).  The build folder also holds strata-ds41.exe for
+the DeepSeek package (packaging/README.md).  Settings (environment variables, all optional):
   STRATA_HIP_ARCHS   gfx1100;gfx1101;gfx1102;gfx1200;gfx1201;gfx1030;gfx1031;gfx1151 (gfx1151 = Strix Halo).
                      The release packages are built one per card family: rx9070 = gfx1200;gfx1201, rdna3 = gfx1100;gfx1101;gfx1102;
                      gfx1151, rdna2 = gfx1030;gfx1031; each then goes through package_engine.py --variant <name>
@@ -29,7 +29,7 @@ sys.path.insert(0, str(ROOT))
 import setup  # noqa: E402
 
 ARCHS = "gfx1100;gfx1101;gfx1102;gfx1200;gfx1201;gfx1030;gfx1031;gfx1151"
-PROGRAMS = ("strata.exe", "strata-device.exe", setup.Q38EXE, setup.DS41EXE, setup.DSV41EXE)
+PROGRAMS = (*setup.QWEN_PROGRAMS, "strata-device.exe", setup.DS41EXE)
 
 
 def main() -> int:

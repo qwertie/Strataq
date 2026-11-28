@@ -4,7 +4,7 @@
  *   preview a folder of a supported model, preview an unsupported GGUF (must be refused in plain terms), prepare the supported one
  *   (pack, from the folder, nothing copied), load it, get a chat answer, unload, shut down, and check nothing is left running.
  *
- *   node local-gguf-e2e.mjs --root /data/ui4-e2e --good /data/141-gyro/models/IQ2_XS --bad /data/ui4-e2e/bad [--context 8192] [--backend cuda|metal]
+ *   node local-gguf-e2e.mjs --root /data/ui4-e2e --good /data/141-gyro/models/IQ2_XS --bad /data/ui4-e2e/bad [--context 8192] [--backend cuda|hip]
  *   (the app folder is <root>/app: node/, host/, control/ ...; <root>/components gets the engine, from <root>/app/engine-bundle when the app carries one)
  */
 import { spawn, spawnSync } from 'node:child_process';

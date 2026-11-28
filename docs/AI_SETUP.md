@@ -4,21 +4,20 @@ Use this guide when a user asks an AI agent to install Strata (version 0.2.13). 
 one; do not start from a source checkout.
 
 - **The Terminal and `strata launch`** (below). This is the route for an agent that has a shell.
-- **The desktop app.** One installer per system: `Strata-0.2.13-windows-x64-setup.exe`,
-  `Strata-0.2.13-linux-x86_64.AppImage`, `Strata-0.2.13-macos-arm64.dmg`, from the
-  [latest release](https://github.com/Niko1221/Strata/releases/latest). The Windows and Linux installers carry no
-  engine: on first start the app shows the engine for the user's graphics card and downloads it, or installs a file the
-  user already has ("I already have the file"). Details: [INSTALL.md](INSTALL.md).
+- **The desktop app.** One installer per system: `Strata-0.2.13-windows-x64-setup.exe` or
+  `Strata-0.2.13-linux-x86_64.AppImage`, from the [latest release](https://github.com/Niko1221/Strata/releases/latest).
+  The installers carry no engine: on first start the app shows the engine for the user's graphics card and downloads
+  it, or installs a file the user already has ("I already have the file"). Details: [INSTALL.md](INSTALL.md).
 
 Model availability, provider preference and API details are in [AI_REFERENCE.md](AI_REFERENCE.md).
 
 ## 1. Check the computer and the requested model
 
 - Check OS, CPU architecture, graphics cards, driver, available RAM/VRAM and free disk space.
-- Use the [hardware guides](INSTALL.md#what-you-need). Linux and Windows packages are x86-64; Mac packages are
-  Apple Silicon and need macOS 15 or newer. Older GPUs, Intel Arc and low-memory machines have specific limits.
-- Model support is separate from hardware support. <!-- cap:summary:qwen36 -->Qwen3.6-35B-A3B runs in the desktop app and in the Terminal. Hardware: NVIDIA on Windows; NVIDIA on Linux; AMD on Windows; AMD on Linux. Package present but not tested: NVIDIA DGX Spark. Does not run on: Intel Arc on Linux, Apple silicon. Per-hardware limits and measurements: [CAPABILITIES.md](CAPABILITIES.md#qwen36).<!-- /cap -->
-  <!-- cap:summary:deepseek41 -->DeepSeekV4.1-Flash-1017 runs in the desktop app and in the Terminal. Hardware: NVIDIA on Windows (RTX 30, 40 and 50); NVIDIA on Linux (RTX 30, 40 and 50); NVIDIA DGX Spark (GB10); AMD on Windows (Ryzen AI Max / Strix Halo, gfx1151); AMD on Linux (Radeon AI PRO R9700); Apple silicon (64 GB or more, macOS 15 or newer). Does not run on: Intel Arc on Linux. Per-hardware limits and measurements: [CAPABILITIES.md](CAPABILITIES.md#deepseek41).<!-- /cap -->
+- Use the [hardware guides](INSTALL.md#what-you-need). Packages are for Linux and Windows on x86-64, with an NVIDIA
+  or AMD card. There is no Mac or Intel Arc engine. Older GPUs and low-memory machines have specific limits.
+- Model support is separate from hardware support. <!-- cap:summary:qwen36 -->Qwen3.6-35B-A3B runs in the desktop app and in the Terminal. Hardware: NVIDIA on Windows; NVIDIA on Linux; AMD on Windows; AMD on Linux. Package present but not tested: NVIDIA DGX Spark. Per-hardware limits and measurements: [CAPABILITIES.md](CAPABILITIES.md#qwen36).<!-- /cap -->
+  <!-- cap:summary:deepseek41 -->DeepSeekV4.1-Flash-1017 runs in the desktop app and in the Terminal. Hardware: NVIDIA on Windows (RTX 30, 40 and 50); NVIDIA on Linux (RTX 30, 40 and 50); NVIDIA DGX Spark (GB10); AMD on Windows (Ryzen AI Max / Strix Halo, gfx1151); AMD on Linux (Radeon AI PRO R9700). Per-hardware limits and measurements: [CAPABILITIES.md](CAPABILITIES.md#deepseek41).<!-- /cap -->
   DeepSeekV4.1-Flash-1017 (`--family deepseek41`) has three sets: 1.75 bpw (239 GB of disk),
   2.00 bpw (257 GB) and 2.25 bpw (274 GB), and for a 12 GB card it needs 46 to 64 GB of RAM. The context is 8K.
   `--speed faster|full` (or `--full-quality`) chooses how many experts it uses per word; Faster is the default on a
@@ -36,7 +35,7 @@ Model availability, provider preference and API details are in [AI_REFERENCE.md]
 The installer downloads a private Python runtime and Control, verifies the release checksums and signed feed, and
 installs into the user's home folder. The engine and model are acquired during launch.
 
-**Linux / Mac:**
+**Linux:**
 
 ```sh
 curl -fsSL https://github.com/qwertie/Strataq/releases/latest/download/install.sh -o install.sh && sh install.sh
@@ -48,7 +47,7 @@ curl -fsSL https://github.com/qwertie/Strataq/releases/latest/download/install.s
 irm https://github.com/qwertie/Strataq/releases/latest/download/install.ps1 | iex
 ```
 
-Open a new terminal on Windows. On Linux and Mac, use the full executable path printed by the installer if
+Open a new terminal on Windows. On Linux, use the full executable path printed by the installer if
 `~/.local/bin` is not on PATH. Confirm with `strata --version` and `strata launch --help`.
 Do not search for `START-HERE.bat` in the installed app or Terminal: it is not part of them.
 
@@ -74,8 +73,7 @@ strata launch --family qwen --model q2_0 --context 32k --plan --output json
 ```
 
 Check the resolved family, model, storage folder, context, picture reader and missing downloads. If the plan names
-an unavailable backend, do not continue as though compatibility were confirmed. Intel Arc has a released Linux
-engine, but model preparation still has special requirements: [INTEL_ARC.md](INTEL_ARC.md).
+an unavailable backend, do not continue as though compatibility were confirmed.
 
 ## 4. Start it
 
@@ -114,7 +112,7 @@ strata doctor --live
 
 Check the printed address and model, then query `/health` and `/v1/models` at that address. With the default port:
 
-**Linux / Mac:**
+**Linux:**
 
 ```sh
 curl -fsS http://127.0.0.1:8080/health

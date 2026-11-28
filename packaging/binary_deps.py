@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""What an engine file needs from the machine it runs on: PE (Windows), ELF (Linux) and Mach-O (macOS) import lists, read
-with no tools and no third-party packages, and the rule "everything imported is bundled or belongs to the OS or the GPU driver".
+"""What an engine file needs from the machine it runs on: PE (Windows) and ELF (Linux) import lists, read with no
+tools and no third-party packages, and the rule "everything imported is bundled or belongs to the OS or the GPU driver".
 
 Why: on 2026-10-17 a tester's clean Windows 11 PC failed to start the engine with 0xC0000135 (a DLL was not found): the
 package held strata.exe and strata_kq.dll but not cublas64_13.dll / cublasLt64_13.dll, which strata.exe imports. Our own
@@ -25,7 +25,7 @@ from strata_common.loader_diag import pe_imports  # noqa: E402
 
 # ---- Windows ---------------------------------------------------------------------------------------------------------------
 # Libraries Windows itself ships (a clean Windows 10/11 has them) or the GPU driver installs in System32. Anything else an
-# engine file imports (the Visual C++ runtime, CUDA, HIP, SYCL/Level Zero loaders, OpenMP...) must travel in the package.
+# engine file imports (the Visual C++ runtime, CUDA, HIP, OpenMP...) must travel in the package.
 WINDOWS_OS = (
     "kernel32.dll", "kernelbase.dll", "user32.dll", "gdi32.dll", "advapi32.dll", "shell32.dll", "ole32.dll", "oleaut32.dll",
     "ws2_32.dll", "wsock32.dll", "mswsock.dll", "iphlpapi.dll", "bcrypt.dll", "crypt32.dll", "secur32.dll", "sechost.dll",
@@ -36,11 +36,11 @@ WINDOWS_OS = (
     "opengl32.dll", "glu32.dll", "wldap32.dll", "authz.dll", "msi.dll", "propsys.dll", "uxtheme.dll", "dnsapi.dll",
 )
 # Installed by the GPU driver into System32 (never redistributable by us): the CUDA driver API, the NVIDIA management library,
-# and the AMD / Intel user-mode driver pieces the driver package owns.
+# and the AMD user-mode driver pieces the driver package owns.
 WINDOWS_DRIVER = (
     "nvcuda.dll", "nvml.dll", "nvapi64.dll", "nvapi.dll", "nvcuvid.dll", "nvEncodeAPI64.dll", "nvfatbinaryloader.dll",
     "amdxx64.dll", "amdhip64_*.dll", "amdhip64.dll", "atiadlxx.dll", "atiadlxy.dll", "amdadlx64.dll",
-    "igdrcl64.dll", "ze_intel_gpu64.dll", "ze_loader.dll", "OpenCL.dll", "vulkan-1.dll",
+    "OpenCL.dll", "vulkan-1.dll",
 )
 
 # ---- Linux -----------------------------------------------------------------------------------------------------------------
@@ -53,13 +53,10 @@ LINUX_OS = (
 )
 # From the GPU driver package: never bundled.
 LINUX_DRIVER = (
-    "libcuda.so.1", "libcuda.so", "libnvidia-*.so*", "libnvcuvid.so*", "libze_intel_gpu.so*", "libze_loader.so*",
-    "libOpenCL.so*", "libvulkan.so*", "libGLX*.so*", "libEGL*.so*", "libamdgpu*.so*", "libhsa-runtime64.so*",
-    "libdrm_amdgpu.so*", "libigdrcl.so*", "libnvidia-ml.so*",
+    "libcuda.so.1", "libcuda.so", "libnvidia-*.so*", "libnvcuvid.so*", "libOpenCL.so*",
+    "libvulkan.so*", "libGLX*.so*", "libEGL*.so*", "libamdgpu*.so*", "libhsa-runtime64.so*",
+    "libdrm_amdgpu.so*", "libnvidia-ml.so*",
 )
-
-# ---- macOS -----------------------------------------------------------------------------------------------------------------
-MAC_OS_PREFIXES = ("/usr/lib/", "/System/Library/")
 
 
 def _match(name: str, patterns: tuple[str, ...], fold: bool) -> bool:
@@ -105,30 +102,6 @@ def elf_needed(path: Path) -> list[str]:
     return out
 
 
-def macho_dylibs(path: Path) -> list[str]:
-    """Install names a Mach-O file loads (LC_LOAD_DYLIB, weak, reexport). A fat file reads its first slice."""
-    data = path.read_bytes()
-    magic = struct.unpack_from(">I", data, 0)[0]
-    base = 0
-    if magic in (0xCAFEBABE, 0xCAFEBABF):
-        base = struct.unpack_from(">I", data, 16)[0] if magic == 0xCAFEBABE else struct.unpack_from(">Q", data, 24)[0]
-        magic = struct.unpack_from(">I", data, base)[0]
-    if struct.unpack_from("<I", data, base)[0] not in (0xFEEDFACF, 0xFEEDFACE):
-        raise ValueError(f"{path}: not a Mach-O file")
-    is64 = struct.unpack_from("<I", data, base)[0] == 0xFEEDFACF
-    ncmds, = struct.unpack_from("<I", data, base + 16)
-    o = base + (32 if is64 else 28)
-    out = []
-    for _ in range(ncmds):
-        cmd, size = struct.unpack_from("<II", data, o)
-        if cmd in (0xC, 0x80000018, 0x8000001F):     # LOAD_DYLIB, LOAD_WEAK_DYLIB, REEXPORT_DYLIB
-            name_off, = struct.unpack_from("<I", data, o + 8)
-            s = o + name_off
-            out.append(data[s:data.index(b"\0", s)].decode("utf-8", "replace"))
-        o += size
-    return out
-
-
 def imports(path: Path) -> tuple[str, list[str]]:
     """(kind, names) for a binary, or ("", []) when it is not an executable format this module reads."""
     with path.open("rb") as f:
@@ -137,8 +110,6 @@ def imports(path: Path) -> tuple[str, list[str]]:
         return "pe", pe_imports(path)
     if head == b"\x7fELF":
         return "elf", elf_needed(path)
-    if head in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"):
-        return "macho", macho_dylibs(path)
     return "", []
 
 
@@ -162,7 +133,7 @@ def uncovered(folder: Path, files: list[str] | None = None) -> list[tuple[str, s
     problems: list[tuple[str, str]] = []
     for rel in rels:
         p = folder / rel
-        if p.suffix.lower() in (".json", ".txt", ".md", ".cu", ".h", ".py", ".yaml", ".yml", ".metallib", ".bin"):
+        if p.suffix.lower() in (".json", ".txt", ".md", ".cu", ".h", ".py", ".yaml", ".yml", ".bin"):
             continue
         try:
             kind, names = imports(p)
@@ -174,10 +145,6 @@ def uncovered(folder: Path, files: list[str] | None = None) -> list[tuple[str, s
                     continue
             elif kind == "elf":
                 if name in bundled or _match(name, LINUX_OS, False) or _match(name, LINUX_DRIVER, False):
-                    continue
-            else:
-                base = name.rsplit("/", 1)[-1]
-                if name.startswith(MAC_OS_PREFIXES) or base in bundled:
                     continue
             problems.append((rel, name))
     return problems

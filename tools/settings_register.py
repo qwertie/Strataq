@@ -8,7 +8,7 @@
     python tools/settings_register.py --docs      # write docs/SETTINGS.md from the register
 
 What counts as "the engine reads it": the name is the string literal argument of a ``getenv`` call or of one of the engine's env
-helpers (``env_on``, ``env_int``, ``pipe_dbg_env`` ...) in src/, include/, metal/src/ or sycl/src/. Calls that write or remove a
+helpers (``env_on``, ``env_int``, ``pipe_dbg_env`` ...) in src/ or include/. Calls that write or remove a
 variable (``_putenv_s``, ``put_env``, ``set_env``, ``unset_env``) are not reads; they are listed as ``engine_sets``.
 
 Automatic fields (rebuilt on every run): backends, reads, parse, code_default, default_state, engine_sets, launch_sets, launch_reads,
@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parent.parent
 REGISTER = ROOT / "data" / "settings-register.json"
 SETTINGS_PAGE = "docs/SETTINGS.md"
 
-ENGINE_DIRS = ("src", "include", "metal/src", "sycl/src")
+ENGINE_DIRS = ("src", "include")
 LAUNCH_PATHS = ("strata_control", "strata_cli", "setup.py", "apps/host/server", "serve")
 DOC_PATHS = ("docs", "README.md", "AGENTS.md")
 LAUNCH_EXT = (".py", ".mjs", ".js", ".cjs", ".ts")
@@ -55,7 +55,8 @@ FLOAT_FNS = {"env_num", "env_f"}
 HIP_MACROS = {"STRATA_USE_HIP", "__HIPCC__", "STRATA_HIP_GFX906", "FNX_HIP", "__HIP_PLATFORM_AMD__", "STRATA_HIPBLASLT_AVAILABLE",
               "STRATA_ROCBLAS_AVAILABLE", "__HIP_DEVICE_COMPILE__", "STRATA_PREFILL_MMQ_HIP"}
 CUDA_ONLY_MACROS = {"__CUDA_ARCH__", "CUDART_VERSION", "__NVPTX__", "STRATA_EXPERIMENTAL_SM60"}
-METAL_MACROS = {"STRATA_METAL", "STRATA_GPU_METAL", "__APPLE__"}
+#: Defined only in a Mac build, which Strata does not make: lines behind them compile in no flavour.
+APPLE_MACROS = {"STRATA_METAL", "STRATA_GPU_METAL", "__APPLE__"}
 
 
 # ---------------------------------------------------------------- file walking
@@ -85,7 +86,7 @@ def _read_lines(p: Path):
         return []
 
 
-# ---------------------------------------------------------------- preprocessor reachability (CUDA / HIP / Metal)
+# ---------------------------------------------------------------- preprocessor reachability (CUDA / HIP)
 
 _TOKEN = re.compile(r"!|&&|\|\||\(|\)|defined\s*\(\s*(\w+)\s*\)|defined\s+(\w+)|[A-Za-z_]\w*|\d+")
 
@@ -102,8 +103,8 @@ def _eval(expr: str, cfg: str):
             return cfg == "hip"
         if sym in CUDA_ONLY_MACROS:
             return cfg == "cuda"
-        if sym in METAL_MACROS:
-            return cfg == "metal"
+        if sym in APPLE_MACROS:
+            return False
         return None
 
     def primary():
@@ -154,8 +155,8 @@ def _eval(expr: str, cfg: str):
 
 
 def _pp_states(lines):
-    """For every line, the set of build flavours in which it can be compiled: a subset of {"cuda", "hip", "metal"}."""
-    flavours = ("cuda", "hip", "metal")
+    """For every line, the set of build flavours in which it can be compiled: a subset of {"cuda", "hip"}."""
+    flavours = ("cuda", "hip")
     stack = []   # each: (cond_values {cfg: bool|None}, parent_alive set) for the current branch
     out = []
     alive = set(flavours)
@@ -195,10 +196,6 @@ def _pp_states(lines):
 
 def _backend_of(path: str, flavours: set[str]) -> list[str]:
     p = path
-    if p.startswith("sycl/src"):
-        return ["sycl"]
-    if p.startswith("metal/src"):
-        return ["metal"]
     if "/cpu/" in p or p.endswith(("_cpu.cpp", "_cpu.hpp")):
         return ["cpu"]
     fl = flavours
@@ -208,8 +205,6 @@ def _backend_of(path: str, flavours: set[str]) -> list[str]:
         res = ["cuda"]
     elif fl == {"hip"}:
         res = ["hip"]
-    elif fl == {"metal"}:
-        res = ["metal"]
     elif not fl:
         res = ["cuda-hip"]
     else:
@@ -506,14 +501,14 @@ def scan_git(names):
 
 # ---------------------------------------------------------------- the settings page (docs/SETTINGS.md)
 
-_BACKEND_WORDS = {"cuda-hip": "NVIDIA and AMD", "cuda": "NVIDIA", "hip": "AMD", "sycl": "Intel Arc", "metal": "Mac", "cpu": "CPU"}
+_BACKEND_WORDS = {"cuda-hip": "NVIDIA and AMD", "cuda": "NVIDIA", "hip": "AMD", "cpu": "CPU"}
 
 
 def _where(e):
     have = set(e["backends"])
     if "cuda-hip" in have:
         have -= {"cuda", "hip"}
-    words = [_BACKEND_WORDS[b] for b in ("cuda-hip", "cuda", "hip", "sycl", "metal", "cpu") if b in have]
+    words = [_BACKEND_WORDS[b] for b in ("cuda-hip", "cuda", "hip", "cpu") if b in have]
     return ", ".join(words)
 
 

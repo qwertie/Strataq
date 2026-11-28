@@ -5,8 +5,6 @@ now `config_for(inputs, lib)`.  Here the inputs are built from the machine class
 (`low_ram_wanted`, `unsloth_budget`, `budget_choice`, `low_ram_resident`, `flash_vision_encoder`, ...), and the probes of the machine (nvidia-smi, the disk kind,
 the compute mode, a saved calibration) are answered by `ProbeLib`, a view of the setup module with those few functions replaced.  What is assumed is recorded in the
 `inputs` field of the record, so a reviewer sees it.
-
-Not driven: Intel Arc (setup hands over to sycl/setup_intel.py) and the Mac (metal/setup_mac.py and `mac_dsv41_setup`): other scripts write their configs.
 """
 
 from __future__ import annotations
@@ -19,13 +17,6 @@ from argparse import Namespace
 from unittest import mock
 
 from .world import ROOT, World, context_for
-
-NOT_DRIVEN = {
-    "arc_a750": "Intel Arc: setup.py hands over to sycl/setup_intel.py (sycl_setup), which writes its own config; it is not behind a seam yet",
-    "mac_small": "Mac: setup.py hands over to metal/setup_mac.py (mac_setup) and, for DeepSeek, to mac_dsv41_setup(); they write their own configs; not behind a seam yet",
-    "mac_large": "Mac: setup.py hands over to metal/setup_mac.py (mac_setup) and, for DeepSeek, to mac_dsv41_setup(); they write their own configs; not behind a seam yet",
-}
-
 
 class ProbeLib:
     """setup.py as a library, with the functions that look at the machine answering for the simulated one."""
@@ -142,7 +133,7 @@ def _dsv41(setup, world: World, lib: ProbeLib, say) -> tuple[dict, dict]:
     a = _args(world, ctx)
     with contextlib.redirect_stdout(say):
         plan = dsv41_fit.plan([{**c, "vram_gb": float(c.get("vram_gb") or 0)} for c in cards], ram, None, ctx, model=model, named=True)
-    inp = setup_config.Dsv41Inputs(a=a, cards=cards, ctx=ctx, cuda_tk=13, ds_vision="on", exe=world.exe, fam=fam, hip=hip, lib_dirs=[], mac=False, md=md,
+    inp = setup_config.Dsv41Inputs(a=a, cards=cards, ctx=ctx, cuda_tk=13, ds_vision="on", exe=world.exe, fam=fam, hip=hip, lib_dirs=[], md=md,
                                    named=False, pack=world.pack, plan=plan, port=8080, ram=ram, tag=fam["tag"] + model)
     summary = {"family": "deepseek41", "model": model, "ram_gb": ram, "gpu": {k: gpu[k] for k in sorted(gpu) if k not in ("driver",)}, "context": ctx,
                "vision": "on", "plan_verdict": plan.get("verdict")}
@@ -154,8 +145,6 @@ def _dsv41(setup, world: World, lib: ProbeLib, say) -> tuple[dict, dict]:
 def drive_setup(world: World) -> dict:
     from .driver import engine_start
     command = f"strata setup --family {'deepseek41' if world.mset.multi_file else world.mset.family} --model {world.mset.model} --yes --no-start"
-    if world.machine.key in NOT_DRIVEN:
-        return {"entry": "setup", "command": command, "not_driven": NOT_DRIVEN[world.machine.key]}
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     import setup

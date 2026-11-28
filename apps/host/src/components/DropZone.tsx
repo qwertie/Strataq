@@ -20,7 +20,7 @@ export function installDropGuard() {
 export function DropZone({ children, className }: { children: ReactNode; className?: string }) {
   const [over, setOver] = useState(false);
   const depth = useRef(0);
-  // Linux and macOS: the app shell reports the drag and the drop (the page is not given the files there).
+  // Linux: the app shell reports the drag and the drop (the page is not given the files there).
   useEffect(() => {
     const drag = (e: Event) => setOver((e as CustomEvent).detail === 'enter');
     const drop = (e: Event) => {

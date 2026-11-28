@@ -133,7 +133,7 @@ in `strata_common/catalog.py`, and `setup.py`'s RAM checks) to fill in what you 
 - the size setup itself would pick: IQ3_XXS from 60 GB of RAM, Q2_0 from about 44 GB, the Coder from about 28 GB,
   and the Coder in the low-RAM mode below that when the GPU makes up for the RAM;
 - the context setup recommends for the GPU's VRAM;
-- pictures on where the model can read them (the reader runs on the CPU under 24 GB of VRAM and on the GPU from 24 GB, on NVIDIA and AMD cards; a Mac reads on its GPU).
+- pictures on where the model can read them (the reader runs on the CPU under 24 GB of VRAM and on the GPU from 24 GB, on NVIDIA and AMD cards).
 
 The first call returns the plan: the download size, the free disk space, the RAM check, and the exact
 setup command. The assistant should show you the plan and call again with `confirm: true` once you agree.

@@ -7,7 +7,7 @@ Two families, two mechanisms, one list:
 
 * the Qwen engine (and every model but DeepSeek): packages in ``<components>/engine/<version>-<platform>-<backend>[-<variant>]/``. What a start runs
   is the pinned package (``.updates/state.json`` engine.pinned), else the newest that fits this PC (engine_component.resolve).
-* the DeepSeek engine (strata-dsv41): packages in ``engine-dsv41/``. A saved profile's run config names its program; the person's choice is the
+* the DeepSeek engine (strata-ds41): packages in ``engine-dsv41/``. A saved profile's run config names its program; the person's choice is the
   ``.chosen`` file in that folder (dsv41_paths.PIN), which every place that picks a package reads, and the saved configs are pointed at it.
 
 The two never touch each other's files or state: switching or deleting one family leaves the other as it was.

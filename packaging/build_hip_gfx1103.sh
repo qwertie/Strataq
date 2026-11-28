@@ -21,13 +21,13 @@ cmake -S . -B b1103 -G Ninja -DCMAKE_BUILD_TYPE=Release -DSTRATA_ENABLE_HIP=ON -
   "-DCMAKE_PREFIX_PATH=$SDK;$SDK/lib/rocm_sysdeps;$SDK/lib/llvm" \
   "-DCMAKE_HIP_FLAGS=--rocm-path=$SDK --rocm-device-lib-path=$SDK/lib/llvm/amdgcn/bitcode" > $R/cfg.log 2>&1
 st "configured rc=$?"
-flock -s $HOME/gpu.lock nice -n 10 cmake --build b1103 --target strata -j 8 > $R/build.log 2>&1
+flock -s $HOME/gpu.lock nice -n 10 cmake --build b1103 --target strata-q38 strata-q36 -j 8 > $R/build.log 2>&1
 st "built rc=$?"
-[ -x b1103/strata ] || { st "ABORT no exe"; tail -5 $R/build.log >> $S; exit 1; }
+[ -x b1103/strata-q38 ] && [ -x b1103/strata-q36 ] || { st "ABORT no exe"; tail -5 $R/build.log >> $S; exit 1; }
 STAGE=$R/stage; mkdir -p $STAGE
-cp b1103/strata $STAGE/
+cp b1103/strata-q38 b1103/strata-q36 $STAGE/
 echo '{"version": "0.1.45", "source": "f-split-tq 322e3fdfb", "archs": ["gfx1103"], "rocm": "TheRock gfx110X-all 7.14.1", "portable": true, "experimental": "Radeon 780M, unvalidated; GPU resets seen (notes-minipc.md)"}' > $STAGE/BUILD.json
-python3 packaging/collect_libs.py --binary b1103/strata --search $SDK/lib --search $SDK/lib/rocm_sysdeps/lib --search $SDK/lib/llvm/lib \
+python3 packaging/collect_libs.py --binary b1103/strata-q38 --search $SDK/lib --search $SDK/lib/rocm_sysdeps/lib --search $SDK/lib/llvm/lib \
   --also 'libamd_comgr.so*' --also 'libhiprtc*.so*' --out $STAGE \
   --data $SDK/lib/rocblas/library=rocblas/library --data $SDK/lib/hipblaslt/library=hipblaslt/library --data-arch gfx1103 > $R/collect.log 2>&1
 st "collected rc=$?"

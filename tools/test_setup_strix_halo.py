@@ -412,7 +412,7 @@ class WindowsZip(unittest.TestCase):
         with zipfile.ZipFile(dest, "w") as z:
             z.writestr("BUILD.json", json.dumps({"source": "prebuilt", "backend": "hip", "platform": "windows-x64",
                                                   "version": ".".join(map(str, setup.MIN_ENGINE)), "archs": self.archs, "lib_dirs": []}))
-            z.writestr(setup.EXE, "x")
+            z.writestr(setup.Q38EXE, "x")
 
 
     def fake_digest(self, asset, base):
@@ -438,7 +438,7 @@ class WindowsZip(unittest.TestCase):
         self.assertIn("docs/STRIX_HALO.md", msg)
         self.assertIn("--build", msg)
         self.assertFalse((self.root / "engine" / "strata-windows-x64-hip.zip").exists())   # dropped
-        self.assertFalse((self.root / "engine" / setup.EXE).exists())                      # nothing installed
+        self.assertFalse((self.root / "engine" / setup.Q38EXE).exists())                   # nothing installed
 
     def test_zip_with_gfx1151_is_installed(self):
         self.archs = self.archs + ["gfx1151"]

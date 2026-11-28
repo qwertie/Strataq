@@ -52,7 +52,7 @@ test('Faster answers on 12 GB NVIDIA cards: only for Qwen on a discrete CUDA car
   assert.deepEqual(ids({ backend: 'cuda', gpus: [{ name: 'GeForce RTX 3060', vram_gb: 12 }] }), ['faster_long_prompts', 'faster_12gb_nvidia'], 'no vendor reported: the name decides');
   assert.deepEqual(ids({ backend: 'cuda', gpus: [{ name: 'Mystery card', vram_gb: 12 }] }), ['faster_long_prompts']);
   assert.deepEqual(ids({ backend: 'hip', gpus: [{ name: 'AMD Radeon RX 7700 XT', vendor: 'amd', arch: 'gfx1101', vram_gb: 12 }] }), ['faster_long_prompts'], 'not a Radeon');
-  assert.deepEqual(ids({ backend: 'sycl', gpus: [RTX3060] }), [], 'not a CUDA build');
+  assert.deepEqual(ids({ backend: 'cpu', gpus: [RTX3060] }), [], 'not a CUDA build');
   assert.deepEqual(ids({ backend: 'cuda', gpus: [RTX3060], arch: 'qwen35moe' }), [], 'Qwen3.6-35B-A3B: the routing needs 512 experts');
   assert.deepEqual(ids({ deepseek: true, backend: 'cuda', gpus: [RTX3060] }), ['deepseek_speedups']);
   // a default launch carries nothing: the engine then runs as 0.2.6 did (STRATA_ROUTE_PRIOR unset = 0)
@@ -145,7 +145,7 @@ test('a switch shows only where it applies: Qwen on CUDA or HIP, Qwen on a Radeo
   assert.deepEqual(ids({ backend: 'hip', gpus: [{ name: 'AMD Radeon RX 9070 XT', vendor: 'amd' }] }), ['faster_long_prompts', 'faster_radeon_9000'], 'no arch reported: the card name decides');
   assert.deepEqual(ids({ backend: 'hip', gpus: [{ name: 'AMD Radeon RX 7900 XT', vendor: 'amd' }] }), ['faster_long_prompts']);
   assert.deepEqual(ids({ backend: 'cuda', gpus: [RTX, R9700] }), ['faster_long_prompts'], 'the Radeon switch needs the HIP engine');
-  for (const backend of ['sycl', 'metal', 'cpu', null]) assert.deepEqual(ids({ backend, gpus: [R9700] }), [], `Qwen on ${backend}`);
+  for (const backend of ['cpu', null]) assert.deepEqual(ids({ backend, gpus: [R9700] }), [], `Qwen on ${backend}`);
   assert.deepEqual(ids({ deepseek: true, backend: 'hip', gpus: [R9700] }), ['deepseek_speedups'], 'DeepSeek has its own switch only');
   assert.deepEqual(ids({ deepseek: true, backend: 'cuda', gpus: [RTX] }), ['deepseek_speedups']);
   assert.equal(speedSwitchApplies('deepseek_speedups', { deepseek: false, backend: 'cuda', gpus: [RTX] }), false);
@@ -240,11 +240,11 @@ test('through the host: Qwen3.6-35B-A3B (its run config has an arch) gets no Fas
   } finally { await f.cleanup(); }
 });
 
-test('through the host: a Qwen model on a PC the engine cannot speed up offers no switch (SYCL, a Mac, no card)', async () => {
+test('through the host: a Qwen model on a PC the engine cannot speed up offers no switch (no card)', async () => {
   const f = nativeFixture();
   try {
-    f.setHardware({ ram_gb: 32, gpus: [{ index: 0, name: 'Intel Arc A750', vendor: 'intel', vram_gb: 8 }] });
-    setConfig(f, 'iq2_xs', { backend: 'sycl' });
+    f.setHardware({ ram_gb: 32, gpus: [] });
+    setConfig(f, 'iq2_xs', { backend: 'cpu' });
     await f.control.refresh();
     assert.deepEqual(f.control.settings('iq2_xs').speedSwitches, []);
   } finally { await f.cleanup(); }

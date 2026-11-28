@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 from strata_cli.launch import cmd, params as P, settings as S  # noqa: E402
 from strata_cli.launch.catalog import TIGHT, verdict  # noqa: E402
+from strata_common import dsv41_paths  # noqa: E402
 
 CARD = {"index": 0, "name": "RTX 5070", "vram_gb": 12.0, "vendor": "nvidia", "usable": True}
 
@@ -36,7 +37,7 @@ class Advanced(unittest.TestCase):
     ARGS = ["--pack", "P", "--max-context", "8192", "--eos", "1", "--dspark", "auto", "--dspark-conf", "0.65"]
 
     def test_deepseeks_own_flags_are_known_before_the_engine_is_installed(self):
-        rows = P.build_rows(P.dsv41_help_text(None), self.ARGS, None, {}, {}, {})
+        rows = P.build_rows(P.dsv41_help_text(), self.ARGS, None, {}, {}, {})
         mine = {r.name: r for r in rows if r.name in self.ARGS}
         self.assertEqual(set(mine), {"--pack", "--max-context", "--eos", "--dspark", "--dspark-conf"})
         for r in mine.values():
@@ -44,7 +45,7 @@ class Advanced(unittest.TestCase):
             self.assertTrue(r.known)
 
     def test_a_real_typing_mistake_is_still_flagged(self):
-        rows = P.build_rows(P.dsv41_help_text(None), self.ARGS + ["--dsparkk", "1"], None, {}, {}, {})
+        rows = P.build_rows(P.dsv41_help_text(), self.ARGS + ["--dsparkk", "1"], None, {}, {}, {})
         self.assertIn("not in this engine's list", next(r for r in rows if r.name == "--dsparkk").description)
 
 
@@ -66,7 +67,7 @@ class PlanEngine(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             pkg = Path(d) / "engine-dsv41" / "0.1.49-windows-x86_64-cuda-cuda13"
             pkg.mkdir(parents=True)
-            exe = pkg / ("strata-dsv41.exe" if sys.platform == "win32" else "strata-dsv41")
+            exe = pkg / dsv41_paths.exe_name()
             exe.write_bytes(b"x")
             fake = mock.MagicMock()
             fake.s.data_dir = d
@@ -209,7 +210,7 @@ class WhichInstallsEngine(unittest.TestCase):
     def make(self, base, version):
         d = Path(base) / "engine-dsv41" / f"{version}-windows-x86_64-cuda-cuda13"
         d.mkdir(parents=True)
-        exe = d / ("strata-dsv41.exe" if sys.platform == "win32" else "strata-dsv41")
+        exe = d / dsv41_paths.exe_name()
         exe.write_bytes(b"x")
         return exe
 

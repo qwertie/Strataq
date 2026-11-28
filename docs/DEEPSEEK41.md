@@ -1,9 +1,13 @@
 # DeepSeek-V4.1-Flash
 
 DeepSeek-V4.1-Flash is a large mixture-of-experts model: 40 layers, 384 experts in each (6 are used for every word), and a 203 GB
-n-gram table next to them. Strata runs it with its own engine, `strata-dsv41` (`src/models/deepseekv41`, ported from Project Maya's
+n-gram table next to them. Strata runs it with its own engine, `strata-ds41` (`src/models/deepseekv41`, ported from Project Maya's
 `maya-ds4`, MIT; the notice is in `third_party/project-maya`). The file is Unsloth's UD-Q8_K_XL, pinned in `setup.py`: nine
 shards, 508.4 GB, the experts as MXFP4 and the rest in BF16. The two official 2-bit sets (below) are what a normal PC runs.
+
+> Much of this page was written for the old DeepSeek engine, `strata-dsv41`, which Strataq has deleted. DeepSeek now
+> runs on the page-pool engine `strata-ds41` ([MODELS.md](MODELS.md#the-page-pool-engine)). Engine commands below
+> (`--pack-info`, `--score`, `--version`) and measurements were made with the old engine.
 
 The 508 GB set is for a computer with several graphics cards and a lot of RAM. It was run on four Radeon AI PRO R9700 (32 GB each) with
 251 GB of RAM. Strata does not refuse a smaller computer; it tells you what to expect first.
@@ -98,7 +102,7 @@ read in 80 s; on one R9700: 2,859 experts on the card, decode about 26 tokens a 
 (CUDA 12.8, sm_120, one of two cards on a shared box): about 100 tokens a second. Against the original model (4,995 positions, 6 experts a word, 4 cards, same harness): KL 0.397, top-1 76.4%, perplexity 4.645
 (reference 3.140); the same run gives 2.00 KL 0.171, top-1 83.7%, perplexity 3.630 and 2.25 KL 0.109, top-1 87.2%, perplexity 3.405. By part (KL): code 0.230, agent 0.199, documents 0.302, English 0.476, multilingual 0.777
 for the Coder; 0.104, 0.108, 0.202, 0.303, 0.138 for 2.00. One run per cell unless the numbers repeat. These are internal measurements; the run logs and the task suite are not published. Also run (2026-11-02, official files, the 0.2.9
-engines): on an Apple M5 Max 19 to 22 tokens a second with all 7,680 experts in memory (a 6,054-token needle read at 300 tokens a second), and on a Ryzen AI Max (Strix Halo, Windows, 64 GB of RAM)
+engines): on a Ryzen AI Max (Strix Halo, Windows, 64 GB of RAM)
 19 to 22 tokens a second with 7,734 of 8,064 experts in graphics memory.
 
 ## Install
@@ -149,7 +153,7 @@ the rest of the time (RTX A6000 as a 12 GB-like card: 370 experts in VRAM agains
 time (a picture is encoded in 0.19 s the first time, 0.08 s the next, 0 s when it was sent before). If a picture finds no free graphics memory (another
 program took the reserve's room), the experts' last slots on the first GPU are lent to the tower for that picture turn, as they are to a long prompt, and read
 back from the model files afterwards (35 experts, 117 ms on an RTX A6000 with 59 MiB free; the picture is read right and the next one is not slower). It stays
-on the card on a GPU that shares the PC's memory (Mac, GB10, Strix Halo), and with `--vision-resident`. The server decodes each picture, brings it to a size the tower takes (both sides a multiple of 42, at most 1024 image
+on the card on a GPU that shares the PC's memory (GB10, Strix Halo), and with `--vision-resident`. The server decodes each picture, brings it to a size the tower takes (both sides a multiple of 42, at most 1024 image
 tokens) and hands it to the engine; it needs Pillow for that (`python -m pip install pillow`; setup installs it). `--vision no` in `strata launch`
 (or `--vision off` for the engine) turns them off; a request with a picture then gets a 400 that says so.
 
@@ -184,7 +188,7 @@ What it does:
   output on a DGX Spark and on 2 RTX A6000, and 6 prompts at once through the server had the same text as alone (greedy), also when a client dropped its connection.
 
 Where it was run: Linux, with 4 Radeon AI PRO R9700 (gfx1201), 1 R9700, 2 RTX A6000 (sm_86) and a DGX Spark (sm_121). Not run: Windows (the engine builds with it, a
-Windows run has not been done), a Mac (Metal; the code adds no Metal kernel of its own, nothing has started it there), Ryzen AI Max, cards under 24 GB, other AMD
+Windows run has not been done), Ryzen AI Max, cards under 24 GB, other AMD
 families. `strata launch` warns for these and still starts. If the engine stops at the start or an answer looks wrong, start without `--parallel`.
 
 ## Speed: Faster or Full quality
@@ -229,12 +233,12 @@ The unpacked folder works as well as the archive. The Strata (Qwen) engine is no
 ### Building the engine for your card
 
 The packages hold machine code for these NVIDIA cards (CUDA 13, Windows and Linux): sm_86 (RTX 30), sm_89 (RTX 40) and sm_120 (RTX 50), plus PTX for
-sm_120. If your card is none of these, or you want your own build, compile `strata-dsv41` and put it where Strata looks for it. You need the CUDA toolkit
+sm_120. If your card is none of these, or you want your own build, compile `strata-ds41` and put it where Strata looks for it. You need the CUDA toolkit
 (the packages are built with 13.0), a C++ compiler, CMake, Ninja and the llama.cpp checkout Strata pins (`third_party/llama.cpp`).
 
 ```
 cmake -S . -B build-dsv41 -G Ninja -DCMAKE_BUILD_TYPE=Release -DSTRATA_ENABLE_CUDA=ON -DSTRATA_BUILD_DSV41=ON -DSTRATA_NATIVE_EXPERTS=ON       "-DCMAKE_CUDA_ARCHITECTURES=89-real" -DSTRATA_GGML_DIR=third_party/llama.cpp
-cmake --build build-dsv41 --target strata-dsv41 -j 8
+cmake --build build-dsv41 --target strata-ds41 -j 8
 ```
 
 Use your card's number in `CMAKE_CUDA_ARCHITECTURES`: 86 for RTX 30, 89 for RTX 40, 120 for RTX 50, or `native` for the cards in this computer. Without the

@@ -37,7 +37,7 @@ On Windows, [STRIX_HALO_WINDOWS.md](STRIX_HALO_WINDOWS.md) has the speeds measur
 
 ## DeepSeek V4.1-Flash
 
-The model runs through its own engine, `strata-dsv41`, as on the other platforms ([DEEPSEEK41.md](DEEPSEEK41.md)); on Windows the
+The model runs through its own engine, `strata-ds41`, as on the other platforms ([DEEPSEEK41.md](DEEPSEEK41.md)); on Windows the
 package is the AMD one built for gfx1151 (`strata-dsv41-...-windows-x86_64-hip-rdna3`), downloaded when you choose the model.
 
 | | |

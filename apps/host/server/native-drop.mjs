@@ -1,5 +1,5 @@
 /**
- * Files dropped on the app window (Linux and macOS).
+ * Files dropped on the app window (Linux).
  *
  * The page cannot read a dragged file there: WebKit gives it the drag events but no files. The app shell sees the drop with the real paths and
  * hands them to the host with its shell secret (POST /api/app/drop); the host reads the files and keeps them for a short time under

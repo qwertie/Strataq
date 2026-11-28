@@ -30,8 +30,7 @@
 #include <string>
 #include <vector>
 
-#if defined(STRATA_EXPERIMENTAL_SM60) && !defined(__HIPCC__) && !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906) && \
-    !defined(STRATA_GPU_METAL)
+#if defined(STRATA_EXPERIMENTAL_SM60) && !defined(__HIPCC__) && !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906)
 #define STRATA_EXPERT_NIBBLE_BUILT 1
 #else
 #define STRATA_EXPERT_NIBBLE_BUILT 0

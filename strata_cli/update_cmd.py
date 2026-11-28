@@ -329,6 +329,8 @@ def run(a) -> int:
         return fail(str(exc), exc.exit_code)
     except signing.SignatureError as exc:
         return fail(str(exc), 5)
+    except ec.ComponentProblem as exc:                  # a computer Strata has no engine for (a Mac, Intel graphics only)
+        return fail(str(exc), 5)
     except acquisition.AcquisitionRefused as exc:
         return fail(f"{exc} (the update is the one explicit step that downloads; run it from a shell where STRATA_NO_ACQUIRE is not set)", 5)
     except KeyboardInterrupt:

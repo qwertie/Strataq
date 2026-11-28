@@ -25,7 +25,7 @@ class Update(unittest.TestCase):
         rt = d / "mtp" / "rt"
         rt.mkdir(parents=True)
         p = d / "strata-iq3_s.json"
-        p.write_text(json.dumps({"model_name": "Qwen IQ3_S", "exe": str(d / "engine" / setup.EXE),
+        p.write_text(json.dumps({"model_name": "Qwen IQ3_S", "exe": str(d / "engine" / setup.Q38EXE),
                                  "args": ["--native", "x", "--mtp", str(rt)], **extra}), encoding="utf-8")
         return p
 
