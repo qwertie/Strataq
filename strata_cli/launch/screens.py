@@ -391,7 +391,7 @@ class ConfirmScreen(ModalScreen):
 class ModelScreen(Base):
     step_id = "model"
     hints = "↑↓ choose   Enter next   o use my own files   Esc back   ? help"
-    help_text = ("Pick the model. 'Needs' is the RAM + graphics memory the model's files take (the app's figure; the n-gram table stays on your SSD and is not counted). 'fits' means they fit the RAM and "
+    help_text = ("Pick the model. 'Needs' is the RAM + graphics memory the model's files take (the n-gram table stays on your SSD and is not counted). 'fits' means they fit the RAM and "
                  "the graphics memory together; 'may run slower' means they do not, so part is read from the SSD while it answers. Neither is a block: you can still try it.")
 
     BINDINGS = Base.BINDINGS + [Binding("o", "own", "Own files", show=False)]

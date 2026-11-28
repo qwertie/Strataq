@@ -1,7 +1,7 @@
 """Hand the Terminal over to a newer Control that `strata update` installed.
 
 `strata update` stages a newer Control in ``<components>/control/<ver>/`` and writes ``<components>/control/active.json``. The
-desktop app follows that pointer; the Terminal on PATH is a different install, so without this it kept running the old one.
+Terminal on PATH is a different install, so without this it would keep running the old one.
 `maybe_hand_over` runs at the very start of ``strata.py``, before any heavy import, and (only when that Control is newer and whole)
 runs the same command line with the newer Control's own interpreter and entry point.
 

@@ -1,6 +1,6 @@
 """The 0.2.0-beta release set as a signed feed offers it: one engine package per platform/backend/variant (values copied from the
 packages' engine-component.json), and what `feed.select_engine` hands each kind of PC. This is the evidence that engine updates
-reach every installer variant by card, so the app update can stay engine-less (tauri.update.conf.json)."""
+reach every installer variant by card."""
 from __future__ import annotations
 
 import os

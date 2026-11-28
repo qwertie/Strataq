@@ -6,7 +6,7 @@ engine compatibility are reported separately.
 
 Finding an existing install: a terminal archive is a new folder with no run configs in it. The places where Strata
 installs keep run configs (the Terminal's own folder, the folders earlier installs remembered in the user's settings file,
-and the desktop app's install folder, which the Terminal shares) are searched read-only by strata_control/discovery.py,
+and the default install folder) are searched read-only by strata_control/discovery.py,
 the same function the launch screens use; the first place that has any is the main one. Nothing is copied or moved:
 the configs name their engine and model files by absolute path, so the old install and its data folder keep
 serving the models.
@@ -46,8 +46,7 @@ SUPPORTED_SELECTIONS = frozenset({"qwen/Q2_0", "qwen/IQ2_XS", "qwen/IQ3_XXS", "q
 
 def settings_path() -> Path:
     """The user's Strata settings file: the same place setup.py writes it (%APPDATA%/Strata/settings.json, or
-    $XDG_CONFIG_HOME/strata/settings.json). The desktop app sets STRATA_SETTINGS_FILE to a file of its own (in its data folder), so it
-    never reads an older command-line install's list of Strata folders."""
+    $XDG_CONFIG_HOME/strata/settings.json), or STRATA_SETTINGS_FILE."""
     return discovery.own_settings_file()
 
 
@@ -66,8 +65,8 @@ def _has_configs(directory: Path) -> bool:
 
 def resolve_install(override: str | None = None) -> tuple[Path, str]:
     """(the main install folder, how it was found): explicit (an argument or STRATA_INSTALL_DIR), here (this folder has run
-    configs), remembered (an earlier install from the settings file), app (the desktop app's install folder, shared with the
-    Terminal) or default (the app's folder, with no model in it yet)."""
+    configs), remembered (an earlier install from the settings file) or default (discovery.default_install_dir, with or
+    without a model in it)."""
     raw = override or os.environ.get("STRATA_INSTALL_DIR")
     if raw is not None:
         path = Path(raw).expanduser()

@@ -76,7 +76,7 @@ from strata_base.memory import read_ram, windows_memory_status
 from strata_base.path_compare import same_drive, same_folder
 from strata_control import dsv41_context
 from strata_base import sysinfo
-from strata_control.discovery import config_files, in_app_mode, in_trash, own_settings_file as settings_path
+from strata_control.discovery import config_files, has_own_settings_file, in_trash, own_settings_file as settings_path
 from strata_control import models_move
 from strata_common import user_args
 from strata_common.gpu_fit import (NVIDIA_SMI_CARDS, SPLIT_MIN_VRAM_GB, SPLIT_PROMPT_VRAM_GB, UMA_OS_LEFT_GB,
@@ -365,11 +365,11 @@ def _urlopen(req, timeout=None):
 def run(cmd, cwd=None, env=None, check=True, quiet=False):
     """An install, build or preparation step (pip, cmake, a package manager, tools/*.py): never part of a start."""
     acquisition.require("an install or build step (" + Path(str(cmd[0])).name + ")")
-    if CONTROL:                                        # the app: only this Python running a bundled tool
+    if CONTROL:                                        # Control's installer: only this Python running a bundled tool
         argv = [str(c) for c in cmd]
         if len(argv) < 2 or os.path.normcase(argv[0]) != os.path.normcase(sys.executable) or argv[1] == "-m" or \
                 Path(argv[1]).resolve().parent not in ((ROOT / "tools").resolve(), (ROOT / "tools" / "dsv41").resolve()):
-            raise acquisition.AcquisitionRefused("the desktop app's installer only runs its bundled preparation tools; "
+            raise acquisition.AcquisitionRefused("Strata Control's installer only runs its bundled preparation tools; "
                                                  + " ".join(argv[:2]))
     gguf_py = (env or {}).get("STRATA_GGUF_PY")
     if gguf_py and not Path(gguf_py).is_dir() and Path(gguf_py).parent == home() / "third_party" / "llama.cpp":
@@ -389,7 +389,7 @@ def run(cmd, cwd=None, env=None, check=True, quiet=False):
 
 def fetch_mtp(mtp: Path, env: dict, tries: int = 3):
     """The ~5 GB of MTP tensors (tools/mtp_fetch.py).  A timeout or a dropped connection stops one run, not the install (#3214 #3193):
-    it is run again, and each run continues where the last one stopped.  The progress lines it prints are what the app shows."""
+    it is run again, and each run continues where the last one stopped.  The progress lines it prints are what `strata launch` shows."""
     cmd = [sys.executable, str(ROOT / "tools" / "mtp_fetch.py"), "fetch", "--out", str(mtp)]
     env = {**env, "STRATA_SOURCE": model_source()}
     for n in range(1, tries + 1):
@@ -1392,7 +1392,7 @@ def choose_roles(a, found) -> list:
     roles = gpu_roles.normalize(roles, cards)
     lst = gpu_roles.order(roles, cards)
     if not lst:
-        fail("every graphics card is Off", "setup needs one card for Main (the app and `strata launch` can start with all cards Off)")
+        fail("every graphics card is Off", "setup needs one card for Main (`strata launch` can start with all cards Off)")
     a._roles = roles
     a._roles_cards = cards
     ok(gpu_roles.describe(roles, cards))
@@ -3115,7 +3115,7 @@ def _installed(name: str) -> bool:
 
 
 def control_missing_packages() -> list:
-    """The Python packages the preparation tools need that this interpreter does not have (the app bundle has them all)."""
+    """The Python packages the preparation tools need that this interpreter does not have (the Control bundle has them all)."""
     import importlib.util
     return [m for m in ("numpy", "jinja2", "regex", "yaml", "tqdm", "requests", "PIL", "psutil")
             if importlib.util.find_spec(m) is None]
@@ -3139,11 +3139,11 @@ def pip_install(packages, what, extra=()):
     """pip install into .venv, skipped when the same list was installed before.  An install from before the pinned
     requirements (#214) recorded bare names: those packages are kept as they are (nothing is reinstalled), and the
     pinned dependencies it already has count as installed."""
-    if CONTROL:                                        # the app ships these (hash-locked); nothing is installed here
+    if CONTROL:                                        # Control ships these (hash-locked); nothing is installed here
         missing = control_missing_packages()
         if missing:
-            fail("this copy of Strata Control lacks " + ", ".join(missing), "reinstall the Strata app")
-        ok(f"{what}: bundled with the app")
+            fail("this copy of Strata Control lacks " + ", ".join(missing), "reinstall Strata")
+        ok(f"{what}: bundled with Strata Control")
         return
     stamp = Path(sys.prefix) / ".strata-pip.json"
     have = json.loads(stamp.read_text(encoding="utf-8")) if stamp.exists() and pip_stamp_is_ours(stamp) else []
@@ -3183,8 +3183,8 @@ def ensure_nvfp4_local_packages() -> None:
     if not missing:
         return
     if CONTROL:
-        fail("preparing NVIDIA's FP4-Local checkpoint needs PyTorch and transformers, which the app does not include",
-             "install this model from the source download (SETUP.bat on Windows, ./setup.sh on Linux), or pick another version in the app")
+        fail("preparing NVIDIA's FP4-Local checkpoint needs PyTorch and transformers, which Strata Control does not include",
+             "install this model from the source download (SETUP.bat on Windows, ./setup.sh on Linux), or pick another version")
     pkgs = nvfp4_local_packages()
     if not pkgs:
         fail("requirements-nvfp4-local.txt is missing", "update Strata, or run: python -m pip install torch transformers safetensors")
@@ -5846,8 +5846,6 @@ def load_settings() -> dict:
 
 
 def save_settings(s: dict) -> None:
-    if s.get("data_dir") and s.get("data_dir") != load_settings().get("data_dir"):
-        s = {**s, "data_dir_at": time.time()}           # when the models folder was chosen: the app and the Terminal keep the newer choice
     try:
         settings_path().parent.mkdir(parents=True, exist_ok=True)
         settings_path().write_text(json.dumps(s, indent=1), encoding="utf-8")
@@ -5869,7 +5867,7 @@ def other_installs(settings: dict) -> list:
     """Strata folders besides this one that may hold model files: the ones this user ran before, and Strata* folders
     next to this one (a zip unpacked again lands in e.g. `Strata-main (1)\\Strata-main`)."""
     cands = [Path(p) for p in settings.get("installs", []) if not in_trash(p)]
-    for base in dict.fromkeys(() if in_app_mode() else (home().parent, home().parent.parent)):
+    for base in dict.fromkeys(() if has_own_settings_file() else (home().parent, home().parent.parent)):
         try:
             for d in base.iterdir():
                 if d.is_dir() and d.name.lower().startswith("strata"):
@@ -6176,9 +6174,9 @@ SHAPE_ENGINE: dict = {}       # the model-shape engine the chosen model runs on:
 
 
 def engine_exe(eng: Path, program: str = Q38EXE) -> str:
-    """Gets the `exe` of a run config for the engine program `program`: in the app a reference to the engine component
-    (bare for its entry point, Q38EXE), else the program's path in the engine folder `eng`.  A model of its own shape
-    names that shape's engine."""
+    """Gets the `exe` of a run config for the engine program `program`: in Control's installer mode a reference to the
+    engine component (bare for its entry point, Q38EXE), else the program's path in the engine folder `eng`.  A model of
+    its own shape names that shape's engine."""
     if SHAPE_ENGINE.get("shape"):
         from strata_control import shape_engine
         return shape_engine.reference(SHAPE_ENGINE["shape"])
@@ -7316,7 +7314,7 @@ def resolve_rope(ctx: int, scaling, scale, trained: int = 262144):
 
 # ------------------------------------------------------------------------------------------------ main
 def control_engine_step(gpu, vision):
-    """Step 4 in the app: the engine is the component folder's package (strata_common/engine_component.py), found if it is
+    """Step 4 in Control's installer mode: the engine is the component folder's package (strata_common/engine_component.py), found if it is
     there and never fetched or built. A model can be downloaded and prepared before the engine is installed; the run config
     names "component:strata-engine" and the engine is looked up when the model is loaded. llama.cpp's source zip is fetched
     for gguf-py only (the preparation tools), as setup always did: no git, no compiler."""
@@ -7335,12 +7333,12 @@ def control_engine_step(gpu, vision):
             # (STRATA_ALLOW_NO_ENGINE: the person said yes to "download the model anyway").  The app does not stop (owner decision
             # 2026-10-18): it says so in its download card and still downloads the model.
             fail(plain or "no engine is installed for this PC",
-                 "get the engine that matches this graphics card (`strata update`, or the app's Settings), then run this again; "
+                 "get the engine that matches this graphics card (`strata update`), then run this again; "
                  "nothing was downloaded and files already downloaded are kept")
         eng = home() / "engine"
         meta = {"version": "99.0.0", "source": "local", "component": "missing"}   # its version is checked when it loads
         warn(f"{plain + ' ' if plain else ''}no engine is installed for this PC yet ({e}). The model is downloaded and prepared now; "
-             "install the engine component for your GPU (the app's Settings, or the Terminal) before loading it")
+             "install the engine component for your GPU (`strata update`) before loading it")
     if vision != "none":
         if (eng / VEXE).is_file():
             ok(f"image encoder: {eng / VEXE} (carried by the engine component)")
@@ -7791,7 +7789,7 @@ DSV41_ENGINE_DIR = "engine-dsv41"
 
 
 def dsv41_engine_dir(eng: Path) -> Path:
-    """Beside the engine folder; for the app / Terminal (the engine is a component folder Strata does not write into): in Strata's own folder."""
+    """Beside the engine folder; for Control's installer mode (the engine is a component folder Strata does not write into): in Strata's own folder."""
     return (home() if CONTROL else Path(eng).parent) / DSV41_ENGINE_DIR
 
 

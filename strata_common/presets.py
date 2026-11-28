@@ -1,7 +1,7 @@
 """Saved tuning presets: tune once, keep it.
 
-One store for the Terminal and the desktop app: a folder of small JSON files (``presets/`` beside the profiles), so tuning in
-one place covers the other. A preset holds
+One store for every Terminal command: a folder of small JSON files (``presets/`` beside the profiles), so tuning once covers
+every start. A preset holds
 
 * the settings the tuner found (``settings``: engine arguments, environment, per-request defaults),
 * what was measured (speeds and the baseline they were compared to),

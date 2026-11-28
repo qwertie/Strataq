@@ -487,7 +487,7 @@ def read_bytes_repairing(path: str | os.PathLike) -> bytes:
         return target.read_bytes()
 
 
-ACCESS_MESSAGE = ("Strata is not allowed to open one of its own files. Run `strata repair-access` (or press Repair in the app); "
+ACCESS_MESSAGE = ("Strata is not allowed to open one of its own files. Run `strata repair-access`; "
                 "these files were probably made while Strata ran as administrator, so run it as your normal user from now on.")
 IN_USE_MESSAGE = ("A file Strata needs is in use by another program (usually antivirus, a backup or a sync tool). "
                   "Wait a moment and run the same command again.")

@@ -49,8 +49,8 @@ PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")   # the revisions this se
 VERSION = "0.1.0"
 WIN = os.name == "nt"
 DEFAULT_ROOT = Path(__file__).resolve().parent.parent
-# The desktop app runs this under Strata Control's Python (STRATA_CONTROL_INSTALL=1): the install runs on that Python, makes no
-# .venv and installs no package (setup.py's own CONTROL mode).
+# Under Strata Control's Python (STRATA_CONTROL_INSTALL=1) the install runs on that Python, makes no .venv and installs no
+# package (setup.py's own CONTROL mode).
 CONTROL = os.environ.get("STRATA_CONTROL_INSTALL") == "1"
 DEFAULT_PORT = 8080
 STATE_DIR = ".strata-mcp"                             # in the Strata folder (git-ignored)

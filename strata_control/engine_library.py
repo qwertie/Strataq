@@ -219,7 +219,7 @@ class SwitchBusy(updater.Busy):
     """A model is running, so the engine is not switched. One plain answer; the running model keeps the engine it started with."""
 
     def __init__(self, serving: list[dict]):
-        updater.UpdateError.__init__(self, "A model is running, so the engine was not switched. Stop the model first (`strata launch --stop`, or Unload in the app), "
+        updater.UpdateError.__init__(self, "A model is running, so the engine was not switched. Stop the model first (`strata launch --stop`), "
                                            "then switch. The running model keeps the engine it started with. Nothing was changed.", 7)
         self.serving = serving
 

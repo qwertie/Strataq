@@ -1,7 +1,7 @@
 """Finding the engine package for this machine in a local component folder. There is no download path.
 
 The engine (the C++ `strata` binary and its GPU runtime libraries) is a separate, independently versioned
-component. The desktop app and the terminal start whatever is installed in the component folder; nothing here, and
+component. The Terminal starts whatever is installed in the component folder; nothing here, and
 nothing on the start path, fetches an engine. A missing or unusable engine is a typed error that says what to do
 (`EngineMissing`, exit code 5, the same family as `acquisition.AcquisitionRefused`) and never an attempt to get one.
 
@@ -83,9 +83,9 @@ class EngineMissing(acquisition.AcquisitionRefused):
         where = f" in {root}" if root else ""
         RuntimeError.__init__(
             self,
-            (f"{notice} (" if notice else "") + f"No engine for this PC was found{where}: {reason}" + (")" if notice else "") + ". The app never downloads an engine while it "
-            f"starts or serves. Download the engine for your GPU with Update engine in the app's Settings, or with "
-            f"`strata update` (or `strata install`) in the Terminal, or copy an engine package into the component folder.")
+            (f"{notice} (" if notice else "") + f"No engine for this PC was found{where}: {reason}" + (")" if notice else "") + ". Strata never downloads an engine while it "
+            f"starts or serves. Download the engine for your GPU with `strata update` (or `strata install`), or copy an "
+            f"engine package into the component folder.")
         self.what = "the engine component"
         self.command = "strata install"
 
@@ -103,8 +103,8 @@ class EngineIntegrityError(EngineMissing):
         RuntimeError.__init__(
             self,
             f"The engine package failed its integrity check, so it was not started: {reason}. Repair or reinstall "
-            f"the engine component with Update engine in the app's Settings or `strata update` in the Terminal "
-            f"(`strata install` also works); the app never downloads one while it runs.")
+            f"the engine component with `strata update` (`strata install` also works); Strata never downloads one while "
+            f"it runs.")
         self.what = "the engine component"
         self.command = "strata install"
 
@@ -208,7 +208,7 @@ def cached_notice(root: Path | None = None) -> str | None:
     touches the network, so showing it at a start does not break the rule that only an update step downloads.
 
     The notice belongs to the versions the check was made for: it is dropped when Control or the installed engine is not the one
-    recorded then (an app install, an update, a rollback), and an engine that is not newer than the installed one is never offered."""
+    recorded then (an update, a rollback), and an engine that is not newer than the installed one is never offered."""
     offers = cached_offers(root)
     parts = ([f"engine {offers['engine']}"] if offers.get("engine") else []) + ([f"DeepSeek engine {offers['dsv41']}"] if offers.get("dsv41") else [])
     return f"update available ({', '.join(parts)}): run `strata update`" if parts else None

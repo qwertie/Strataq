@@ -5,10 +5,10 @@ widen that lock for no gain. Ed25519 (RFC 8032) is small enough to carry here: v
 runs, signing is what the owner's release machine runs (`packaging/feed_tool.py`). Both are checked against the RFC's
 test vectors in tests/terminal/test_update_feed.py.
 
-The feed/component key is an Ed25519 key the owner keeps offline. It signs the update feed index and every engine package
-manifest. Installed copies of Control carry the public half in ``update_keys.json`` and nothing else can add to it except the
-explicit, documented override ``STRATA_UPDATE_TRUSTED_KEYS`` (a file of extra public keys; the test suite and a local feed use
-it, and the CLI says so when it is in effect).
+The feed/component key is an Ed25519 key the owner keeps offline. It signs the update feed index and every engine
+package manifest. Installed copies of Control carry the public half in ``update_keys.json`` and nothing else can add to
+it except the explicit, documented override ``STRATA_UPDATE_TRUSTED_KEYS`` (a file of extra public keys; the test suite
+and a local feed use it, and the CLI says so when it is in effect).
 
 A public key is ``{"key_id": "<16 hex>", "alg": "ed25519", "public": "<base64 of the 32 bytes>"}``. ``key_id`` is the first 8 bytes
 of SHA-256 of the public key, so a signature names the key that made it without anyone choosing the name.

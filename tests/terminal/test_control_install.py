@@ -294,7 +294,7 @@ class InstallerServerTests(unittest.TestCase):
                               capture_output=True, text=True, env=env, cwd=str(ROOT), stdin=subprocess.DEVNULL, timeout=300)
         out = done.stdout + done.stderr
         self.assertNotEqual(done.returncode, 0)
-        self.assertIn("bundled with the app", out)
+        self.assertIn("bundled with Strata Control", out)
         self.assertIn("Step 5: downloading", out)
         self.assertIn("Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00001-of-00002.gguf", out)
         self.assertFalse(log.exists(), "something ran pip, git, cmake or a package manager: " + (log.read_text() if log.exists() else ""))

@@ -650,8 +650,8 @@ class ApprovedWords(unittest.TestCase):
         self.assertEqual(W["newer_failed"].format(model=M, why="bad hash", have="0.1.59"),
                          "A newer engine for Q4 Lite Shape is available but could not be installed (bad hash). Still using 0.1.59.")
         self.assertEqual(W["missing"].format(model=M, reason="nothing matched"),
-                         "Q4 Lite Shape needs its own engine, which is not installed or does not fit this PC: nothing matched. Run `strata launch` again, or Download / repair in "
-                         "the app, to fetch it. Starting a model never downloads an engine.")
+                         "Q4 Lite Shape needs its own engine, which is not installed or does not fit this PC: nothing matched. Run `strata launch` again "
+                         "to fetch it. Starting a model never downloads an engine.")
         self.assertEqual(W["setup_failed"].format(model=M), "the engine for Q4 Lite Shape could not be installed")
         self.assertEqual(W["setup_failed_hint"], "See the line above. Nothing was downloaded for the model. Run this again when the update feed has it.")
         self.assertEqual(W["setup_ok"].format(model=M, version="0.1.59", folder="/x/y"), "engine for Q4 Lite Shape: 0.1.59 in /x/y")

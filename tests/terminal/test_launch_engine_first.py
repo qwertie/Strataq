@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WRONG_FAMILY = ec.arch_notice(("gfx1100", "gfx1101", "gfx1102"), ["gfx1201"])
 USABLE = {"usable": True, "engine": {"version": "0.1.45", "backend": "hip"}, "notice": None}
 UNUSABLE = {"usable": False, "engine": None, "notice": "No engine for this PC was found in /x: the component folder holds no engine package. "
-                                                       "The app never downloads an engine while it starts or serves."}
+                                                       "Strata never downloads an engine while it starts or serves."}
 
 
 def qwen_catalog():
@@ -102,7 +102,7 @@ class EngineBeforeModel(unittest.TestCase):
         self.assertIn("Strata couldn't find an engine for this computer (The feed has no engine package for this PC)", warning)
         self.assertIn("The model will download, but it may not run until you install the right engine (next step:", warning)
         self.assertIn(NO_ENGINE_STEP, warning)
-        self.assertNotIn("The app never downloads", warning)          # not the generic line
+        self.assertNotIn("Strata never downloads", warning)          # not the generic line
 
     def test_no_graphics_card_is_said_plainly_with_no_feed_address(self):
         report = dict(UNUSABLE, backend=None)

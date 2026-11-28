@@ -4,7 +4,7 @@ Every step reports plain-word events through one callback (`emit`), so the TUI (
 tests see the same thing. Nothing here prints or reads the keyboard. The steps reuse what is already in the Terminal:
 
 * the engine comes from the signed feed (`strata update`, the one explicit step that downloads);
-* the model comes from setup.py in the app's own installer mode (STRATA_CONTROL_INSTALL), the same job the desktop app runs;
+* the model comes from setup.py in Control's installer mode (STRATA_CONTROL_INSTALL);
 * the run config the engine uses is a private copy of the installed one with this launch's choices applied; the profile
   `launch-<name>` (the shared profiles store) points at it, and carries host, port and parallel;
 * tuning is `strata tune auto`, its result lives in the shared presets store and is applied at every start;
@@ -1068,7 +1068,7 @@ class Runner:
 
     def existing_data_dir(self) -> Path | None:
         """The data folder to give setup when the person chose none: the folder the model already lives in (its run config names its files),
-        else the folder the desktop app uses, so a helper file that is missing is fetched next to the rest, never into a second folder.
+        else the data folder the settings name, so a helper file that is missing is fetched next to the rest, never into a second folder.
         None: setup's own default is right."""
         s = self.s
         try:
