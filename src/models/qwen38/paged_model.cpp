@@ -11,6 +11,7 @@
 #include "strata/common/experts/auto_cache.hpp"
 #include "strata/base/gpu/runtime.hpp"
 #include "strata/base/gpu/traffic.hpp"
+#include "strata/models/common/card_stage.hpp"
 #include "strata/models/common/prompt_images.hpp"
 #include "strata/common/experts/card_rules.hpp"
 #include "strata/common/experts/expert_files.hpp"
@@ -171,7 +172,7 @@ Part& get_part(strata::serve::PagedPart& part) { return static_cast<Part&>(part)
 
 /// Qwen3.8 for the paged engine: the Model and its Conversation (card 0's prompt path and verify windows), the cards'
 /// stages, the layer split's CPU routing and the MTP drafter.
-class PagedQwen final : public strata::serve::PagedModel {
+class PagedQwen final : public strata::models::CardPipelineModel {
 public:
     /// `drafter`: null when drafting is off; `sessions`: the conversations the engine holds (its batch slots and
     /// "main").
@@ -259,7 +260,6 @@ public:
         refine_pcie_shares();
         return true;
     }
-    int get_pipeline_stages() const override { return (int) cards_.size(); }
     int get_route_tail_skip() const override { return strata::core::tail_skip_rank(); }
     void set_route_tail_skip(int rank) override { strata::core::set_tail_skip_rank(rank); }
     int get_route_tail_skip_max() const override { return 9; }
@@ -269,8 +269,6 @@ public:
     }
     void set_route_prior_pct(int pct) override { strata::core::set_route_prior((float) std::log1p(pct / 100.0)); }
     bool prepare_group(int group, const std::vector<strata::spec::StepRow>& rows, std::string& err) override;
-    bool launch_group(int stage, int group, std::string& err) override;
-    int poll_group(int stage, int group, std::vector<int32_t>& picks, std::string& err) override;
     bool finish_group(int group, std::vector<int32_t>& picks, std::string& err) override;
     bool keep_group(int group, const std::vector<strata::spec::StepRow>& rows, const std::vector<int>& kept,
                     bool drafting, std::string& err) override;
@@ -312,6 +310,18 @@ private:
         }
     };
     std::vector<std::unique_ptr<Group>> groups_;
+    /// Runs card `k`'s verifier on a prepared Group: its pipeline stage.
+    class CardRunner final : public strata::models::CardStage {
+    public:
+        CardRunner(PagedQwen& model, size_t k) : model_(model), k_(k) {}
+        bool launch(int group, std::string& err) override;
+        int poll(std::string& err) override;
+        bool wait_writes(std::string& err) override { return model_.cards_[k_].ver->wait_commit(err); }
+
+    private:
+        PagedQwen& model_;
+        const size_t k_;
+    };
     /// Converts the shared step's chains to the verifier's row arguments.
     static bool get_row_inputs(const std::vector<strata::spec::StepRow>& rows, RowInputs& inputs, std::string& err);
     /// Verifies `rows` in one window. `tails[r]` holds the tokens row r's conversation had read before the row's
@@ -558,6 +568,8 @@ PagedQwen::PagedQwen(Model& m, Conversation& conv, PagedCards& cards, ModelCards
     facts.max_rows = strata::kernels::kVerifyMaxT;
     facts.end_tokens = o.eos_ids;
     facts.has_drafter = drafter != nullptr;
+    for (size_t k = 0; k < cards_.size(); ++k)
+        stages_.push_back(std::make_unique<CardRunner>(*this, k));
     facts.draft_rule.kind = strata::kernels::DraftRule::Exact;
     // (a shared start is pinned, which needs room for the chain's root and leaf beside it, as for the old engine's pin)
     strata::core::ConversationStateSizes sizes;
@@ -1367,10 +1379,10 @@ bool PagedQwen::prepare_group(int group, const std::vector<strata::spec::StepRow
     return true;
 }
 
-bool PagedQwen::launch_group(int stage, int group, std::string& err) {
-    Group& g = *groups_[(size_t) group];
-    auto& v = *cards_[(size_t) stage].ver;
-    const strata::core::OnDevice on(pcards_[(size_t) stage].dev);
+bool PagedQwen::CardRunner::launch(int group, std::string& err) {
+    Group& g = *model_.groups_[(size_t) group];
+    auto& v = *model_.cards_[k_].ver;
+    const strata::core::OnDevice on(model_.pcards_[k_].dev);
     if (g.coordinates) {
         int32_t* table = v.get_batch_image_table();
         if (cudaMemcpyAsync(table, g.coordinates, (size_t) g.count * 3 * sizeof(int32_t),
@@ -1384,8 +1396,8 @@ bool PagedQwen::launch_group(int stage, int group, std::string& err) {
                               g.tokens.data(), g.positions.data(), err);
 }
 
-int PagedQwen::poll_group(int stage, int, std::vector<int32_t>&, std::string& err) {
-    return cards_[(size_t) stage].ver->batch_poll(&drive_pool_split, &split_, err);
+int PagedQwen::CardRunner::poll(std::string& err) {
+    return model_.cards_[k_].ver->batch_poll(&drive_pool_split, &model_.split_, err);
 }
 
 bool PagedQwen::finish_group(int group, std::vector<int32_t>& picks, std::string& err) {
@@ -1776,9 +1788,8 @@ uint64_t read_size(const std::vector<uint8_t>& bytes, size_t& at) {
 }
 
 bool PagedQwen::wait_state(std::string& err) {
-    for (const ModelCard& card : cards_)
-        if (!card.ver->wait_commit(err))
-            return false;
+    if (!CardPipelineModel::wait_state(err))
+        return false;
     if (m_.mtp.stream()) {
         const strata::core::OnDevice on(m_.mtp.device());
         if (!strata::core::gpu_stream_synchronize(m_.mtp.stream())) {

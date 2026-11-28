@@ -1483,15 +1483,19 @@ bool Model::launch_group(int stage, int group, std::string& err) {
 
 bool Model::wait_state(std::string& err) {
     bool ok = true;
-    for (Dev& d : p_->devs) {
-        cudaSetDevice(d.id);
-        const cudaError_t result = cudaStreamSynchronize(d.st);
-        if (result != cudaSuccess) {
-            err = cudaGetErrorString(result);
-            ok = false;
-        }
-    }
+    for (size_t di = 0; di < p_->devs.size(); ++di)
+        ok = wait_card((int) di, err) && ok;
     return ok;
+}
+
+bool Model::wait_card(int dev, std::string& err) {
+    Dev& d = p_->devs[(size_t) dev];
+    cudaSetDevice(d.id);
+    const cudaError_t result = cudaStreamSynchronize(d.st);
+    if (result == cudaSuccess)
+        return true;
+    err = cudaGetErrorString(result);
+    return false;
 }
 
 }  // namespace strata::ds4

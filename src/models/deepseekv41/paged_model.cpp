@@ -21,6 +21,7 @@
 #include "strata/common/state/restore_points.hpp"
 #include "strata/common/state/state_bytes.hpp"
 #include "strata/models/common/adapt_decay.hpp"
+#include "strata/models/common/card_stage.hpp"
 
 #include <cuda_runtime.h>
 
@@ -229,7 +230,7 @@ struct Part final : strata::serve::PagedPart {
 /// its experts in the GPU's pool before the trunk's (the RAM's pool holds none: it drafts only while all of them are
 /// on the GPU). Stages use Model's existing serial or chunked hand-offs; each stage owns a pool, while the lead
 /// part owns the conversation's host state.
-class PagedDeepSeek final : public strata::serve::PagedModel {
+class PagedDeepSeek final : public strata::models::CardPipelineModel {
 public:
     /// `drafting`: the drafter is switched on at the start.
     PagedDeepSeek(Model& m, const Options& o, const ProgramOptions& x, bool drafting,
@@ -332,18 +333,7 @@ public:
     }
     bool read_prompt(const PagedParts& parts, const std::vector<int64_t>& ids, int64_t from, int64_t n, bool drafting,
                      const PromptControl& control, int64_t& took, std::string& err) override;
-    bool wait_state(std::string& err) override { return m_.wait_state(err); }
-    int get_pipeline_stages() const override {
-        // Speculative windows share rollback scratch until the step commits all participants.
-        return !facts.has_drafter && cards_.size() > 1 ? (int) cards_.size() : 0;
-    }
     bool prepare_group(int group, const std::vector<strata::spec::StepRow>& rows, std::string& err) override;
-    bool launch_group(int stage, int group, std::string& err) override {
-        return group_rows_[(size_t) group].pending.empty() || m_.launch_group(stage, group, err);
-    }
-    int poll_group(int stage, int group, std::vector<int32_t>&, std::string& err) override {
-        return group_rows_[(size_t) group].pending.empty() ? 1 : m_.poll_group(stage, err);
-    }
     bool finish_group(int group, std::vector<int32_t>& picks, std::string& err) override;
     bool keep_group(int, const std::vector<strata::spec::StepRow>&, const std::vector<int>&,
                     bool, std::string&) override { return true; }
@@ -388,7 +378,24 @@ public:
     }
     void begin_step(int) override { router_bad_.reset(); }
 
+protected:
+    // Speculative windows share rollback scratch until the step commits all participants.
+    bool can_pipeline() const override { return !facts.has_drafter && cards_.size() > 1; }
+    bool is_group_idle(int group) const override { return group_rows_[(size_t) group].pending.empty(); }
+
 private:
+    /// Runs GPU `dev`'s layers of the model on a prepared group: its pipeline stage.
+    class CardRunner final : public strata::models::CardStage {
+    public:
+        CardRunner(Model& m, int dev) : m_(m), dev_(dev) {}
+        bool launch(int group, std::string& err) override { return m_.launch_group(dev_, group, err); }
+        int poll(std::string& err) override { return m_.poll_group(dev_, err); }
+        bool wait_writes(std::string& err) override { return m_.wait_card(dev_, err); }
+
+    private:
+        Model& m_;
+        const int dev_;
+    };
     /// Gets the experts of trunk layers [lb, le) in the order the GPU's pool takes them (get_ranking), the drafter's
     /// before them while it is on.
     std::vector<strata::core::ExpertKey> get_pool_ranking(int64_t lb, int64_t le) const;
@@ -640,8 +647,10 @@ namespace {
 PagedDeepSeek::PagedDeepSeek(Model& m, const Options& o, const ProgramOptions& x,
                              bool drafting, const std::vector<int>& eos, PagedCards& cards)
     : m_(m), o_(o), x_(x), drafting_(drafting) {
-    for (PagedCard& card : cards)
+    for (PagedCard& card : cards) {
+        stages_.push_back(std::make_unique<CardRunner>(m, (int) cards_.size()));
         cards_.push_back(&card);
+    }
     drafter_card_ = cards_.back();
     const Geometry& g = m.geometry();
     facts.name = kProgram;

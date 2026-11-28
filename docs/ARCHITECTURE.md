@@ -47,7 +47,10 @@ server does not have to know which one it started.
 - **The paged engine** — `src/common/serve/paged_engine.cpp`, with its start in `paged_start.cpp`. Conversations live
   in page pools (GPU, RAM, SSD): several decode in one step, and one that is not decoding is paused down a tier
   instead of dropped. `strata-q38` (`src/program/q38_main.cpp`) runs it for Qwen3.8 and `strata-ds41`
-  (`src/program/ds41_main.cpp`) for DeepSeek V4.1, each through its own `PagedModel`. **New engine work goes here.**
+  (`src/program/ds41_main.cpp`) for DeepSeek V4.1. Their `PagedModel` adapters share the layer-2
+  `CardPipelineModel` base (`include/strata/models/common/card_stage.hpp`): each card supplies a `CardStage` for
+  launch, poll and state-write waits. Preparing, finishing and committing a group stay in the family adapter.
+  **New engine work goes here.**
 - **Qwen3.6's `Serve`** (`src/models/qwen36/q36_engine.cu`, run by `strata-q36`) still has the older per-session
   loop. Each conversation holds a session allocated for the whole context, so conversations at once counts sessions
   (`--batch`); the paged engine counts rows instead, and its `slots` is that capacity, not an allocation.

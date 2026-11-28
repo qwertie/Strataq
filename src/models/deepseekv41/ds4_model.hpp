@@ -238,6 +238,8 @@ public:
     bool launch_group(int stage, int group, std::string& err);
     /// Completes outstanding writes before pages can be reused, including after a failed launch.
     bool wait_state(std::string& err);
+    /// Waits for the work queued on GPU `dev` (an index into get_devices, which is also its pipeline stage).
+    bool wait_card(int dev, std::string& err);
     /// Checks the stage's completion event without waiting for its stream.
     int poll_group(int stage, std::string& err);
     /// Restores the group's logits and retains its DSpark inputs after every stage drains.
