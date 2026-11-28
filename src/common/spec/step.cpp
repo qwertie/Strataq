@@ -103,7 +103,7 @@ bool Step::run(const std::vector<Decoding*>& active, std::string& err) {
     std::vector<Work> work((size_t) count);
     group_turns_.resize((size_t) count);
     std::vector<StepGroup> groups;
-    // Picture/suffix answers can differ across live group changes; see docs/DETAILS.md's validation limits.
+    // Picture/suffix answers can differ across live group changes; see docs/ENGINE_NOTES.md's validation limits.
     for (int i = 0; i < count; ++i) {
         const size_t first = active.size() * (size_t) i / count;
         const size_t end = active.size() * (size_t) (i + 1) / count;

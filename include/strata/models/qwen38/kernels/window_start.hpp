@@ -1,6 +1,6 @@
 // include/strata/models/qwen38/kernels/window_start.hpp - the first cell the draft layer's attention reads.
 //
-// The draft layer attends to the last `window` cells.  KVA (docs/KVA.md) can leave cells in the draft layer's K/V
+// The draft layer attends to the last `window` cells.  KVA (prefill/kva.hpp) can leave cells in the draft layer's K/V
 // that were built from approximated rows; `floor` is the first cell that holds a real one, so the attention starts
 // there when it is higher.  floor = 0 (every session KVA did not approximate) gives exactly the plain window.
 // One function for the device kernel and for the host test.

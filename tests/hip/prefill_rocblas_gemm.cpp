@@ -58,7 +58,7 @@ uint16_t f16_bits(float value) {
 
 // Y[T, N] (fp32, row stride ldy, at output_offset floats into the buffer) = X[T, K] . W[N, K]^T, Gemm's FP16 route
 // against hipBLASEx with FP32 out.  The FP16 route rounds its outputs to FP16 (that is the measured, accepted cost of
-// prompt_f16(), docs/AMD_HIP.md): the tolerance is a few FP16 ulps of the largest output.
+// prompt_f16()): the tolerance is a few FP16 ulps of the largest output.
 bool run_case(strata::prefill::Gemm& gemm, hipblasHandle_t blas, hipStream_t stream, int t, int n, int k, int ldy,
               int output_offset, uint32_t seed) {
     std::mt19937 rng(seed);

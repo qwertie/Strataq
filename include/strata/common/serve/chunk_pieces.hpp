@@ -8,7 +8,7 @@
 namespace strata::serve {
 
 /// Uses 16 MiB physical pieces for a paged GPU pool's chunk after a whole chunk spills into shared memory.
-/// The Strix Halo comparison and its conditions are recorded in docs/DETAILS.md.
+/// The Strix Halo comparison and its conditions are recorded in docs/ENGINE_NOTES.md.
 constexpr uint64_t kPieceBytes = 16ull << 20;
 
 /// Where a chunk's pieces landed: not taken (no memory), all in the GPU's dedicated memory, or some outside it.

@@ -143,7 +143,7 @@ void f16_to_f32(const uint16_t* x, float* y, int64_t n, void* stream);
 /// dst = {0, rows} (the bounds of one matrix; dst on the device).
 void set_bounds(int32_t* dst, int32_t rows, void* stream);
 
-// ---- STRATA_MMQ_DIRECT: the prompt MMQ reads resident experts in place (docs/DETAILS.md, "STRATA_MMQ_DIRECT") ----
+// ---- STRATA_MMQ_DIRECT: the prompt MMQ reads resident experts in place ----
 /// This build has the pointer-table MMQ (CUDA, the build option STRATA_MMQ_TAB on - off by default - and the
 /// llama.cpp tree matched the mirrored scheduler's fingerprint).  false under HIP, gfx906 and builds without MMQ.
 bool tab_built();

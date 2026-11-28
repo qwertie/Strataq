@@ -102,7 +102,7 @@ void hadamard_rows_f16(uint16_t* x, int64_t rows, int64_t width, int block, cons
 /// kept for the process.  Call it at setup, not inside a CUDA graph capture.  nullptr for a nullptr `host`.
 const float* hadamard_device_signs(const float* host, int width);
 
-/// EXPDEC (STRATA_EXPDEC, docs/EXPERTDEC.md): `native_expert_grouped` stages the group's q8_1 activations in shared
+/// EXPDEC (STRATA_EXPDEC): `native_expert_grouped` stages the group's q8_1 activations in shared
 /// memory and computes several rows per lane, the same sums per (row, entry) as the default kernels (bitwise), for
 /// gate/up IQ2_XXS / IQ2_XS / IQ3_XXS / IQ3_S / IQ2_S at n_embd 2560 and down IQ4_NL / Q2_0 at n_ff 640; other layouts
 /// keep the default kernels.  Enabled by default on gfx12 (STRATA_EXPDEC=0 disables it) and opt-in elsewhere

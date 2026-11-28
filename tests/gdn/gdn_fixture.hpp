@@ -1,8 +1,8 @@
 // tests/gdn/gdn_fixture.hpp - backend-independent fixtures and an FP64 oracle for the Flash-Next GDN prompt path.
 //
-// Plain C++17, no GPU headers: the CUDA harness (src/models/qwen38/prefill/gdn_harness.cu) uses it today; the HIP and Metal/SYCL
-// harnesses are meant to include the same file, so every backend is judged against the same inputs and the same
-// reference.  Contract: docs/GDN_CONTRACT.md (shapes, layouts, what a candidate may change).
+// Plain C++17, no GPU headers: the CUDA harness (src/models/qwen38/prefill/gdn_harness.cu) uses it today; the HIP
+// harness is meant to include the same file, so every backend is judged against the same inputs and the same
+// reference.
 //
 //   Fixture       raw inputs of one layer for T tokens: qkv [T][C], ab [T][2 HV], dt, ssm_a, conv_w [C][4], conv
 //                 history [C][3], the recurrent state [S][HV][S] (row, head, column), z [T][HV][S], gamma [S]
