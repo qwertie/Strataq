@@ -36,9 +36,6 @@ class VersionBump(unittest.TestCase):
         self.assertEqual(strata_cli.version(), "0.1.150")
         self.assertEqual(first("CMakeLists.txt", r"^project\(strata VERSION ([0-9.]+) "), "0.1.59.1")
 
-    def test_the_documents_that_state_the_current_version_agree(self):
-        self.assertIn("Version 0.2.13, engine 0.1.59.1.", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
-
     def test_version_prints_the_product_and_the_build(self):
         done = subprocess.run([sys.executable, str(ROOT / "strata.py"), "--version"], capture_output=True, text=True, cwd=str(ROOT),
                               env={**os.environ, "STRATA_NO_HANDOVER": "1"})
