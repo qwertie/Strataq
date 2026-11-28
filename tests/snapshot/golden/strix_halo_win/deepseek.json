@@ -24,7 +24,7 @@
     "plan_verdict": "tight"
    },
    "config_file": {
-    "exe": "<ROOT>/engine/strata-dsv41",
+    "exe": "<ROOT>/engine/strata-ds41",
     "args": [
      "--pack",
      "<ROOT>/data/packs/deepseek",
@@ -55,7 +55,7 @@
     "backend": "hip"
    },
    "engine": {
-    "exe": "<ROOT>/engine/strata-dsv41",
+    "exe": "<ROOT>/engine/strata-ds41",
     "argv": [
      "--pack",
      "<ROOT>/data/packs/deepseek",
@@ -73,10 +73,7 @@
      "16384"
     ],
     "env_set": {
-     "DS4_ASYNC_T": "4",
-     "STRATA_DS4_SLOT_DIR": "<REPO>/ds4-slots",
-     "STRATA_DS4_SLOT_GB": "2",
-     "STRATA_DS4_SLOT_KEEP": "1"
+     "DS4_ASYNC_T": "4"
     },
     "notes": []
    },
@@ -85,7 +82,6 @@
   "launch": {
    "entry": "launch",
    "command": "strata launch --model IST-DAS-2.00bpw --yes --no-tui --context 131072",
-   "fetches": [],
    "setup_args": [
     "--yes",
     "--no-start",
@@ -101,7 +97,7 @@
     "<ROOT>/data"
    ],
    "config_file": {
-    "exe": "<ROOT>/engine/strata-dsv41",
+    "exe": "<ROOT>/engine/strata-ds41",
     "args": [
      "--pack",
      "<ROOT>/data/packs/deepseek",
@@ -134,7 +130,7 @@
     "args_written": "=args"
    },
    "engine": {
-    "exe": "<ROOT>/engine/strata-dsv41",
+    "exe": "<ROOT>/engine/strata-ds41",
     "argv": [
      "--pack",
      "<ROOT>/data/packs/deepseek",
@@ -150,10 +146,7 @@
      "0.65"
     ],
     "env_set": {
-     "DS4_ASYNC_T": "4",
-     "STRATA_DS4_SLOT_DIR": "<ROOT>/<STATE>/launch/ds4-slots",
-     "STRATA_DS4_SLOT_GB": "2",
-     "STRATA_DS4_SLOT_KEEP": "1"
+     "DS4_ASYNC_T": "4"
     },
     "notes": []
    }

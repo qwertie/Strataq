@@ -6,7 +6,7 @@ A record has the same shape for every entry point:
   command          what the person asked for, in words
   setup_args       what the entry point hands to setup.py (Terminal launch only)
   config_file      the run config the entry point leaves on disk (normalized)
-  engine           {exe, argv, env_set, notes}: what serve/server.py would start: engine_args(cfg) and the variables child_env(cfg) adds
+  engine           {exe, argv, env_set, notes}: what strata_server/server.py would start: engine_args(cfg) and the variables child_env(cfg) adds
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def run_cli(argv: list[str]) -> tuple[int, str, str]:
     return code, out.getvalue(), err.getvalue()
 
 def engine_start(world: World, cfg: dict) -> dict:
-    """What serve/server.py hands to the engine for this run config: the arguments (engine_args) and the variables child_env adds to the environment."""
+    """What strata_server/server.py hands to the engine for this run config: the arguments (engine_args) and the variables child_env adds to the environment."""
     from strata_common import engine_client as server
     baseline = dict(os.environ)
     notes = io.StringIO()
