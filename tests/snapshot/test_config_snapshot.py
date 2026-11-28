@@ -3,8 +3,7 @@
   python -m pytest tests/snapshot -q                          (or: python -m unittest tests.snapshot.test_config_snapshot)
   STRATA_SNAPSHOT_UPDATE=1 python -m pytest tests/snapshot    (rewrite the golden files after an intended change; the diff of golden/ is the review)
 
-No GPU, no model, no download, no network and no real user folder is needed (see tests/snapshot/README.md).  The app entry points run the host's own code in Node,
-so `node` (24 or newer) must be installed; STRATA_SNAPSHOT_SKIP_APP=1 skips those two entries by name and the test says so.
+No GPU, no model, no download, no network and no real user folder is needed (see tests/snapshot/README.md).
 """
 
 from __future__ import annotations
@@ -12,7 +11,6 @@ from __future__ import annotations
 import difflib
 import json
 import os
-import shutil
 import sys
 import unittest
 from pathlib import Path
@@ -26,8 +24,6 @@ from tests.snapshot.generate import GOLDEN, dump  # noqa: E402
 from tests.snapshot.matrix import ENTRY_POINTS, MACHINES, MODEL_SETS  # noqa: E402
 
 UPDATE = os.environ.get("STRATA_SNAPSHOT_UPDATE") == "1"
-SKIP_APP = os.environ.get("STRATA_SNAPSHOT_SKIP_APP") == "1"
-APP_ENTRIES = ("app_plain", "app_models")
 
 
 def readable_diff(want: dict, got: dict, label: str) -> str:
@@ -44,14 +40,7 @@ class ConfigSnapshot(unittest.TestCase):
     def check_cell(self, machine_key: str, set_key: str) -> None:
         path = GOLDEN / machine_key / f"{set_key}.json"
         want = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
-        got_entries = {}
-        for entry in ENTRY_POINTS:
-            if entry in APP_ENTRIES and SKIP_APP:
-                print(f"SKIPPED (STRATA_SNAPSHOT_SKIP_APP=1): {machine_key}/{set_key}/{entry}")
-                continue
-            if entry in APP_ENTRIES and not shutil.which(os.environ.get("STRATA_SNAPSHOT_NODE") or "node"):
-                self.fail("node is not installed: the app entry points cannot be driven (install Node 24, or set STRATA_SNAPSHOT_SKIP_APP=1 to skip them by name)")
-            got_entries[entry] = drive(machine_key, set_key, entry)
+        got_entries = {entry: drive(machine_key, set_key, entry) for entry in ENTRY_POINTS}
         if UPDATE:
             merged = dict(want["entries"]) if want else {}
             merged.update(got_entries)

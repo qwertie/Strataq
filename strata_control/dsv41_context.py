@@ -8,8 +8,6 @@ Project Maya v1.1.28 (#442, @needmorevram, MIT) offered 512K and 1M in its setup
 - Past 256K nothing was tested by us: the owner's decision is to offer it and let users try it.  The words for that are NOTE.
 - A size past the pack's limit (or past 1,048,576 when no pack says) cannot run: that is an error, the only one.
 - The engine takes whatever ``--max-context`` it is given (src/models/deepseekv41/ds4_model.cu allocates for it, no clamp); the rope settings come from the pack.
-
-apps/host/server/dsv41-context.mjs says the same for the app; tests/terminal/test_dsv41_context.py compares the two.
 """
 from __future__ import annotations
 

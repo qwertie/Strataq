@@ -170,11 +170,5 @@ class Pascal(unittest.TestCase):
         self.assertEqual(best.variant, "cuda13")
 
 
-class Host(unittest.TestCase):
-    def test_the_app_shows_the_sentence_not_the_no_engine_for_this_card_text(self):
-        text = (Path(__file__).resolve().parents[2] / "apps" / "host" / "server" / "updates.mjs").read_text(encoding="utf-8")
-        self.assertIn("engine.status === 'wrong-make'", text)
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -397,10 +397,6 @@ class AppPlatform(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.run_tool(pubkey=other_public)
 
-    def test_the_default_key_is_the_one_in_tauri_conf(self):
-        from feed_tool import _default_app_pubkey
-        self.assertEqual(_default_app_pubkey(), json.loads((fx.ROOT / "apps/desktop/src-tauri/tauri.conf.json").read_text())["plugins"]["updater"]["pubkey"])
-
     def test_a_version_mismatch_is_refused(self):
         self.run_tool()
         with self.assertRaises(SystemExit):

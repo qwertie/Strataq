@@ -22,7 +22,7 @@ fails when Control would leave one out.
 ``keygen`` never prints the secret and refuses to write inside a git checkout or over an existing file. The public file's
 entry goes into ``strata_common/update_keys.json`` (``keys``) once, in the commit that ships the first signed release.
 The Tauri updater key is a different key (minisign, made by ``tauri signer generate``); its public half goes in
-``tauri.conf.json`` and in ``update_keys.json`` as ``app_minisign_public``.
+``update_keys.json`` as ``app_minisign_public``.
 """
 
 from __future__ import annotations
@@ -282,8 +282,8 @@ TAURI_TARGET_NAMES = tuple(feedmod.TAURI_TARGETS.values())
 
 
 def _default_app_pubkey() -> str:
-    conf = Path(__file__).resolve().parents[1] / "apps" / "desktop" / "src-tauri" / "tauri.conf.json"
-    return json.loads(conf.read_text(encoding="utf-8"))["plugins"]["updater"]["pubkey"]
+    """Gets the app installer's minisign public key that release builds ship (update_keys.json ``app_minisign_public``)."""
+    return json.loads(signing.BUILTIN_KEYS.read_text(encoding="utf-8-sig"))["app_minisign_public"]
 
 
 def set_app_platform(app_json: Path, *, target: str, archive: Path, signature_file: Path, url: str, version: str | None = None,
@@ -292,7 +292,7 @@ def set_app_platform(app_json: Path, *, target: str, archive: Path, signature_fi
     """Add or replace one platform in the Tauri updater JSON (the file ``build-feed --app-json`` takes; it becomes ``latest.json``).
 
     The ``.sig`` is made by ``npx tauri signer sign`` (or by ``tauri build`` for the Windows / Linux installers) and is only READ here;
-    this tool never touches the Tauri private key. It is checked against the public key in ``tauri.conf.json`` (or ``pubkey``) over the
+    this tool never touches the Tauri private key. It is checked against the public key in ``update_keys.json`` (or ``pubkey``) over the
     exact archive bytes, so a signature of an older or unsigned file, or one from another key, is refused before it can be published.
     ``sha256`` and ``size`` are taken from the archive."""
     if target not in TAURI_TARGET_NAMES:
@@ -368,7 +368,7 @@ def main(argv: list[str] | None = None) -> int:
     sa.add_argument("--version")
     sa.add_argument("--notes")
     sa.add_argument("--pub-date")
-    sa.add_argument("--pubkey", help="the Tauri public key (default: tauri.conf.json plugins.updater.pubkey)")
+    sa.add_argument("--pubkey", help="the Tauri public key (default: update_keys.json app_minisign_public)")
     vf = sub.add_parser("verify-feed")
     vf.add_argument("source")
     vf.add_argument("--pub", type=Path, required=True)

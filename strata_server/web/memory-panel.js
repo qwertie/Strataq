@@ -2,8 +2,8 @@
 // engine holds in each memory (each GPU, the RAM, the SSD), the conversations it holds and its settings, drawn from
 // GET /v1/memory (strata_server/server.py memory_view).  An engine that changes its settings while it runs
 // (`can_change`) gets dividers to drag on the bars and controls for its other settings; the caller sends the changes
-// (POST /v1/memory).  No framework: the web page (app.js) imports this file as it is, and the desktop app
-// (apps/host/src/components/MemoryPanel.tsx) wraps it.  Its styles are memory-panel.css beside it.
+// (POST /v1/memory).  No framework: the web page (app.js) imports this file as it is.  Its styles are
+// memory-panel.css beside it.
 //
 // A GPU whose memory is system RAM (Strix Halo) is drawn as the BIOS divides it: its bar is the BIOS share, with the
 // engine's uses drawn scaled to what the engine holds in the share (`in_share`; the engine cannot know which

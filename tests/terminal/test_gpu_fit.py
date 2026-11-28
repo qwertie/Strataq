@@ -1,14 +1,10 @@
-"""strata_common/gpu_fit.py: the one rule for which graphics cards a model uses (app, strata launch and setup share it)."""
+"""strata_common/gpu_fit.py: the one rule for which graphics cards a model uses (strata launch and setup share it)."""
 
 from __future__ import annotations
 
-import re
 import unittest
-from pathlib import Path
 
 from strata_common import gpu_fit as G
-
-ROOT = Path(__file__).resolve().parents[2]
 
 
 def card(index, name, vram, **kw):
@@ -113,13 +109,7 @@ class GpuFitRule(unittest.TestCase):
         r2 = G.options(44.0, 32.0, [card(0, "RTX 3060", 10)])
         self.assertIn("read from the SSD", r2["options"][0]["words"])
 
-    def test_the_constants_equal_the_apps(self):
-        text = (ROOT / "apps" / "host" / "src" / "lib" / "native-fit.ts").read_text(encoding="utf-8")
-        m = re.search(r"const DENSE_GB = (\d+), SYSTEM_ROOM_GB = (\d+), DENSE_EXTRA_GB = (\d+)", text)
-        self.assertIsNotNone(m)
-        self.assertEqual((G.DENSE_GB, G.SYSTEM_ROOM_GB, G.DENSE_EXTRA_GB), tuple(float(x) for x in m.groups()))
-
-    def test_fit_matches_the_launch_catalog_port_of_native_fit(self):
+    def test_fit_matches_the_launch_catalogs_fit_on(self):
         from strata_cli.launch.catalog import fit_on
         for ram, vram in ((62, 16), (32, 10), (16, 0), (128, 24)):
             a = fit_on({"memory_gb": 44.0}, ram, vram)
@@ -130,7 +120,7 @@ class GpuFitRule(unittest.TestCase):
 
 
 class GpuFitInTheModelList(unittest.TestCase):
-    """The app reads the options from the model list (tools/strata_mcp.py model_table): the same rule, nothing duplicated in the UI."""
+    """The model list (tools/strata_mcp.py model_table) carries the options: the same rule, nothing duplicated."""
 
     def setUp(self):
         from tests.terminal.launch_support import Home

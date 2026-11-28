@@ -1,9 +1,8 @@
-"""The speed features of 0.2.7 that have a switch in the app's Expert settings and in the Terminal's Advanced table.
+"""The speed features of 0.2.7 that have a switch in the Terminal's Advanced table.
 
 A switch has a default (``on`` or ``off``).  In its other state it writes exactly the engine environment below into the model's run config ("env"); back in
 its default it removes those entries, so a default launch carries none of them and is byte for byte what 0.2.6 started.  The names are the engine switch
-contract (phaseA-tests/notes-027-plan.md).  The app does the same in apps/host/server/native-settings.mjs (SPEED_SWITCHES); tests/terminal/test_speed_switches.py
-reads that file and fails when the two disagree, so the Terminal and the app cannot drift apart.
+contract (phaseA-tests/notes-027-plan.md).
 
 - "Faster long prompts" (Qwen KVA) is OFF by default (owner decision, 26 October): ``STRATA_KVA=1`` turns it on.  A file that holds ``STRATA_KVA=0`` (the
   off switch of an earlier 0.2.7 test build) reads as off, which is what it is now.
@@ -25,14 +24,14 @@ from typing import Any, Iterable, Mapping
 @dataclass(frozen=True)
 class Switch:
     id: str
-    label: str                    # the words the app shows
+    label: str                    # the switch's name in the Terminal's row words
     effect: str                   # one plain sentence: what it does and what the other choice does
     env: tuple[tuple[str, str], ...]   # the environment entries written when the switch is NOT in its default state
     only: str                     # "qwen-gpu" | "qwen-cuda-12gb" | "qwen-radeon-9000" | "deepseek" | "qwen-any": where it applies
     default: str = "on"           # "on" | "off": what a launch without the entries does
     legacy: tuple[tuple[str, str], ...] = ()    # entries an earlier 0.2.7 test build wrote for the same state: they read as the switch being set, and are removed with it
     cleanup_env: tuple[str, ...] = ()  # Retired names removed when returning to the default state.
-    terminal_only: bool = False   # shown in the Terminal's Advanced table only, never in the app
+    troubleshooting: bool = False  # puts back old behaviour for troubleshooting, so its words name no default
 
 
 SWITCHES: tuple[Switch, ...] = (
@@ -55,10 +54,10 @@ SWITCHES: tuple[Switch, ...] = (
             ("DS4_STORE_SPARE", "0"), ("DS4_STORE_PUT", "0")), "deepseek",
            legacy=(("DS4_FAST_ATTN", "0"), ("DS4_ATTN_SLAB", "0"), ("DS4_COPY_PIN", "0"), ("DS4_COPY_HUGETLB", "0"),
                    ("DS4_STORE_SPARE", "0"), ("DS4_STORE_PUT", "0")), cleanup_env=("DS4_DEFAULTS",)),
-    # Troubleshooting only, in the Terminal's Advanced table and nowhere else: every Qwen 0.2.7 default back to its 0.2.6 behaviour.
+    # Troubleshooting only: every Qwen 0.2.7 default back to its 0.2.6 behaviour.
     Switch("qwen_defaults_026", "Qwen: 0.2.6 behaviour",
            "Starts every Qwen speed setting new in 0.2.7 the way 0.2.6 did, for troubleshooting. Use it if something that worked before no longer does.",
-           (("STRATA_DEFAULTS", "026"),), "qwen-any", default="off", terminal_only=True),
+           (("STRATA_DEFAULTS", "026"),), "qwen-any", default="off", troubleshooting=True),
 )
 
 BY_ID = {s.id: s for s in SWITCHES}
@@ -122,11 +121,6 @@ def applies(switch: Switch | str, cfg: Mapping[str, Any] | None, gpus: Iterable[
 def applicable(cfg: Mapping[str, Any] | None, gpus: Iterable[Mapping[str, Any]] | None, backend: str | None = None) -> list[Switch]:
     gpus = list(gpus or [])
     return [s for s in SWITCHES if applies(s, cfg, gpus, backend)]
-
-
-def app_switches() -> list[Switch]:
-    """The switches the app shows (apps/host/server/native-settings.mjs SPEED_SWITCHES): all but the Terminal-only ones."""
-    return [s for s in SWITCHES if not s.terminal_only]
 
 
 def is_set(env: Mapping[str, Any] | None, switch: Switch | str) -> bool:

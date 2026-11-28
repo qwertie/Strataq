@@ -1,4 +1,4 @@
-"""strata_common/gpu_roles.py: Main / Helper / Off for every graphics card (the rules the app, `strata launch`, setup and the server share)."""
+"""strata_common/gpu_roles.py: Main / Helper / Off for every graphics card (the rules `strata launch`, setup and the server share)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def roles(d):
 
 
 class Vectors(unittest.TestCase):
-    """tests/data/gpu_roles_vectors.json is also run by apps/host/tests/gpu-roles.test.mjs against gpu-roles.ts."""
+    """The cases of tests/data/gpu_roles_vectors.json."""
 
     def test_recommend(self):
         for c in V["recommend"]:

@@ -1,6 +1,6 @@
 name: Config snapshot
 
-# tests/snapshot: what `strata launch`, the app's plain Load and the app's Models-screen Load hand the engine (arguments, environment, drafter,
+# tests/snapshot: what setup and `strata launch` hand the engine (arguments, environment, drafter,
 # confidence), for every simulated machine class and model set, against the golden files in tests/snapshot/golden.  Nothing is loaded,
 # downloaded or run on a GPU.  Windows and Linux must give byte-identical output, so both run.  A change that moves what users
 # get has to update the golden files in the same commit (STRATA_SNAPSHOT_UPDATE=1 python -m pytest tests/snapshot, see tests/snapshot/README.md).
@@ -17,8 +17,6 @@ on:
       - setup.py
       - strata.py
       - requirements*.txt
-      - apps/host/server/**
-      - apps/host/package*.json
       - packaging/**
       - tools/check
   pull_request:
@@ -31,8 +29,6 @@ on:
       - setup.py
       - strata.py
       - requirements*.txt
-      - apps/host/server/**
-      - apps/host/package*.json
       - packaging/**
       - tools/check
   workflow_dispatch:
@@ -62,16 +58,8 @@ jobs:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: requirements*.txt
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: apps/host/package-lock.json
       - name: Python packages
         run: python -m pip install -r requirements.txt -r requirements-dev.txt
-      - name: Host packages (the app's Load runs in Node)
-        working-directory: apps/host
-        run: npm ci --no-audit --no-fund
       - name: tools/check snapshot
         run: python tools/check --only snapshot --keep --scratch "${{ runner.temp }}/check"
       - name: Logs

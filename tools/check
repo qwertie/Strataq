@@ -8,20 +8,17 @@ Runs, each in its own step with its own timeout, in a scratch folder (build tree
   py-serve        pytest serve/
   py-tools        pytest tools/test_*.py
   py-optional     tools/dflash2, tools/dsv41, tools/trellis tests; need torch and are skipped without it
-  host-typecheck  apps/host: npm run typecheck
-  host-test       apps/host: npm test (a per-test timeout, so a hang fails one test instead of the run)
-  host-build      apps/host: npm run build
-  snapshot        pytest tests/snapshot (the config snapshot of the four entry points; needs Node 24)
+  snapshot        pytest tests/snapshot (the config snapshot of setup and `strata launch`)
   docs            local links in the current pages (tools/check_links.py), the release manifest, the capability table and the bench results index (--check)
 
 Prints one table: passed / failed / skipped / not run, per step, with the reason for every skip and every "not run".
-A step that cannot run because a tool is missing (Node, cmake, a compiler, pytest, torch) is "not run" and says which tool;
+A step that cannot run because a tool is missing (cmake, a compiler, pytest, torch) is "not run" and says which tool;
 it is never reported as a pass.  The exit code is 1 when anything failed or timed out, and 0 otherwise; --strict makes a
 "not run" step exit 2 too.  Nothing here needs a GPU, a model or the real Strata install.
 
     python tools/check                      everything above
     python tools/check --only cmake-cpu,py-tools
-    python tools/check --skip host-build --json result.json
+    python tools/check --skip cmake-cpu --json result.json
     python tools/check --list
 Backend, model and browser tests are separate commands (see the CI workflows in .github/workflows); they are not part of this one.
 """
@@ -40,12 +37,10 @@ import xml.etree.ElementTree as ET
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WIN = os.name == "nt"
-HOST = os.path.join(ROOT, "apps", "host")
-NODE_MIN = (24, 12)
 
 # step name -> default timeout in seconds (explicit, per step; --timeout-scale multiplies them)
 TIMEOUTS = {"cmake-cpu": 1800, "py-tests": 3600, "py-serve": 1800, "py-tools": 1200, "py-optional": 900,
-            "host-typecheck": 600, "host-test": 1800, "host-build": 600, "snapshot": 900, "docs": 300}
+            "snapshot": 900, "docs": 300}
 STEPS = list(TIMEOUTS)
 
 
@@ -132,20 +127,6 @@ def tail(logfile, n=25):
 
 
 # ---------------------------------------------------------------------------------------------------------- tools
-
-def node_version():
-    node = shutil.which("node")
-    if not node:
-        return None, "Node.js is not installed (needs >= %d.%d)" % NODE_MIN
-    try:
-        out = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=30).stdout.strip()
-        v = tuple(int(x) for x in re.match(r"v(\d+)\.(\d+)", out).groups())
-    except Exception as e:  # noqa: BLE001
-        return None, "node --version failed (%s)" % e
-    if v < NODE_MIN:
-        return None, "Node.js %s is too old (needs >= %d.%d)" % (out, NODE_MIN[0], NODE_MIN[1])
-    return node, ""
-
 
 def have_module(name):
     r = subprocess.run([sys.executable, "-c", "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec(%r) else 1)" % name],
@@ -281,17 +262,12 @@ def step_cmake(ctx):
     return finish(r, rc, False, log)
 
 
-def step_pytest(name, targets, extra=(), need_node=False, cwd=None):
+def step_pytest(name, targets, extra=(), cwd=None):
     def run(ctx):
         r = Result(name)
         if not have_module("pytest"):
             r.reason = "pytest is not installed for %s" % sys.executable
             return r
-        if need_node:
-            node, why = node_version()
-            if not node:
-                r.reason = why
-                return r
         paths = []
         for t in targets:
             hit = sorted(glob.glob(os.path.join(ROOT, t))) if any(c in t for c in "*?[") else ([os.path.join(ROOT, t)] if os.path.exists(os.path.join(ROOT, t)) else [])
@@ -343,57 +319,6 @@ def step_optional(ctx):
     return step_pytest("py-optional", ["tools/dflash2", "tools/dsv41", "tools/trellis"])(ctx)
 
 
-def npm_cmd():
-    return shutil.which("npm.cmd" if WIN else "npm") or shutil.which("npm")
-
-
-def host_ready(ctx, r):
-    """Node, npm and apps/host/node_modules. Installs the packages with `npm ci` when they are missing."""
-    node, why = node_version()
-    if not node:
-        r.reason = why
-        return False
-    if not npm_cmd():
-        r.reason = "npm is not installed"
-        return False
-    if os.path.isdir(os.path.join(HOST, "node_modules", ".bin")) or ctx.npm_ready:
-        return True
-    log = ctx.scratch.path("npm-ci.log")
-    rc, _ = run_cmd([npm_cmd(), "ci", "--no-audit", "--no-fund"], HOST, ctx.scratch.env(), 900, log)
-    if rc != 0:
-        r.reason = "npm ci could not install apps/host's packages (no network?); log " + log
-        return False
-    ctx.npm_ready = True
-    return True
-
-
-def step_npm(name, script, args=()):
-    def run(ctx):
-        r = Result(name)
-        if not host_ready(ctx, r):
-            return r
-        log = ctx.scratch.path(name + ".log")
-        junit = ctx.scratch.path(name + ".xml")
-        cmd = [npm_cmd(), "run", script]
-        if name == "host-test":
-            # the junit file gives the counts and the skip reasons; spec goes to the log
-            cmd += ["--", "--test-reporter=spec", "--test-reporter-destination=stdout", "--test-reporter=junit",
-                    "--test-reporter-destination=" + junit]
-        rc, secs = run_cmd(cmd, HOST, ctx.scratch.env({"STRATA_TEST_TIMEOUT_MS": "180000"}), ctx.timeout(name), log)
-        r.seconds = secs
-        if name == "host-test" and os.path.exists(junit):
-            parse_junit(junit, r)
-            # node writes suites and tests as testcases; a suite-level failure has no testcase of its own
-        elif name == "host-test":
-            summary = {m.group(1): int(m.group(2)) for m in re.finditer(r"^\W*(tests|pass|fail|cancelled|skipped)\s+(\d+)\s*$",
-                                                                       open(log, "rb").read().decode("utf-8", "replace"), re.M)}
-            r.passed, r.failed, r.skipped = summary.get("pass", 0), summary.get("fail", 0) + summary.get("cancelled", 0), summary.get("skipped", 0)
-            if r.skipped:
-                r.skips["(node:test gives no reason in this report)"] = r.skipped
-        return finish(r, rc, rc is None, log)
-    return run
-
-
 def step_docs(ctx):
     """The documentation checks that need no tools but Python: links, release manifest, capability table, bench index, settings register, the vendored ggml manifest."""
     r = Result("docs")
@@ -428,17 +353,14 @@ STEP_FUNCS = {
     "py-serve": step_pytest("py-serve", ["serve"]),
     "py-tools": step_pytest("py-tools", ["tools/test_*.py"]),
     "py-optional": step_optional,
-    "host-typecheck": step_npm("host-typecheck", "typecheck"),
-    "host-test": step_npm("host-test", "test"),
-    "host-build": step_npm("host-build", "build"),
-    "snapshot": step_pytest("snapshot", ["tests/snapshot"], need_node=True),
+    "snapshot": step_pytest("snapshot", ["tests/snapshot"]),
     "docs": step_docs,
 }
 
 
 class Ctx:
     def __init__(self, scratch, scale, jobs, shard=None):
-        self.scratch, self.scale, self.jobs, self.npm_ready, self.shard = scratch, scale, jobs, False, shard
+        self.scratch, self.scale, self.jobs, self.shard = scratch, scale, jobs, shard
 
     def timeout(self, name):
         return int(TIMEOUTS[name] * self.scale)

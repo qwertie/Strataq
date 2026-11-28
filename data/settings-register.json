@@ -8,7 +8,6 @@
   "strata_control",
   "strata_cli",
   "setup.py",
-  "apps/host/server",
   "serve"
  ],
  "statuses": [
@@ -429,21 +428,8 @@
    "code_default": null,
    "engine_sets": [],
    "engine_defaults": [],
-   "launch_files": [
-    "apps/host/server/native-resources.mjs"
-   ],
-   "launch_sets": [
-    {
-     "file": "apps/host/server/native-resources.mjs",
-     "line": 166,
-     "value": "String(gib)"
-    },
-    {
-     "file": "apps/host/server/native-resources.mjs",
-     "line": 167,
-     "value": "${gib}"
-    }
-   ],
+   "launch_files": [],
+   "launch_sets": [],
    "launch_reads": [],
    "doc_mentions": [
     "docs/AMD_HIP.md:482",
@@ -2421,7 +2407,6 @@
    ],
    "engine_defaults": [],
    "launch_files": [
-    "apps/host/server/policy-generated.mjs",
     "setup.py",
     "strata_control/speed_switches.py"
    ],
@@ -2434,11 +2419,6 @@
     {
      "file": "strata_control/speed_switches.py",
      "line": 61,
-     "value": "\"026\""
-    },
-    {
-     "file": "apps/host/server/policy-generated.mjs",
-     "line": 8,
      "value": "\"026\""
     }
    ],
@@ -11452,19 +11432,12 @@
    ],
    "engine_defaults": [],
    "launch_files": [
-    "apps/host/server/native-settings.mjs",
-    "apps/host/server/policy-generated.mjs",
     "strata_control/speed_switches.py"
    ],
    "launch_sets": [
     {
      "file": "strata_control/speed_switches.py",
      "line": 41,
-     "value": "\"1\""
-    },
-    {
-     "file": "apps/host/server/policy-generated.mjs",
-     "line": 5,
      "value": "\"1\""
     }
    ],
@@ -16606,18 +16579,12 @@
    "engine_sets": [],
    "engine_defaults": [],
    "launch_files": [
-    "apps/host/server/policy-generated.mjs",
     "strata_control/speed_switches.py"
    ],
    "launch_sets": [
     {
      "file": "strata_control/speed_switches.py",
      "line": 48,
-     "value": "\"old\""
-    },
-    {
-     "file": "apps/host/server/policy-generated.mjs",
-     "line": 7,
      "value": "\"old\""
     }
    ],
@@ -22540,9 +22507,7 @@
    "code_default": null,
    "engine_sets": [],
    "engine_defaults": [],
-   "launch_files": [
-    "apps/host/server/native-resources.mjs"
-   ],
+   "launch_files": [],
    "launch_sets": [],
    "launch_reads": [],
    "doc_mentions": [
@@ -22742,7 +22707,6 @@
    "engine_sets": [],
    "engine_defaults": [],
    "launch_files": [
-    "apps/host/server/native-resources.mjs",
     "setup.py"
    ],
    "launch_sets": [
@@ -23106,19 +23070,12 @@
    "engine_sets": [],
    "engine_defaults": [],
    "launch_files": [
-    "apps/host/server/native-settings.mjs",
-    "apps/host/server/policy-generated.mjs",
     "strata_control/speed_switches.py"
    ],
    "launch_sets": [
     {
      "file": "strata_control/speed_switches.py",
      "line": 44,
-     "value": "\"1.5\""
-    },
-    {
-     "file": "apps/host/server/policy-generated.mjs",
-     "line": 6,
      "value": "\"1.5\""
     }
    ],
