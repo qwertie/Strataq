@@ -15,8 +15,6 @@ type, layout or default; the engine's CPU decoder only gains K = 5 and 4 (ids 22
 | `tqenc_test.cpp` | the tests (about 64,000 checks): streams and the circular wrap, Viterbi against a naive DP, planted solutions, bit-exact decode against `tq_states.hpp` and the scalar / AVX2 / AVX-512 kernels, special blocks, thread determinism, quality against the rate-distortion limit |
 | `tqenc_hip.cpp`, `tqenc_hip_test.cpp` | the same search on a GPU (HIP, gfx1201): bit-identical blocks, about 20 M weights/s on one R9700 |
 | `../tqenc.py` | Python wrapper (ctypes): `encode`, `decode`, the input-only block-128 Hadamard, signs, the `.tqx` container |
-| `pilot.py`, `pilot_summary.py` | the block-quality pilot on a source GGUF (local files or HTTP range requests) |
-| `gyro_reencode.py`, `gyro_vs_original.py`, `gyro_error_profile.py`, `hf_slice.py` | checks against agentionai's Gyro files and the original Qwen weights |
 
 Build and test (Linux x86-64, g++ with AVX2; the GPU part needs ROCm):
 

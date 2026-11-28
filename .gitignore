@@ -76,6 +76,4 @@ dist-hip/
 .terminal-test-venv/
 node_modules/
 /release/artifacts/
-# the NVIDIA test session's output (tools/nvidia_session/run.ps1)
-/tools/nvidia_session/results/
 
