@@ -60,7 +60,7 @@ struct Pending {
 };
 
 /// The number of issuing threads: STRATA_IO_THREADS, else 4 (Windows: overlapped submits) /
-/// STRATA_DIRECT_FILE_PREAD_THREADS (Linux, macOS: each thread does one blocking pread, so the thread count is the
+/// STRATA_DIRECT_FILE_PREAD_THREADS (Linux: each thread does one blocking pread, so the thread count is the
 /// queue depth).
 int io_threads(int dflt) {
     const char* v = std::getenv("STRATA_IO_THREADS");
@@ -310,12 +310,7 @@ DirectFile::~DirectFile() { close(); delete impl_; }
 
 bool DirectFile::open(const std::string& path, std::string& err) {
     close();
-#if defined(__APPLE__)   // macOS has no O_DIRECT: F_NOCACHE keeps the reads out of the unified buffer cache
-    impl_->fd = ::open(path.c_str(), O_RDONLY);
-    if (impl_->fd >= 0 && fcntl(impl_->fd, F_NOCACHE, 1) != 0) { ::close(impl_->fd); impl_->fd = -1; }
-#else
     impl_->fd = ::open(path.c_str(), O_RDONLY | O_DIRECT);
-#endif
     if (impl_->fd < 0) { err = "DirectFile: cannot open " + path; return false; }
     struct stat st;
     if (fstat(impl_->fd, &st) != 0) { err = "DirectFile: cannot size " + path; close(); return false; }

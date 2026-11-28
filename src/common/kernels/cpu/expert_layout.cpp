@@ -50,9 +50,6 @@ bool cpu_gather_fast_here() { return false; }
 bool cpu_avxvnni_ok() { return false; }
 bool cpu_vnni_ok() { return false; }
 std::string cpu_name() {
-#if defined(__APPLE__)
-    return "unknown";   // (no /proc/cpuinfo)
-#else
     std::ifstream f("/proc/cpuinfo");
     std::string line;
     while (std::getline(f, line)) {
@@ -69,7 +66,6 @@ std::string cpu_name() {
 #else
     return "unknown";
 #endif
-#endif  // __APPLE__
 }
 #else
 bool cpu_isa_free() {                                    // STRATA_FORCE_AVX2 and the ISA cap, shared by the probes

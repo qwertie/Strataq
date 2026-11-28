@@ -122,7 +122,7 @@ void set_pool_cores(const std::vector<int>& cpus);
 const std::vector<int>& pool_cores_setting();
 
 /// Every logical processor this process may run on and the physical core it belongs to (see LogicalCpuInfo).  Empty when
-/// the system does not say (macOS, a sandbox without the topology).
+/// the system does not say (a sandbox without the topology).
 std::vector<LogicalCpuInfo> logical_cpu_layout();
 
 CpuTopology detect_cpu_topology(bool skip_first, PoolAffinity affinity = PoolAffinity::All);

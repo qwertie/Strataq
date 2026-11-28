@@ -18,8 +18,8 @@ struct FilePiece {
 /// Reads every piece (Windows: overlapped reads; Linux: the kernel's io_submit) as one
 /// queue, each piece's range widened to whole sectors, and ranges of a file that are near each other merged into one
 /// request.  Returns false (some dst may then hold partial bytes) when a read fails, a range runs past the end of
-/// its file, a range is too large for the OS, or the platform has no such reads (macOS), so the caller can read the
-/// pieces another way. The handle's open mode decides whether reads bypass the file cache.
+/// its file, or a range is too large for the OS, so the caller can read the pieces another way. The handle's open
+/// mode decides whether reads bypass the file cache.
 /// Safe from several threads: each keeps its own staging buffer until the thread exits.
 bool read_pieces(const FilePiece* pieces, size_t n);
 
