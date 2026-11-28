@@ -1,6 +1,6 @@
 """Which Markdown files are current pages and which are archived history.
 
-Used by the link check (tools/check_links.py) and the bench results index (tools/bench_results_index.py).
+Used by the link check (tools/check_links.py).
 Standard library only.
 """
 import os
