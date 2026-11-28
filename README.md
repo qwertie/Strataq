@@ -121,6 +121,9 @@ Python packages and refreshes the run configs; rebuild the engine with `--build`
 When the server is up, open the address it prints. The web page has the chat, the monitor and the Memory panel with
 the live settings. Any OpenAI- or Anthropic-compatible client can use the API.
 
+From a source checkout, use `python strata.py` in place of `strata` in the commands below
+(Windows: `.\.venv\Scripts\python.exe strata.py`; Linux: `.venv/bin/python strata.py`).
+
 - `strata connect` lists the apps it can set up (Claude Code, Codex CLI, OpenCode and others);
   `strata connect <app> --check` sends one prompt and one tool call the way that app does.
 - `strata launch` sets up, serves and monitors in guided screens. With flags it does the same without asking, for

@@ -606,13 +606,6 @@ class ContractTests(unittest.TestCase):
                                      "--host", "0.0.0.0", "--port", "0", *extra])
                 self.assertIn("tokenizer is missing", err.getvalue(), (body, extra))   # past the key check, stopped later
 
-    def test_code_run_uses_missing_component_exit_until_shared_harness_arrives(self):
-        output = io.StringIO()
-        with redirect_stdout(output):
-            code = main(["code", "run", "--prompt-file", "task.md", "--policy", "policy.json",
-                         "--output", "jsonl"])
-        self.assertEqual(code, 5)
-        self.assertEqual(json.loads(output.getvalue())["error"]["code"], 5)
 
 
 try:

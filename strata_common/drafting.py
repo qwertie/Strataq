@@ -71,18 +71,6 @@ def decide(mode: Any, mtp_here: bool | None = None) -> Decision:
     return Decision(asked, "mtp") if mtp_here is not False else Decision(asked, "off", NONE_HERE)
 
 
-def data_dir_of(args: list[Any]) -> Path | None:
-    """The model data folder an argument list belongs to: `--pack <data>/packs/<tag>`, else `--mtp <data>/mtp/rt`."""
-    items = [str(a) for a in args]
-    for flag, up in (("--pack", 2), ("--mtp", 2)):
-        if flag in items and items.index(flag) + 1 < len(items):
-            path = Path(items[items.index(flag) + 1])
-            if flag == "--mtp" and path.name.isdigit():
-                continue
-            return path.parents[up - 1] if len(path.parents) >= up else None
-    return None
-
-
 def summary_line(decision: Decision) -> str:
     """The line the Terminal shows: what drafts."""
     return line(decision.drafter, decision.note) if decision.note else f"Drafting: {'MTP' if decision.drafter == 'mtp' else 'Off'}"

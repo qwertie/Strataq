@@ -20,7 +20,7 @@ What goes in
 * the read-only tooling under `tools/` that the terminal paths import. Everything else under `tools/` is engine
   installation and preparation work and is deliberately excluded: the serving import graph must not pull it in
   (tests/terminal/test_no_acquisition.py checks that);
-* launchers: `bin/strata.cmd` and `bin/strata.ps1` (Windows), `bin/strata` (Linux, macOS).
+* launchers: `bin/strata.cmd` and `bin/strata.ps1` (Windows), `bin/strata` (Linux).
 
 What does NOT go in
 -------------------

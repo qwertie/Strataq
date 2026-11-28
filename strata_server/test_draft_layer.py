@@ -34,6 +34,12 @@ class DraftLayer(unittest.TestCase):
         for flag in ("--mtp", "--spec-min-p", "--batch-mtp"):
             self.assertNotIn(flag, off)
 
+    def test_qwen36_saved_drafting_off_applies_without_the_mtp_switch(self):
+        cfg = {"arch": "qwen35moe", "args": ["--model", "/model.gguf", "--mtp", "4"],
+               "drafting": "off"}
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(engine_args(cfg), ["--model", "/model.gguf"])
+
     def test_the_web_settings_page_lists_it(self):
         cfg = {"args": []}
         self.assertTrue(any(k["key"] == "mtp" for k in runconfig.view(cfg, "strata-x.json")["keys"]))

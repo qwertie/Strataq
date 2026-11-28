@@ -104,9 +104,6 @@ class OperatorProfileTests(unittest.TestCase):
                                     "--output", "jsonl")
         self.assertEqual(code, 2)
         self.assertEqual(stream["event"], "failed")
-        code, harness = self.command("code", "sessions", "list", "--json")
-        self.assertEqual(code, 5)
-        self.assertEqual(harness["error"]["code"], 5)
 
     def test_quiet_suppresses_human_success_but_preserves_errors_and_json(self):
         output, diagnostics = io.StringIO(), io.StringIO()
