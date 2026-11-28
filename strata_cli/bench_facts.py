@@ -1,4 +1,4 @@
-"""What a standard benchmark report says about the machine, the build, the model and the settings (docs/BENCHMARK_PROTOCOL.md).
+"""What a standard benchmark report says about the machine, the build, the model and the settings.
 
 Every probe is best effort and local: it reads the inference host's own tools (nvidia-smi, rocm-smi, amd-smi, PowerShell, /proc, sysctl) and the
 server's answers. A fact that cannot be read becomes `None` with a reason in `Why`, never a guess. Nothing here changes the machine.

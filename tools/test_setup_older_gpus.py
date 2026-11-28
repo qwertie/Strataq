@@ -110,7 +110,6 @@ class OptIn(unittest.TestCase):
         note = setup.maxwell_note([m6000, {**m6000, "index": 1}])
         self.assertIn("GPU 0 (Quadro M6000), GPU 1 (Quadro M6000)", note)
         self.assertIn("-DSTRATA_EXPERIMENTAL_SM60=ON -DCMAKE_CUDA_ARCHITECTURES=52", note)
-        self.assertIn("docs/OLDER_GPUS.md", note)
         self.assertNotIn("STRATA_EXPERIMENTAL_SM52", note)                       # no switch the user has to set
         self.assertEqual(setup.maxwell_note([V100, P40]), "")
         self.assertEqual(setup.maxwell_note([]), "")
@@ -234,7 +233,6 @@ class Install(unittest.TestCase):
                 self.assertIsNone(cfg)
                 self.assertIn("Maxwell (compute capability 5.2)", out)
                 self.assertIn("-DCMAKE_CUDA_ARCHITECTURES=52", out)
-                self.assertIn("docs/OLDER_GPUS.md", out)
 
     def test_a_maxwell_card_beside_a_newer_one_is_not_a_warning(self):
         rtx = card(0, "NVIDIA GeForce RTX 3090", 24.0, "86")

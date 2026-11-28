@@ -8,8 +8,7 @@ The rule (owner decision):
 The memory arithmetic is strata_cli/launch/catalog.py `fit_on` (a test keeps the two equal): the experts are held first in the
 graphics memory beyond about DENSE_GB (the dense weights, buffers and a 32K cache), then in RAM beyond
 about SYSTEM_ROOM_GB left for the system; whatever is left would be read from the SSD (`spill_gb`). A split adds the memory of the extra
-cards but every extra card holds its own dense layers and prompt buffers, so each one costs SPLIT_CARD_OVERHEAD_GB of that (an estimate:
-docs/MULTI_GPU.md says each card "holds the dense weights of its layers and its own prompt buffers").
+cards but every extra card holds its own dense layers and prompt buffers, so each one costs SPLIT_CARD_OVERHEAD_GB of that (an estimate).
 
 Cards that count: not integrated (an iGPU shares the system RAM and is ignored), at least MIN_CARD_GB of graphics memory, flagged usable by
 the caller's own driver checks (NVIDIA RTX 20 or newer, a supported AMD card, ...). A card needs SPLIT_MIN_VRAM_GB to share a model.
@@ -25,13 +24,12 @@ SYSTEM_ROOM_GB = 10.0          # = native-fit.ts SYSTEM_ROOM_GB
 DENSE_EXTRA_GB = 1.0           # = native-fit.ts DENSE_EXTRA_GB
 SPLIT_CARD_OVERHEAD_GB = 2.0   # each extra card of a split: its own dense layers and prompt buffers
 SPLIT_MIN_VRAM_GB = 8          # a card sharing a model holds the dense weights and its own prompt buffers too
-                               # (docs/MULTI_GPU.md)
 SPLIT_PROMPT_VRAM_GB = 12      # #448: a split stage lends a prompt chunk's buffers from its own cache; below this one
                                # cannot fund a 4096-token chunk (a 10 GB RTX 3080 beside a 32 GB card: 512 tokens,
                                # prompts 6.2x slower), while the big card alone could
 MIN_CARD_GB = 4.0              # under this a card cannot hold the dense weights: ignored (an iGPU, a display card)
 FITS_SPARE_RAM_GB = 4.0        # RAM left beyond the experts below which "fits" becomes "tight"
-SPLIT_PROMPT_GAIN = "about 20% faster"   # setup.py's own words for prompts read on two cards (docs/MULTI_GPU.md)
+SPLIT_PROMPT_GAIN = "about 20% faster"   # setup.py's own words for prompts read on two cards
 
 
 def _round1(x: float) -> float:
@@ -261,7 +259,7 @@ def _option(key: str, cards: list[dict], memory_gb: float, ram_gb: float | None)
         words = f"fits: needs {memory_gb:.0f} GB of the {have:.0f} GB available"
     notes = []
     if n >= 2:
-        notes.append(f"prompts are read {SPLIT_PROMPT_GAIN}; the cards share the layers (docs/MULTI_GPU.md)")
+        notes.append(f"prompts are read {SPLIT_PROMPT_GAIN}; the cards share the layers")
         small = [c for c in cards[1:] if float(c.get("vram_gb") or 0) < SPLIT_PROMPT_VRAM_GB - 0.5]
         if small and float(cards[0].get("vram_gb") or 0) >= SPLIT_PROMPT_VRAM_GB - 0.5:
             notes.append(f"{_name(small[0])} is small: it can make prompts slower than the first card alone")

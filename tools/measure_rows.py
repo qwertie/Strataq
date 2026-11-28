@@ -1,4 +1,4 @@
-"""tools/measure_rows.py - strata-q38's decode speed by conversations at once and rows per step (docs/DETAILS.md,
+"""tools/measure_rows.py - strata-q38's decode speed by conversations at once and rows per step (docs/ENGINE_NOTES.md,
 "Rows per step, lookahead and conversations at once"; docs/MEMORY_MANAGER_PLAN.md, step M7).
 
 One engine start runs every configuration (conversations at once x rows per step, with a lookahead) on story, code and

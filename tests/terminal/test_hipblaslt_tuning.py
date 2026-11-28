@@ -1,7 +1,7 @@
 """The hipBLASLt tuning tables in the AMD engine packages: what a package holds per card family, and the one rule that decides at a start
 whether a table is used (strata_common/hipblaslt_tuning.py). Folders are throwaways; no GPU tool is run.
 
-The packages' hipBLASLt versions below are the ones the 0.2.x release packages bundle (docs/AMD_HIP.md, Ready-made packages): Windows ROCm
+The packages' hipBLASLt versions below are the ones the 0.2.x release packages bundle: Windows ROCm
 10.2.0a20260930 carries 1.5.0 (100500), the Linux 7.10.0a20251120 wheels 1.2.0 (100200), Linux Strix Halo's 7.14.1 1.4.1 (100401)."""
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ import stage_tuning  # noqa: E402
 PACKAGES = {
     ("windows-x86_64", "rx9070"): (("gfx1200", "gfx1201"), 100500, {"gfx1201"}),
     ("windows-x86_64", "rdna3"): (("gfx1100", "gfx1101", "gfx1102", "gfx1151"), 100500, {"gfx1100", "gfx1151"}),
-    ("linux-x86_64", "rx9070"): (("gfx1200", "gfx1201"), 100200, set()),                    # no table for 1.2.0 on RDNA4 (docs/AMD_HIP.md)
+    ("linux-x86_64", "rx9070"): (("gfx1200", "gfx1201"), 100200, set()),                    # no table for 1.2.0 on RDNA4
     ("linux-x86_64", "rx7900"): (("gfx1100", "gfx1101", "gfx1102"), 100200, {"gfx1100"}),
     ("linux-x86_64", "halo"): (("gfx1151",), 100401, {"gfx1151"}),
     # 0.2.2 RX 6000 packages: hipBLASLt ships no gfx1030 / gfx1031 kernels at any version, so no table, plain hipBLAS

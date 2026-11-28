@@ -155,7 +155,7 @@ def plan(report: dict, set_index: int, a, prev: dict) -> dict:
 
     step("%d" % n, "The model's feed entry (a `models` member entry, DRAFT)", "owner PC, python only", 2,
          ["python packaging/make_model_release.py --intake <report> --id %s ... --write <OUTDIR>   # writes models/%s.entry.json (the feed's schema; build-feed refuses every [FILL: ...] left in it) and models/%s.model.json (the older draft)" % (a.id, a.id, a.id)],
-         ["models/%s.entry.json" % a.id], note="the entry follows strata_control/feed.py (packaging/UPDATES.md): fill the [FILL: ...] values (about, licence_url, ram_gb) by hand or with --about/--licence-url/--ram-gb, then `feed_tool.py build-feed --models <OUTDIR>/models`")
+         ["models/%s.entry.json" % a.id], note="the entry follows strata_control/feed.py: fill the [FILL: ...] values (about, licence_url, ram_gb) by hand or with --about/--licence-url/--ram-gb, then `feed_tool.py build-feed --models <OUTDIR>/models`")
     n += 1
     if with_app:
         for e in prev["app"]:
@@ -230,7 +230,7 @@ def model_entry(s: dict, a) -> dict:
 
 
 def feed_entry(s: dict, a) -> dict:
-    """The model's entry in the feed's `models` member, in the schema strata_control/feed.py reads (packaging/UPDATES.md). Every value the report cannot know
+    """The model's entry in the feed's `models` member, in the schema strata_control/feed.py reads. Every value the report cannot know
     (about, licence, licence_url, ram_gb, quant name) is a "[FILL: ...]" text, which `feed_tool.py build-feed --models` refuses: it is filled by hand, then built."""
     g = s.get("general", {})
     d = s.get("draft_catalog_entry", {})

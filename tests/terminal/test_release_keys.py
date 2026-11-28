@@ -15,7 +15,7 @@ from tests.terminal import update_fixture as fx
 
 ROOT = Path(__file__).resolve().parents[2]
 RELEASE_KEY_ID = "5d1bc23abbeffd0d"
-FORK_KEY_ID = "f8aabae844c8ba19"      # qwertie/Strataq's feed key (packaging/UPDATES.md, "This fork's release")
+FORK_KEY_ID = "f8aabae844c8ba19"      # qwertie/Strataq's feed key (docs/RELEASING.md)
 
 
 class ShippedKeys(unittest.TestCase):

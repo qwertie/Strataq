@@ -9,7 +9,7 @@ Runs, each in its own step with its own timeout, in a scratch folder (build tree
   py-tools        pytest tools/test_*.py
   py-optional     tools/dsv41, tools/trellis tests; need torch and are skipped without it
   snapshot        pytest tests/snapshot (the config snapshot of setup and `strata launch`)
-  docs            local links in the current pages (tools/check_links.py), the release manifest and the capability table (--check)
+  docs            local links in the current pages (tools/check_links.py) and the settings register (--check)
 
 Prints one table: passed / failed / skipped / not run, per step, with the reason for every skip and every "not run".
 A step that cannot run because a tool is missing (cmake, a compiler, pytest, torch) is "not run" and says which tool;
@@ -320,12 +320,11 @@ def step_optional(ctx):
 
 
 def step_docs(ctx):
-    """The documentation checks that need no tools but Python: links, release manifest, capability table, settings register, the vendored ggml manifest."""
+    """The documentation checks that need no tools but Python: links, settings register, the vendored ggml manifest."""
     r = Result("docs")
     log = ctx.scratch.path("docs.log")
     r.log = log
-    for label, script, args in (("links", "check_links.py", ()), ("release manifest", "release_manifest.py", ("--check",)),
-                                ("capability table", "capability_table.py", ("--check",)), ("settings register", "settings_register.py", ("--check",)),
+    for label, script, args in (("links", "check_links.py", ()), ("settings register", "settings_register.py", ("--check",)),
                                 ("vendored ggml (third_party/strata-ggml)", "check_vendored.py", ())):
         path = os.path.join(ROOT, "tools", script)
         if not os.path.exists(path):

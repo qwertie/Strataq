@@ -20,11 +20,10 @@ Speeds are the engine's own timings (the `timings` of the answer: prompt_per_sec
 token and latency are measured by this client.  Thinking is off for the suite (--think turns it on), so the answers are
 short and the runs comparable.  The default run takes about 3-10 minutes after the model has loaded (the slower the card, the longer).
 
-The result goes to bench/results/<date>-community-<gpu>-<model>/ : README.md in the format of
-docs/COMMUNITY_BENCHMARKS.md, results.json (every request) and an engine log excerpt.  Home folders, user and host names,
+The result goes to bench/results/<date>-community-<gpu>-<model>/ : README.md, results.json (every request) and an engine log excerpt.  Home folders, user and host names,
 IP addresses and API keys are replaced by placeholders before anything is written; read it once before you share it.
 `--compare <older results folder>` prints the two side by side.  Standard library only.
-This is the quick speed check, not the standard benchmark: `strata bench run` follows docs/BENCHMARK_PROTOCOL.md (fixed prompts, thinking on,
+This is the quick speed check, not the standard benchmark: `strata bench run` follows the standard protocol (fixed prompts, thinking on,
 the model card sampling, twelve sanity checks) and writes results other people can compare with.
 """
 from __future__ import annotations
@@ -261,7 +260,7 @@ class Suite:
         """Five pieces of text a coding agent would read: this folder's own documents when they exist (nothing personal),
         else generated filler of the same size."""
         names = []
-        for rel in ("README.md", "docs/HOW_IT_WORKS.md", "docs/DETAILS.md", "docs/INSTALL.md", "docs/MODELS.md", "docs/COMMUNITY_BENCHMARKS.md"):
+        for rel in ("README.md", "AGENTS.md", "docs/ARCHITECTURE.md", "docs/ENGINE_NOTES.md", "docs/MEMORY_MANAGER_PLAN.md", "docs/REFACTOR_PLAN.md"):
             p = ROOT / rel
             if p.is_file():
                 words = p.read_text(encoding="utf-8", errors="replace").split()
@@ -1033,10 +1032,10 @@ def main(argv=None) -> int:
             shown = d.relative_to(ROOT)
         except ValueError:
             shown = d
-        say(f"\nReport: {shown / 'README.md'}\nShare it: open a pull request that adds the folder {shown} (see docs/COMMUNITY_BENCHMARKS.md), "
+        say(f"\nReport: {shown / 'README.md'}\nShare it: open a pull request that adds the folder {shown}, "
             f"or paste README.md into a GitHub issue. Home folders, user and host names and IP addresses are already replaced; "
             f"read it once before you share it.")
-        say("For results other people can compare with, run the standard benchmark: strata bench run (docs/BENCHMARK_PROTOCOL.md).")
+        say("For results other people can compare with, run the standard benchmark: strata bench run.")
         return 1 if out["failures"] and not any(out[k] for k in ("chat", "prompts", "agent")) else 0
     finally:
         if started:

@@ -8,7 +8,7 @@ The stage folder is the one packaging/package_engine.py is pointed at. The hipBL
 libraries come from (include/hipblaslt/hipblaslt-version.h; 1.5.0 is 100500), written to BUILD.json as ``hipblaslt_version``, and every
 table of tools/hip for one of --archs and exactly that version is copied to ``<stage>/tuning/``. An architecture without a table keeps plain
 hipBLAS: it is listed on stdout, and --expect makes it an error for the ones that must have one. The tables are measured per architecture and
-version (docs/AMD_HIP.md, Tuning table); nothing is calibrated or invented here. Windows packages do the same inside tools/hip/package_windows.py.
+version; nothing is calibrated or invented here. Windows packages do the same inside tools/hip/package_windows.py.
 """
 from __future__ import annotations
 

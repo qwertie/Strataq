@@ -1,7 +1,6 @@
 """G04/E01 from the TUI stress test: a second launch while a model serves (same choices, other choices, no screens, --restart,
 another context on the same port)."""
 
-import os
 import unittest
 from unittest import mock
 
@@ -142,12 +141,9 @@ class SecondLaunchTests(unittest.TestCase):
             self.assertEqual(code, 0, err)
             self.assertTrue(seen["restart"])
 
-    def test_restart_is_in_help_and_docs(self):
+    def test_restart_is_in_help(self):
         code, out, _ = run_cli(["launch", "--help"])
         self.assertIn("--restart", out)
-        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        with open(os.path.join(root, "docs", "TERMINAL_LAUNCH.md"), encoding="utf-8") as f:
-            self.assertIn("--restart", f.read())
 
 
 class ModelPathWins(unittest.TestCase):

@@ -4,7 +4,7 @@
 .DESCRIPTION
     Strata keeps the experts the GPU does not hold in a host memory arena. With SeLockMemoryPrivilege
     granted, Windows lets it allocate that arena in 2 MB large pages (MEM_LARGE_PAGES); without it the
-    engine says at start that the large pages were refused and uses 4 KB pages (docs/DETAILS.md, #1412).
+    engine says at start that the large pages were refused and uses 4 KB pages (#1412).
     The same can be done by hand with secpol.msc (User Rights Assignment, "Lock pages in memory").
 
     NOTE: Windows applies security token privilege changes ONLY after sign-out/sign-in or reboot.

@@ -62,7 +62,7 @@ MAX_NEW = 128
 TIER_MAX_NEW = 512
 # --prefill-pipe's values: 0 the buffers' chunks (the engine default), 1 their count evened out, then b/a in tokens
 PIPE_VALUES = (0, 1, 768, 1536, 3072, 6144)
-PIPE_TOKENS = (2048, 8192)        # fresh prompts read per value (their text: the install's docs/*.md)
+PIPE_TOKENS = (2048, 8192)        # fresh prompts read per value (their text: the install's README.md and docs/*.md)
 PROMPTS = (
     "Write a Python function that merges two sorted lists into one sorted list, with a docstring and two tests.",
     "Explain in two paragraphs how a refrigerator moves heat from inside to outside.",
@@ -134,7 +134,8 @@ def doc_prompt(tok):
     """`make(i, n)`: a fresh prompt of about n tokens - the same stretch of the docs' text for every i, after a header
     that differs for every i, so no read reuses an earlier one's cache and the reads differ only in their chunks (where
     experts are streamed, the read speed depends on the text: a different stretch per read measured the text)."""
-    text = "\n\n".join(p.read_text(encoding="utf-8", errors="replace") for p in sorted((ROOT / "docs").glob("*.md")))
+    pages = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]
+    text = "\n\n".join(p.read_text(encoding="utf-8", errors="replace") for p in pages if p.is_file())
     body = tok.encode(text, parse_special=False) or [0]
     tail = tok.encode("<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n", parse_special=True)
 

@@ -1,4 +1,4 @@
-"""Tests for setup.py's Unsloth choices (docs/UNSLOTH_Q4.md): UD-IQ4_XS (regular from 0.1.39) and the experimental
+"""Tests for setup.py's Unsloth choices: UD-IQ4_XS (regular from 0.1.39) and the experimental
 UD-Q4_K_XL: the four pinned shards with
 their sizes and SHA-256, the RAM budget from the PC's RAM, the pack with --compat-bf16 (never experts.bin), the
 engine version it needs, one GPU, no images.  Mocked - no GPU, no downloads, nothing written outside a temp folder.
@@ -283,7 +283,7 @@ class Main(Base):
 
     def test_amd_is_not_asked(self):
         """#429 is closed by MODEL-UPDATE Phase 2: UD-Q4_K_XL ran on an R9700 (quality yardstick, decode and prompt
-        numbers in docs/QUANTS.md), so AMD is no longer asked before the download."""
+        numbers), so AMD is no longer asked before the download."""
         r9700 = [{"index": 0, "name": "AMD Radeon AI PRO R9700", "vram_gb": 31.9, "arch": "gfx1201",
                   "driver": "amdgpu"}]
         with mock.patch.object(setup, "get_prebuilt_hip", lambda *a, **k: self.t / "engine"),                 mock.patch.object(setup, "build_engine_hip", lambda *a, **k: self.t / "engine"):

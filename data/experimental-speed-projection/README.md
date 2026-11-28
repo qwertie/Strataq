@@ -14,7 +14,7 @@ on the same text it costs 0.2-0.4% per token; a chat's speed with it on depends 
 
 **Turning it on.** `START-HERE.bat --setup` asks (default: off), or pass `--experimental-speed-projection on`. With it
 loaded, the web app's Sampling drawer and the API field `"experimental_speed_projection": false` switch it off per
-request. See `docs/DETAILS.md`, "Experimental speed projection".
+request.
 
 **Origin and license.** A local package of the vector (the published original uses filenames containing "refusal";
 the bytes are the same), made from Qwen3.8-Flash-Next activations, so the Qwen Community License 1.0 of the model

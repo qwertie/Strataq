@@ -1,4 +1,4 @@
-"""The local link check (tools/check_links.py) and the pointer files left where material moved to history/."""
+"""The local link check (tools/check_links.py)."""
 import os
 import sys
 import unittest

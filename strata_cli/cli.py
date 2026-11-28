@@ -288,14 +288,14 @@ def parser() -> argparse.ArgumentParser:
                               help="require the candidate run-config bytes shown in a restart recipe plan")
     bench = sp.add_parser("bench", help="explicit serving benchmark with local JSON evidence")
     bench_sp = bench.add_subparsers(dest="bench_command", required=True)
-    bench_run = bench_sp.add_parser("run", help="the standard benchmark (docs/BENCHMARK_PROTOCOL.md), or a serving suite")
+    bench_run = bench_sp.add_parser("run", help="the standard benchmark, or a serving suite")
     bench_source = bench_run.add_mutually_exclusive_group(required=True)
     bench_source.add_argument("--profile", help="saved serving profile or installed run config")
     bench_source.add_argument("--url", help="server root; remote connections require HTTPS")
     bench_run.add_argument("--suite", choices=("standard-v1", "serving-smoke", "parallel-mixed-v1", "parallel-overload-v1",
                                                "parallel-cancel-v1", "parallel-prefill-cancel-v1"),
                            default="standard-v1",
-                           help="standard-v1 (default) follows docs/BENCHMARK_PROTOCOL.md; the others are serving suites for your own comparisons")
+                           help="standard-v1 (default) is the standard benchmark; the others are serving suites for your own comparisons")
     bench_run.add_argument("--concurrency", type=int, default=None,
                            help="serving suites: simultaneous requests (1..16, or 1..64 for parallel-overload-v1; default 4)")
     bench_run.add_argument("--repeat", type=int, default=None, help="serving suites: repeat measured phases (1..5; default 1)")
@@ -310,7 +310,7 @@ def parser() -> argparse.ArgumentParser:
     bench_run.add_argument("--credential-env", default="STRATA_API_KEY")
     bench_run.add_argument("--telemetry-credential-env", default=None)
     bench_run.add_argument("--output", choices=("human", "json"), default="human")
-    standard = bench_run.add_argument_group("standard suite (docs/BENCHMARK_PROTOCOL.md)")
+    standard = bench_run.add_argument_group("standard suite")
     standard.add_argument("--optional-concurrency", action="store_true",
                           help="also run the optional stage: four short requests released together, three rounds")
     standard.add_argument("--no-start", action="store_true",
@@ -1116,7 +1116,7 @@ def _usable_key(value):
 
 
 def _bench_standard(a: argparse.Namespace, machine: bool) -> int:
-    """`strata bench run` for docs/BENCHMARK_PROTOCOL.md: against a running server (--url, or a profile that is already serving),
+    """`strata bench run` for the standard benchmark: against a running server (--url, or a profile that is already serving),
     or by starting the profile's engine for the run and stopping it afterwards."""
     from strata_cli import bench_facts, bench_standard
     fixed = [name for name, value in (("--concurrency", a.concurrency), ("--repeat", a.repeat),
@@ -1941,7 +1941,7 @@ def _components_backends(a: argparse.Namespace) -> int:
         print(f"  {row['backend']:<6} {', '.join(row['platforms']):<45} {mark}")
     print()
     print("  Unsupported combinations are not attempted. A combination that is listed but has not")
-    print("  been qualified on real hardware is prepared, not claimed: see packaging/README.md.")
+    print("  been qualified on real hardware is prepared, not claimed.")
     return 0
 
 

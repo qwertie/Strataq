@@ -1,5 +1,5 @@
 """tools/q8_dense_gguf.py - a copy of a model whose natively served dense projections and head are Q8_0, for the
-Pascal GP100 decode kernel (STRATA_Q8_SM60=1, docs/OLDER_GPUS.md).
+Pascal GP100 decode kernel (STRATA_Q8_SM60=1).
 
 The GSQ-RCO packs keep those matrices in K- and i-quants (Q6_K, IQ4_XS, Q4_K, IQ3_S, Q5_K, Q2_0, IQ4_NL), whose
 decode is what a GP100 die is slowest at; STRATA_Q8_SM60 only runs Q8_0 matrices. Every shard of the model is

@@ -56,7 +56,7 @@ Both expose the same [request-ID protocol](../contracts/requests.md). The paged 
 conversation state when it is needed. Qwen3.6's loop keeps its execution structures behind a shared adapter.
 The Python client does not choose a solo path or an execution slot for an updated engine.
 
-`src/common/serve/README.md` lists which parts each one uses. Much of [DETAILS.md](DETAILS.md) was written for the
+`src/common/serve/README.md` lists which parts each one uses. Much of upstream's documentation was written for the
 per-session engines that came before the paged one: when a doc says "session", "slot" or "`--batch`", check which loop
 it means.
 

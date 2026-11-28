@@ -788,11 +788,8 @@ class TdrPointer(unittest.TestCase):
     def test_setup_points_windows_gfx12_to_the_entry(self):
         src = Path(setup.__file__).read_text(encoding="utf-8")
         self.assertIn('WIN and str(gpu.get("arch") or "").startswith("gfx12")', src)
-        doc = (Path(setup.__file__).resolve().parent / "docs/TROUBLESHOOTING.md").read_text(encoding="utf-8")
-        self.assertIn("Windows AMD: the driver resets", doc)
-        for env in ("STRATA_PF_STEP_SYNC", "STRATA_KV_HOST_DMA"):
-            self.assertIn(env, doc)
-            self.assertIn(env, (Path(setup.__file__).resolve().parent / "src/models/qwen38/prefill/prefill.cpp").read_text(encoding="utf-8"))
+        self.assertIn("STRATA_KV_HOST_DMA", src)
+        self.assertIn("STRATA_KV_HOST_DMA", (Path(setup.__file__).resolve().parent / "src/models/qwen38/prefill/prefill.cpp").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

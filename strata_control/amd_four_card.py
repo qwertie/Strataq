@@ -1,6 +1,6 @@
 """The serving profile of a four-card AMD box: 4 x Radeon AI PRO R9700 (32 GB, gfx1201) running Qwen3.8-Flash-Next IQ3_S.
 
-Measured on that box (docs/BATCHING.md, "Four R9700 cards: the serving profile"): the cards hold the whole model, so what limits
+Measured on that box: the cards hold the whole model, so what limits
 them is how many requests decode together and how the four stages are fed, not memory.  The profile sets
 
 * 32 slots in 4 pipelined groups (one group per card), instead of the launcher's 4 requests at a time;
@@ -25,7 +25,7 @@ GROUPS = 4                        # pipelined groups: one per card
 LAYER_SPLIT = "13,26,39"          # Qwen3.8-Flash-Next has 48 layers: 13 / 13 / 13 / 9 (the output head sits on the last card)
 PREFILL_CHUNK = "2048"
 BATCH_ENV = {"STRATA_QSA_SLOTS": "1", "STRATA_BATCH_SELF_COMMIT": "1", "STRATA_SLOT_COPY_DIRECT": "1"}
-PROMPT_CACHE_OFF = False          # --prompt-cache 0 is not part of the default: see docs/BATCHING.md
+PROMPT_CACHE_OFF = False          # --prompt-cache 0 is not part of the default
 MIN_CARD_GB = 28.0                # a 32 GB card reports a little less than its name
 CARDS = 4
 OFF_VALUES = ("0", "off", "no", "false")

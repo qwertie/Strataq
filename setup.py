@@ -181,7 +181,7 @@ def source_hint(url: str) -> str:
     """The recommendation that goes with a failed download from Hugging Face: ModelScope, by an explicit choice."""
     if "huggingface" in url or "hf-mirror" in url:
         return ("; if huggingface.co does not reach you (mainland China), the same files are on ModelScope: run setup "
-                "with --source modelscope (docs/INSTALL.md)")
+                "with --source modelscope")
     return ""
 
 
@@ -247,7 +247,7 @@ MIN_DRIVER = 580                       # CUDA 13.0
 # Older NVIDIA GPUs (experimental): CUDA 13 dropped Pascal (sm_60/61) and Volta (sm_70), so a model whose GPUs include
 # one runs a second engine, built with CUDA 12.9 (-DSTRATA_EXPERIMENTAL_SM60=ON) and kept in its own folder: the
 # ready-made one is CUDA12_ASSET (Windows; on Linux it is compiled here with a CUDA 12.x toolkit).  One engine runs per
-# model, so the choice is per model config, by its oldest GPU; --cuda 12|13 overrides it (docs/OLDER_GPUS.md).
+# model, so the choice is per model config, by its oldest GPU; --cuda 12|13 overrides it.
 CUDA13_MIN_ARCH = 75                   # the oldest compute capability CUDA 13 compiles for (sm_75, RTX 20)
 CUDA12_ASSET = "strata-windows-x64-cuda12.zip" if WIN else "strata-linux-x64-cuda12.zip"
 CUDA12_WHEELS = ["nvidia-cublas-cu12==12.9.1.4", "nvidia-cuda-runtime-cu12==12.9.79"]
@@ -674,7 +674,7 @@ def hybrid_pool_workers(cores) -> int | None:
     """#642 (Hardin22's measurement): on a hybrid CPU the expert pool runs best on the P-cores but the host loop's one
     plus HALF of the E-cores - an E-core runs the expert kernels ~2.2x slower and each layer waits for its slowest
     part (i9-14900KF, 8P + 16E: 15 workers decoded 165 / 116 tok/s against 106 / 84 with all 23).  Only on a CPU with
-    more E-cores than P-cores: on an i7-13700KF (8P + 8E, docs/AMD_HIP.md's gfx1030 report) all 15 workers decoded
+    more E-cores than P-cores: on an i7-13700KF (8P + 8E, a gfx1030 report) all 15 workers decoded
     38-42 tok/s against 36 with 8, so there the engine's own count stays.  None: the engine's own default (one worker
     per physical core but the host's) stays."""
     if not cores:
@@ -1037,7 +1037,7 @@ def sm60_card(arch) -> bool:
 
 
 def maxwell_card(arch) -> bool:
-    """#3218: Maxwell (5.x).  No ready-made engine holds code for it; it is a source build (docs/OLDER_GPUS.md)."""
+    """#3218: Maxwell (5.x).  No ready-made engine holds code for it; it is a source build."""
     return 50 <= int(arch) < 60
 
 
@@ -1052,8 +1052,8 @@ def maxwell_note(found) -> str:
     return (f"{names}: Maxwell (compute capability {cc(cards[0])}). No ready-made Strata engine holds code for it, so "
             "setup cannot install one. One reporter built the engine from source for two Quadro M6000 with a CUDA 12.x "
             "toolkit (cmake -B build -G Ninja -DSTRATA_EXPERIMENTAL_SM60=ON -DCMAKE_CUDA_ARCHITECTURES=52) and saw about "
-            "22 tokens a second with a 1-bit Qwen3.8-Flash-Next; nobody has checked the answer text yet. Steps and "
-            "caveats: docs/OLDER_GPUS.md. A card of the RTX 20 series or newer runs the ready-made engine")
+            "22 tokens a second with a 1-bit Qwen3.8-Flash-Next; nobody has checked the answer text yet. "
+            "A card of the RTX 20 series or newer runs the ready-made engine")
 
 
 def old_gpus_opt_in(found, named=(), cuda=None, other=False):
@@ -1162,9 +1162,9 @@ def gpu_problem(g, together=False):
     """Why Strata cannot use this card, in plain words (None: it can)."""
     if int(g["arch"]) < 75 and not (sm60_card(g["arch"]) and experimental_sm60()):
         return (f"not supported - older than the RTX 20 series (compute capability {cc(g)}; Strata needs 7.5 or "
-                "newer" + ("; experimental: choose it with --gpu " + str(g["index"]) + " (the CUDA 12 engine, "
-                          "docs/OLDER_GPUS.md)" if sm60_card(g["arch"]) else
-                          "; Maxwell only runs from a source build, docs/OLDER_GPUS.md" if maxwell_card(g["arch"]) else "") + ")")
+                "newer" + ("; experimental: choose it with --gpu " + str(g["index"]) + " (the CUDA 12 engine)"
+                          if sm60_card(g["arch"]) else
+                          "; Maxwell only runs from a source build" if maxwell_card(g["arch"]) else "") + ")")
     if together and g["vram_gb"] < SPLIT_MIN_VRAM_GB - 0.5:
         return (f"not supported together with other GPUs - {g['vram_gb']:.0f} GB of VRAM (a card sharing the model "
                 f"needs {SPLIT_MIN_VRAM_GB} GB or more)")
@@ -1205,7 +1205,7 @@ def split_short(cards) -> list:
 def split_short_note(g) -> str:
     return (f"GPU {g['index']} ({g['name']}, {g['vram_gb']:.0f} GB) is too small to lend a split its prompt buffers: "
             "it would cap prompt reading at 512-2048-token chunks, several times slower than the first card alone "
-            "(#448). It can serve as a helper expert cache instead (docs/SECOND_GPU.md)")
+            "(#448). It can serve as a helper expert cache instead")
 
 
 def parse_gpus(text, found) -> list:
@@ -1369,13 +1369,13 @@ def roles_cards(found) -> list:
 def choose_roles(a, found) -> list:
     """Two or more cards can share the model: the recommended role of each (the best card Main, the others Helper, a card with 8 GB or less
     Off) and ONE question, "Use these roles?".  n takes the person's own: 1=main,0=helper (cards left out are Off).  Returns the card
-    numbers in the engine's order (Main last) and keeps the roles in a._roles for the config (docs/MULTI_GPU.md)."""
+    numbers in the engine's order (Main last) and keeps the roles in a._roles for the config."""
     from strata_common import gpu_roles
     cards = roles_cards(found)
     roles = dict(gpu_roles.recommend(cards)["roles"])
     say()
     say("  Strata recommends a role for each graphics card. Main does the last steps of every answer; a Helper holds part of the model;")
-    say("  Off leaves the card alone (a card with 8 GB or less starts Off beside a bigger card). Details: docs/MULTI_GPU.md.")
+    say("  Off leaves the card alone (a card with 8 GB or less starts Off beside a bigger card).")
     by = {c["index"]: c for c in cards}
     for i in sorted(roles):
         say(f"    GPU {i + 1}  {gpu_roles.short_name(by[i]):<22} {by[i]['vram_gb']:>4.0f} GB   {roles[i].capitalize()}")
@@ -1521,16 +1521,16 @@ def recommend_remote_expert_opt(cfg: dict, off: bool = False) -> None:
             args.remove(REMOTE_EXPERT_OPT)
         return
     # #1352: --pipeline-windows (the first card starts the next window) is switched off by --remote-expert-opt (the
-    # helper caches), so a config that asks for it keeps its pipeline: one of the two, not both (docs/MULTI_GPU.md)
+    # helper caches), so a config that asks for it keeps its pipeline: one of the two, not both
     pw = args.index("--pipeline-windows") if "--pipeline-windows" in args else -1
     if pw >= 0 and pw + 1 < len(args) and args[pw + 1] != "0":
         if REMOTE_EXPERT_OPT in args:
             warn("--pipeline-windows and --remote-expert-opt are both in this config: the engine turns the pipeline off "
                  "beside the helper caches. Keep one - remove --remote-expert-opt for the pipeline "
-                 "(docs/MULTI_GPU.md, #1352)")
+                 "(#1352)")
         else:
             ok("multi-GPU: --pipeline-windows is set, so --remote-expert-opt is not added (the helper caches turn the "
-               "pipeline off; docs/MULTI_GPU.md)")
+               "pipeline off)")
         return
     # #1447: the flag acts only on the helper caches (--expert-cache-device1..3); without one the engine builds nothing
     # from it, and a plain layer split gained a flag that says "helpers" for no reason. Setup adds it only beside a
@@ -1565,7 +1565,7 @@ def offer_together(cfg_path: Path, cfg: dict, yes: bool) -> dict:
     resident = "--resident-experts" in cfg.get("args", []) and not resident_split()
     say()
     say("  This PC has " + " and ".join(gpu_name(g) for g in pair) + ": Strata can share the model across both.")
-    say("  Together they hold about twice the model's experts and read prompts about 20% faster (docs/MULTI_GPU.md).")
+    say("  Together they hold about twice the model's experts and read prompts about 20% faster.")
     if resident:
         say("  This model runs in the low-RAM mode with its experts kept in RAM, on one GPU (recommended: steady RAM")
         say("  use). On both, the experts the GPUs do not hold are read through the OS file cache instead: faster in")
@@ -2867,7 +2867,7 @@ def ready_fetch(model: str, models_dir: Path) -> None:
 def resident_budget_gib(model, ram, kv_ram_gb=0.0) -> int:
     """UD-Q4_K_XL: the GiB of experts the engine keeps in RAM (--resident-budget-gib): the RAM (GiB, ram_gb()) less
     24 for the OS, the engine and the file cache the other experts are read through, less a KV cache streamed to
-    RAM; at most all of them, at least 8.  64 GB: 40, the measured setting (docs/UNSLOTH_Q4.md)."""
+    RAM; at most all of them, at least 8.  64 GB: 40, the measured setting."""
     gib = round(ram) - UNSLOTH_RAM_LEFT_GB - math.ceil(kv_ram_gb)
     return max(8, min(gib, int(MODELS[model]["arena_gb"] / 1.073741824)))
 
@@ -3218,7 +3218,7 @@ def cuda_lib_dirs(toolkit=13):
 
 # ------------------------------------------------------------------------------------------------ AMD
 # The RX 7900 XT / XTX (gfx1100) and the RX 9070 series / Radeon AI PRO R9700 (gfx1201) on Linux, through the HIP
-# backend (docs/AMD_HIP.md); the RX 7800 XT / 7700 XT (gfx1101, #254) and the RX 9060 XT (gfx1200, #256) were run by
+# backend; the RX 7800 XT / 7700 XT (gfx1101, #254) and the RX 9060 XT (gfx1200, #256) were run by
 # their owners; the RX 6800 / 6900 series (gfx1030, #311) and the RX 6700 XT (gfx1031, #524) run but are unvalidated.  There is no ready-made AMD engine: ROCm comes from AMD's TheRock Python wheels into .venv (no sudo;
 # a system ROCm 7 in /opt/rocm is used when it has hipcc and hipBLAS) and the engine is compiled here for the cards.
 # No images yet.
@@ -3229,7 +3229,7 @@ ROCM_INDEXES = {"gfx1100": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",   
                 "gfx1201": "https://rocm.nightlies.amd.com/v2/gfx120X-all/",
                 "gfx1030": "https://rocm.nightlies.amd.com/v2/gfx103X-all/",
                 "gfx1031": "https://rocm.nightlies.amd.com/v2/gfx103X-all/",
-                "gfx1151": "https://rocm.nightlies.amd.com/v2/gfx1151/",       # Strix Halo (docs/STRIX_HALO.md)
+                "gfx1151": "https://rocm.nightlies.amd.com/v2/gfx1151/",       # Strix Halo
                 "gfx1150": "https://rocm.nightlies.amd.com/v2/gfx1150/",       # Strix Point: only with STRATA_EXPERIMENTAL_GFX1150=1
                 "gfx1103": "https://rocm.nightlies.amd.com/v2/gfx110X-all/"}   # Radeon 780M: only with STRATA_EXPERIMENTAL_GFX1103=1
 # The TheRock nightly indexes are pruned and move on, and each GPU family's index holds its own range (#1103: gfx103X-all
@@ -3277,7 +3277,7 @@ GFX1103_SWITCHES = {
     "STRATA_QFUSE": "1", "STRATA_PLE_BATCH": "1", "STRATA_SH_STREAM": "1",
 }
 # The same set for a gfx1150 install (Radeon 890M / 880M): less STRATA_HCD_EXACT as well, because a gfx1150 table picks other
-# solutions than the gfx1151 one.  The Radeon 890M report (docs/AMD_HIP.md; bench/results/2026-10-07-community-gfx1150) measured the
+# solutions than the gfx1151 one.  The Radeon 890M report (bench/results/2026-10-07-community-gfx1150) measured the
 # same greedy answers with all 17 on and with all 17 off, decode +2% and prompts +3-6%.  The engine's arch defaults are not used
 # for gfx1150 (src/core/arch_defaults_test.cpp asserts gfx1150 stays empty), so this keeps the default path byte-identical.
 GFX1150_SWITCHES = dict(GFX1103_SWITCHES)
@@ -3296,7 +3296,7 @@ AMD_NAMES = {"gfx1100": "AMD Radeon RX 7900 series (gfx1100)",   # when sysfs ha
 AMD_CARDS = ("the RX 7900 XT / XTX (gfx1100), RX 7800 XT / 7700 XT (gfx1101), RX 9060 XT (gfx1200) and "
              "RX 9070 / 9070 XT / Radeon AI PRO R9700 (gfx1201), and the RX 6800 / 6900 series (gfx1030) and RX 6700 XT "
              "(gfx1031, #524), and the RX 7600 / 7600 XT (gfx1102, one run reported, #942), all unvalidated, and the Ryzen AI Max \"Strix Halo\" APU (Radeon 8060S / 8050S / 8040S, "
-             "gfx1151: experimental, docs/STRIX_HALO.md)")
+             "gfx1151: experimental)")
 
 
 def rocm_index(arch):
@@ -3355,7 +3355,7 @@ def rocm_wanted(index, listing=None):
     if rocm_family(index) == "gfx1151" and (rocm_vkey(version) or (9, 0))[:2] < (7, 11):
         note = ((note + "; ") if note else "") + (
             "the ROCm 7.10 wheels segfault in the HSA runtime on a Strix Halo with a new kernel (7.2.8, #1267): "
-            "the 7.14 line (docs/STRIX_HALO.md) is the one that works")
+            "the 7.14 line is the one that works")
     return version, note
 
 
@@ -3389,7 +3389,7 @@ def is_rdna2(g) -> bool:
 RDNA2_PACKAGE_NOTE = ("RX 6000 series (RDNA2, {arch}): Strata has a ready-made engine package for these cards, built, not tested on a real "
                       "RX 6000 card. It runs plain kernels (this chip has no matrix cores, so the RX 7000 / RX 9000 prompt paths stay off) "
                       "and plain hipBLAS (no hipBLASLt tuning table for it). If something goes wrong, open an issue with the end of "
-                      "strata-<model>.log: docs/AMD_HIP.md, \"RDNA2\".")
+                      "strata-<model>.log.")
 
 
 def rdna2_notes(gpu) -> list[str]:
@@ -3445,7 +3445,7 @@ def amd_mem_text(g) -> str:
     return f"{g['vram_gb']:.0f} GB VRAM"
 
 
-STRIX_HALO_FAMILY, STRIX_HALO_MODEL = "unsloth", "UD-IQ4_XS"    # the model docs/STRIX_HALO.md measures
+STRIX_HALO_FAMILY, STRIX_HALO_MODEL = "unsloth", "UD-IQ4_XS"    # the model measured on a Strix Halo
 STRIX_HALO_MIN_GB = 80         # UD-IQ4_XS keeps all of its experts in memory from ~80 GB (its menu line says so)
 
 
@@ -3553,7 +3553,7 @@ def menu_families(hip: bool) -> list:
 
 def nvfp4_card_note(gpu) -> str:
     """What the NVFP4 menu line says about this NVIDIA card: RTX 50 (Blackwell, sm_120) has FP4 tensor cores; on older
-    RTX cards the experts run at 8-bit precision, which measured slower than UD-IQ4_XS (docs/NVFP4.md)."""
+    RTX cards the experts run at 8-bit precision, which measured slower than UD-IQ4_XS."""
     try:
         arch = int((gpu or {}).get("arch") or 0)
     except (TypeError, ValueError):
@@ -3565,7 +3565,7 @@ def nvfp4_card_note(gpu) -> str:
 
 def nvfp4_cpu_note(avx2: bool, avx512: bool) -> str:
     """What the NVFP4 menu line and the install step say about this CPU (#2347).  Its experts that stay on the CPU run
-    on AVX-512 rows when the CPU has them, else on AVX2 rows (bit-equal to ggml's AVX2 dot).  Measured (docs/NVFP4.md):
+    on AVX-512 rows when the CPU has them, else on AVX2 rows (bit-equal to ggml's AVX2 dot).  Measured:
     per core the AVX2 rows are ~10% slower, and on a whole pool that reads DRAM the two are the same speed up to two
     tokens a window (Ryzen 7 255: 58.9 vs 58.7 GB/s) and ~12% apart at four.  A note only: nothing is refused."""
     if avx512 or not avx2:
@@ -3591,7 +3591,7 @@ def family_menu_note(family: str, hip: bool, gpu, avx2: bool = True, avx512: boo
 
 def strix_halo_recommends(gpu, ram) -> bool:
     """Is UD-IQ4_XS the recommended model here: a Strix Halo whose unified memory (the OS's RAM plus the BIOS carve-out)
-    holds it - the model docs/STRIX_HALO.md measures.  A recommendation only: the menus still list every size."""
+    holds it - the model measured on a Strix Halo.  A recommendation only: the menus still list every size."""
     return is_strix_halo(gpu) and bool(gpu.get("uma")) and ram + gpu.get("dedicated_gb", 0.0) >= STRIX_HALO_MIN_GB
 
 
@@ -3619,7 +3619,7 @@ def gfx1103_notes(gpu, ram) -> list[str]:
     notes.append("  " + ("The engine is compiled here for gfx1103" if not WIN else "This GPU has no ready-made Windows engine")
                  + " with the native dot4 and WMMA kernels and the 780M's exact speed switches"
                  + " (experimental opt-in, STRATA_EXPERIMENTAL_GFX1103=1; measured on one machine, not validated on a real "
-                 "card): see docs/AMD_HIP.md and docs/RADEON_780M.md. This is not a Strix Halo.")
+                 "card). This is not a Strix Halo.")
     if not WIN and gpu.get("shared_gb", 0) < 0.75 * ram - 1:
         notes.append(f"!the GPU can reach {gpu.get('shared_gb', 0):.0f} GB of shared memory (the GTT pool; the kernel's "
                      "default is about half of the RAM). The kernel option ttm.pages_limit raises it; setup changes no "
@@ -3635,7 +3635,7 @@ def gfx1150_notes(gpu, ram) -> list[str]:
              "that pool and the expert cache is sized from the memory the OS can give back."]
     notes.append("  " + ("The engine is compiled here for gfx1150" if not WIN else
                          "Windows has no ready-made engine for gfx1150: run setup with --build to compile one")
-                 + " (experimental opt-in, STRATA_EXPERIMENTAL_GFX1150=1, unvalidated: docs/AMD_HIP.md).")
+                 + " (experimental opt-in, STRATA_EXPERIMENTAL_GFX1150=1, unvalidated).")
     if not WIN and gpu.get("shared_gb", 0) < 0.75 * ram - 1:
         notes.append(f"!the GPU can reach {gpu.get('shared_gb', 0):.0f} GB of shared memory (the GTT pool; the kernel's "
                      "default is about half of the RAM). The kernel option ttm.pages_limit raises it; setup changes no "
@@ -3675,10 +3675,10 @@ def strix_halo_notes(gpu, ram) -> list[str]:
              "and the expert cache is sized from the memory the OS can give back, not from the carve-out."]
     notes.append("  " + ("The engine is compiled here for gfx1151" if not WIN else "Windows uses the ready-made AMD engine, "
                                                                                      "which must be built for gfx1151")
-                 + " (experimental, measured on one machine): see docs/STRIX_HALO.md.")
+                 + " (experimental, measured on one machine).")
     if not WIN and gpu.get("shared_gb", 0) < 0.75 * ram - 1:
         notes.append(f"!the GPU can reach {gpu.get('shared_gb', 0):.0f} GB of shared memory (the GTT pool; the kernel's "
-                     f"default is about half of the RAM). docs/STRIX_HALO.md boots with ttm.pages_limit and "
+                     f"default is about half of the RAM). Booting with ttm.pages_limit and "
                      "ttm.page_pool_size to give it most of the RAM; setup changes no host setting - a bigger model "
                      "needs the room, a smaller one runs as it is")
     if gpu.get("dedicated_gb", 0.0) > 16:
@@ -3686,7 +3686,7 @@ def strix_halo_notes(gpu, ram) -> list[str]:
                      "reaches the shared memory anyway. A small carve-out (the BIOS's default or 512 MB - 2 GB) leaves "
                      "the RAM to the model")
     if strix_halo_recommends(gpu, ram):
-        notes.append(f"  Recommended model: {STRIX_HALO_MODEL} (the one docs/STRIX_HALO.md measures); the menus list the "
+        notes.append(f"  Recommended model: {STRIX_HALO_MODEL} (the one measured on a Strix Halo); the menus list the "
                      "others.")
     return notes
 
@@ -4139,11 +4139,11 @@ def get_prebuilt_hip(url_base, gpu, updating=False) -> Path | None:
         why = f"it is version {meta.get('version')}; this setup needs {'.'.join(map(str, WIN_HIP_MIN_ENGINE))}"
     elif gpu["arch"] not in arch_names(meta.get("archs")):
         why = (f"it is built for {', '.join(arch_names(meta.get('archs')))}; your GPU is {gpu['arch']}.  A card it has no code "
-               "for runs from a self-build of the engine: see docs/AMD_HIP.md (--build)")   # #881
+               "for runs from a self-build of the engine (--build)")   # #881
         if is_strix_halo(gpu):                         # never a zip without gfx1151 code: say so, and what to do
             why = (f"it is built for {', '.join(arch_names(meta.get('archs'))) or 'other GPUs'} and has no gfx1151 code: your "
                    f"{gpu['name']} (Strix Halo) needs a ready-made engine from Strata 0.1.40 or newer, whose zip is "
-                   "built for gfx1151 too.  Until then: the Linux guide docs/STRIX_HALO.md, or compile the engine "
+                   "built for gfx1151 too.  Until then, compile the engine "
                    "here: run setup again with --build")
     if why:
         warn(f"the ready-made AMD engine at {base} cannot be used: {why}")
@@ -4291,8 +4291,7 @@ def hipblaslt_table(arch, lib_dirs, ver=None, extra_dirs=()):
     have = sorted(p.name for p in (ROOT / "tools" / "hip").glob(f"{arch}-hipblaslt-*.txt"))
     warn(f"no hipBLASLt tuning table for {arch} with hipBLASLt {ver or '(version unknown)'}"
        + (f" (have: {', '.join(have)})" if have else "")
-       + ": the prompt's dense matrix products use plain hipBLAS (tools/hip/tune_hipblaslt makes a table: "
-         "docs/AMD_HIP.md, Tuning table)")
+       + ": the prompt's dense matrix products use plain hipBLAS (tools/hip/tune_hipblaslt makes a table)")
     return None
 
 
@@ -5210,7 +5209,7 @@ def install_build_tools(gpu, yes):
     acquisition.require("the compiler and CUDA toolkit")
     archs = [int(x) for x in gpu.get("archs", [gpu["arch"]])]
     # #295: Pascal / Volta need a CUDA 12.x toolkit - CUDA 13 cannot build sm_60/sm_70; gpu["toolkit"] = 12: the
-    # experimental CUDA 12 engine for any cards (--cuda 12, docs/OLDER_GPUS.md)
+    # experimental CUDA 12 engine for any cards (--cuda 12)
     old = int(gpu.get("toolkit") or (12 if min(archs) < CUDA13_MIN_ARCH else 13)) == 12
     need12 = (12, 8) if max(archs) >= 120 else (12, 0)     # sm_120 needs CUDA 12.8 or newer
     if old and max(archs) >= 120:
@@ -5332,7 +5331,7 @@ def get_configured_value(bdir: Path, key: str) -> str | None:
 
 def fresh_if_other_generator(bdir: Path, generator: str = "Ninja") -> bool:
     """CMake refuses to configure a folder with another generator than the one it was made with ("Does not match the generator used
-    previously"). The manual build in docs/INSTALL.md uses CMake's default, Unix Makefiles on Linux, in the same build/ folder (#4038).
+    previously"). A manual CMake build uses CMake's default, Unix Makefiles on Linux, in the same build/ folder (#4038).
     Such a folder is configured afresh: its cache is removed (the compiled objects of the other generator are not reused anyway), with one
     plain line. True when it did."""
     had = get_configured_value(bdir, "CMAKE_GENERATOR")
@@ -7016,7 +7015,7 @@ def parallel_recommend(vram_gbs, arena_gb: float, ctx: int, kv: str, streaming: 
     PARALLEL_HELD of the model's experts beside the slots' sessions, which take at most PARALLEL_SHARE of it, up to 4.
     Where the experts mostly run on the CPU a batch reads about as many experts as the requests one by one and every
     slot's VRAM is expert cache lost: measured on a 12 GB RTX 5070 (Q2_0, 32K), a request alone 11-24% slower with 2-4
-    slots, 4 requests together 63 tok/s against 71 one after the other (docs/BATCHING.md)."""
+    slots, 4 requests together 63 tok/s against 71 one after the other."""
     if isinstance(vram_gbs, (int, float)):
         vram_gbs = [vram_gbs]
     cache_gb = sum(max(0.0, v - 5) for v in vram_gbs)
@@ -7035,9 +7034,9 @@ def parallel_note(asked: int | None, vram_gbs, arena_gb: float, ctx: int, kv: st
     slot = parallel_slot_gb(ctx, kv, streaming)
     if asked is None or asked <= 1:
         if not rec:
-            return [f"Several requests at once: left at one at a time - {PARALLEL_COST_NOTE} (docs/BATCHING.md)."]
+            return [f"Several requests at once: left at one at a time - {PARALLEL_COST_NOTE}."]
         return [f"Several requests at once (opt-in): --parallel {rec} decodes up to {rec} together instead of one "
-                f"after the other (each takes ~{slot:.1f} GB of VRAM from the expert cache; docs/BATCHING.md)."]
+                f"after the other (each takes ~{slot:.1f} GB of VRAM from the expert cache)."]
     lines = [f"parallel requests: {asked} at once (each takes ~{slot:.1f} GB of VRAM from the expert cache, "
              f"{asked * slot:.1f} GB in all)"]
     if asked > PARALLEL_MAX:
@@ -7238,7 +7237,7 @@ def use_cuda12(cards, cfg_path: Path, cfg: dict, yes: bool) -> dict:
                         ("START-HERE.bat --setup --cuda 12" if WIN else "./setup.sh --setup --cuda 12"))
     say()
     warn(f"sm_{old} is older than CUDA 13 supports (it dropped Pascal and Volta): this model moves to the experimental "
-         "CUDA 12 engine (docs/OLDER_GPUS.md; START-HERE.bat --setup --cuda 13 and newer cards only moves it back)")
+         "CUDA 12 engine (START-HERE.bat --setup --cuda 13 and newer cards only moves it back)")
     main = gpu_info(cards[0]["index"]) or cards[0]
     vision = "gpu" if cfg.get("vision") else "none"
     eng = get_cuda12_engine(os.environ.get("STRATA_PREBUILT_URL", PREBUILT_URL),
@@ -7408,7 +7407,7 @@ def engine_step(a, gpu, hip, amd, cuda_tk, vision):
         eng = get_prebuilt_hip(a.prebuilt, gpu)
         if eng is None:
             fail("no ready-made AMD engine for this Strata version",
-                 "compile one here: run the same command again with --build (docs/AMD_HIP.md)")
+                 "compile one here: run the same command again with --build")
     else:
         eng = None if a.build or hip else get_prebuilt(a.prebuilt, gpu, vision, **({"toolkit": 12} if cuda_tk == 12
                                                                                     else {}))
@@ -7569,17 +7568,16 @@ def own_path_parallel_note(a_parallel, fam: dict, model: str, vram_gb: float, ct
             return ["Several requests at once (opt-in, --parallel N): left at one at a time, because this card cannot spare "
                     f"the room: each session takes ~{slot:.1f} GB of VRAM at this context, and where the card holds every "
                     "expert only for one session, more would move experts to the CPU and slow every request a lot (a "
-                    "smaller context leaves room for more; docs/QWEN36.md)."]
+                    "smaller context leaves room for more)."]
         if own_path_parallel_fits_all(fam, model, vram_gb, ctx, rec):
             return [f"Several requests at once (opt-in): --parallel {rec} decodes up to {rec} together instead of one after "
-                    f"the other (each takes ~{slot:.1f} GB of VRAM at this context; docs/BATCHING.md)."]
+                    f"the other (each takes ~{slot:.1f} GB of VRAM at this context)."]
         return [f"Several requests at once (opt-in): --parallel {rec} decodes up to {rec} together, so a second user or agent "
                 "starts at once instead of waiting for the first. The price on this card, which does not hold every expert: "
                 f"each session takes ~{slot:.1f} GB of VRAM from the expert cache, so a request alone runs about 4-11% "
                 "slower, and next to one-at-a-time WITH the draft layer the requests together are only 1.0-1.15x faster "
                 "(measured, Q4_K_XL: RTX 3060 12 GB at 8K context, 4 requests: 1.15x, alone -4%; A4000 / P100 16 GB at "
-                "32K, 2 requests: 1.0x, alone -7 to -11%). Worth it for several users at once, not for one chat "
-                "(docs/QWEN36.md)."]
+                "32K, 2 requests: 1.0x, alone -7 to -11%). Worth it for several users at once, not for one chat."]
     lines = [f"parallel requests: {a_parallel} at once (each takes ~{slot:.1f} GB of VRAM at this context, "
              f"{a_parallel * slot:.1f} GB in all)"]
     if a_parallel > PARALLEL_MAX:
@@ -8373,13 +8371,13 @@ def install_dsv41(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopted, 
     if exe is None:
         if os.environ.get("STRATA_VERBOSE") == "1" or "--verbose" in sys.argv:
             say("  Details for developers: build it with cmake -DSTRATA_BUILD_DSV41=ON -DCMAKE_CUDA_ARCHITECTURES=<your card: 86 RTX 30, 89 RTX 40, 120 RTX 50> "
-                "and point STRATA_DSV41_EXE at it (docs/DEEPSEEK41.md, \"Building the engine for your card\").")
+                "and point STRATA_DSV41_EXE at it.")
         fail("DeepSeek's engine is not available for this computer yet",
              "Supported graphics cards: NVIDIA RTX 30, 40 and 50 series, the Radeon AI PRO R9700, and a Ryzen AI Max (Strix Halo) on "
              "Windows with the AMD DeepSeek engine package. "
              + dsv41_manual_steps(eng)
              + " Or update Strata later (a newer version may add your card), pick another model, or build the engine for your card yourself "
-             "(docs/DEEPSEEK41.md, \"Building the engine for your card\"). Nothing has been downloaded.")
+             "(cmake -DSTRATA_BUILD_DSV41=ON). Nothing has been downloaded.")
 
     step(5, f"downloading {fam['title']} {model}")
     for f in shards:
@@ -8536,8 +8534,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--family", choices=list(FAMILIES) + list(PREVIEW_FAMILIES) + list(MULTI_FILE_FAMILIES),
                     help="qwen = Qwen3.8-Flash-Next, swift = Swift 1.5, qwen36 = Qwen3.6-35B-A3B (pictures with --vision, "
-                         "several requests at once with --parallel; docs/QWEN36.md), deepseek41 = DeepSeek-V4.1-Flash "
-                         "(the official 1.75 / 2.00 / 2.25 bpw versions, 239 / 257 / 274 GB; docs/DEEPSEEK41.md)")
+                         "several requests at once with --parallel), deepseek41 = DeepSeek-V4.1-Flash "
+                         "(the official 1.75 / 2.00 / 2.25 bpw versions, 239 / 257 / 274 GB)")
     ap.add_argument("--model", type=model_alias, choices=list(dict.fromkeys([*MODELS, *(m for f in PREVIEW_FAMILIES.values()
                                                                        for m in f["models"]),
                                                           *(m for f in MULTI_FILE_FAMILIES.values() for m in f["models"])])))
@@ -8559,7 +8557,7 @@ def main() -> int:
                     help="the most image tokens a picture becomes (default 1024 with the encoder on the GPU, 300 on "
                          "the CPU): more reads small text and charts better, and takes longer to encode; remembered "
                          "for this model")
-    # image generation (Qwen-Image): in preview, not offered in setup or --help; the options still work (docs/IMAGES.md)
+    # image generation (Qwen-Image): in preview, not offered in setup or --help; the options still work
     ap.add_argument("--images", choices=["qwen-image", "no"],
                     help=argparse.SUPPRESS)
     ap.add_argument("--image-quant", choices=["Q4_K_M", "Q6_K", "Q8_0"],
@@ -8572,15 +8570,15 @@ def main() -> int:
                     help=argparse.SUPPRESS)
     ap.add_argument("--experimental-speed-projection", metavar="on|off|GGUF",
                     help="EXPERIMENTAL, off by default: the control vector in data/experimental-speed-projection "
-                         "(or another GGUF) as a projection on layers 4-44; see docs/DETAILS.md")
+                         "(or another GGUF) as a projection on layers 4-44")
     ap.add_argument("--port", type=int, help="the server's port (default: the one the install was set up with, 8080 for a new one)")
     ap.add_argument("--gpu", help="one GPU, numbered as nvidia-smi numbers them (AMD: as setup lists them) (default: asked when several can be "
                                   "used; with --setup it is saved, when starting it is for that start only)")
     ap.add_argument("--gpus", help="several GPUs sharing one model, as nvidia-smi numbers them (AMD: as setup lists "
                                    "them): \"0,2\", or \"all\" (every card that can); Strata puts the faster card last, "
-                                   "and the last card is the Main one. Saved, also when starting (see docs/MULTI_GPU.md)")
+                                   "and the last card is the Main one. Saved, also when starting")
     ap.add_argument("--gpu-roles", metavar="LIST", help="a role for each GPU: main, helper or off, e.g. 1=main,0=helper (cards you do not "
-                                                        "name are off). Main does the last steps of every answer. Saved (docs/MULTI_GPU.md)")
+                                                        "name are off). Main does the last steps of every answer. Saved")
     ap.add_argument("--layer-split", help="with --gpus: where each later GPU's layers start (\"18\", \"16,32\"), one "
                                           "rising number per GPU after the first - not layers per card; default "
                                           "auto, placed from each GPU's free VRAM")
@@ -8629,7 +8627,7 @@ def main() -> int:
     ap.add_argument("--cuda", choices=["12", "13", "auto"], default=os.environ.get("STRATA_CUDA") or None,
                     help="NVIDIA: the CUDA toolkit of this model's engine. auto (default): CUDA 13, the ready-made "
                          "engine; CUDA 12 (experimental) when a chosen card is older than CUDA 13 supports (Pascal, "
-                         "Volta). 12 also runs with an older driver (Windows 528+, Linux 525+). docs/OLDER_GPUS.md")
+                         "Volta). 12 also runs with an older driver (Windows 528+, Linux 525+).")
     ap.add_argument("--prebuilt", default=os.environ.get("STRATA_PREBUILT_URL", PREBUILT_URL),
                     help="where the ready-made engine is (a URL folder or a local folder)")
     ap.add_argument("--check", action="store_true", help="only check this PC and exit")
@@ -8813,12 +8811,12 @@ def main() -> int:
     found = gpus()
     amd = amd_gpus()
     amd_ok = [g for g in amd if amd_problem(g) is None]
-    # older NVIDIA GPUs (Pascal / Volta): the experimental CUDA 12 engine, when chosen (docs/OLDER_GPUS.md)
+    # older NVIDIA GPUs (Pascal / Volta): the experimental CUDA 12 engine, when chosen
     OLD_GPUS = OLD_GPUS or old_gpus_opt_in(found, named_gpus(a.gpu, a.gpus), a.cuda,
                                            other=bool(amd_ok) or a.backend == "hip")
     if OLD_GPUS and a.backend != "hip":
         warn(f"older NVIDIA GPUs (Pascal / Volta) can be used ({OLD_GPUS}): experimental, through a second engine "
-             "built with CUDA 12 (docs/OLDER_GPUS.md)")
+             "built with CUDA 12")
     nv_ok = any(gpu_problem(g) is None for g in found)
     if not nv_ok and not amd_ok and a.backend != "hip" and maxwell_note(found):    # #3218: a warning with the way forward
         warn(maxwell_note(found))
@@ -8831,8 +8829,7 @@ def main() -> int:
             + "   (recommended)")
         say("  2) AMD: " + ", ".join(f"{g['name']} ({g['vram_gb']:.0f} GB{', unified memory' if g.get('uma') else ''})"
                                for g in amd_ok)
-            + f"   ({'the ready-made AMD engine' if WIN else 'compiled here'}, pictures on"
-              " - docs/AMD_HIP.md)")
+            + f"   ({'the ready-made AMD engine' if WIN else 'compiled here'}, pictures on)")
         say("  One engine drives the cards of one make: a model is never split across NVIDIA and AMD cards, and two models at the same")
         say("  time, one on each, is not supported yet.")
         from strata_common import gpu_fit
@@ -8865,7 +8862,7 @@ def main() -> int:
             for d in amd_pci_devices():
                 if d["pci_id"] in STRIX_HALO_PCI_IDS:
                     say(f"    The kernel lists an AMD Strix Halo (PCI 1002:{d['pci_id']:04x}) but /dev/kfd's topology is "
-                        "empty: ROCm cannot use it yet (docs/STRIX_HALO.md: the amdgpu driver and /dev/kfd access, "
+                        "empty: ROCm cannot use it yet (it needs the amdgpu driver and /dev/kfd access, "
                         "your user in the render and video groups)")
         if not usable:
             fail("no AMD GPU Strata can use", f"the AMD backend runs on {AMD_CARDS}")
@@ -8898,7 +8895,7 @@ def main() -> int:
            f"{gpu['arch']} (AMD: docs/{'STRIX_HALO' if is_strix_halo(gpu) else 'AMD_HIP'}.md)")
         if WIN and str(gpu.get("arch") or "").startswith("gfx12"):   # only a pointer; no default changes
             say("  If Windows resets the AMD driver (VIDEO_ENGINE_TIMEOUT_DETECTED, flicker, the engine dies mid-answer): "
-                "docs/TROUBLESHOOTING.md, \"Windows AMD: the driver resets\"")
+                "try \"STRATA_KV_HOST_DMA\": \"1\" in the run config's \"env\", a smaller --prefill or 32K context")
         if gpu.get("uma"):
             for line in igpu_notes(gpu, ram_gb()):
                 (warn if line.startswith("!") else say)(line.lstrip("!"))
@@ -8978,8 +8975,7 @@ def main() -> int:
         # users on a few Xeons.  A warning, not a stop.
         warn(f"this CPU has no AVX2: Strata support for it is EXPERIMENTAL and slow. Setup compiles the engine on this "
              f"PC for {'AVX' if floor == 'avx' else 'SSE4.2'} (STRATA_ISA_FLOOR={floor}; 10-20 minutes, once), and the "
-             "CPU's share of the experts runs on ggml-cpu's kernels, a few times slower than on an AVX2 CPU. "
-             "See \"Older CPUs\" in docs/INSTALL.md")
+             "CPU's share of the experts runs on ggml-cpu's kernels, a few times slower than on an AVX2 CPU.")
         a.build = True
     if a.check:
         say()
@@ -9108,7 +9104,7 @@ def main() -> int:
         # unless the RAM holds the GGUFs and 24 GB more: then several, without the budget, if asked for (#498).  #642:
         # from RESIDENT_SPLIT_ENGINE several GPUs, when asked for, keep the budget (unsloth_together)
         if MODELS[model].get("experimental"):
-            warn(f"{model} is EXPERIMENTAL (docs/UNSLOTH_Q4.md)" + (
+            warn(f"{model} is EXPERIMENTAL" + (
                  ": most of its experts are read from the SSD while it answers, so it is several times slower than the "
                  "2-3-bit models" if in_budget else "") + "; quality checked against llama.cpp")
         if hip and MODELS[model].get("nvidia_only"):
@@ -9230,7 +9226,7 @@ def main() -> int:
         if a.vision not in (None, "no", "none"):
             warn(f"images are not available with {model} yet: off")
     elif hip:
-        # Unsloth's files on AMD: pictures on by default, the reader by the 24 GB rule (hip_vision; docs/QUANTS.md)
+        # Unsloth's files on AMD: pictures on by default, the reader by the 24 GB rule (hip_vision)
         vision = hip_vision(a.vision if a.vision is not None or not images_default(model, family, ram, gpu)
                             else "yes", float((gpu or {}).get("vram_gb") or 0.0))
     elif a.vision:
@@ -9452,7 +9448,7 @@ def main() -> int:
         ok(f"vision encoder: {mmproj}")
         if vision == "cpu" and "BF16" in mmproj.name:       # a tip only (recommend, never force; #625)
             say("       tip: on the CPU a Q8_0 copy of this encoder is a third smaller and about as exact (embedding "
-                "cosine 0.999 vs BF16); see 'A Q8_0 encoder' in docs/DETAILS.md")
+                "cosine 0.999 vs BF16)")
 
     # ---- 6. the pack and the MTP draft layer
     step(6, "preparing the model for Strata")

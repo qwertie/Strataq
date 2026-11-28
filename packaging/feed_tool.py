@@ -15,7 +15,7 @@ Typical use (the owner's offline machine; replace ``KEYDIR`` with a folder that 
         --engine RELEASE/engine --control RELEASE/control [--app-json tauri-latest.json] [--channel stable] [--expires-days 365]
     python packaging/feed_tool.py verify-feed RELEASE --pub KEYDIR/feed-key.pub.json
 
-A new model ships as a signed feed update with the optional `models` member (packaging/UPDATES.md): write one <id>.entry.json for each model in a folder
+A new model ships as a signed feed update with the optional `models` member: write one <id>.entry.json for each model in a folder
 (`model-files` prints the size and SHA-256 of the real files for it) and pass the folder as `build-feed --models FOLDER`; `verify-feed` lists the models and
 fails when Control would leave one out.
 
