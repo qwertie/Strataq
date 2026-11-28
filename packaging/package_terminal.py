@@ -24,7 +24,7 @@ What goes in
 
 What does NOT go in
 -------------------
-* the engine binary. That is a separate, independently versioned component (`packaging/README.md`);
+* the engine binary. That is a separate, independently versioned component;
 * model weights or prepared data;
 * `node_modules` or the UI. The terminal does not need a browser.
 
@@ -101,8 +101,7 @@ PAYLOAD = (
     "strata_server",
     "requirements.txt",
     "requirements-monitor.txt",
-    "docs/MANAGEMENT_PROTOCOL.md",
-    "docs/TERMINAL_LAUNCH.md",         # the README below points at it (`strata launch`); it used to be missing from the archive
+    "README.md",                       # the README below points at it (`strata launch`)
     "data/gguf_fingerprints.json",     # `strata models import --plan` names a known file set from this table
     "bench/prompts/standard-v1",       # `strata bench run` (the standard benchmark) sends these frozen requests; hashed byte for byte
 )
@@ -535,7 +534,7 @@ downloads the one you choose (the installer files setup.py and tools/ are in thi
 
 Useful commands
 ---------------
-    strata launch                     choose a model, tune it, serve it and watch it (guided screens; docs/TERMINAL_LAUNCH.md)
+    strata launch                     choose a model, tune it, serve it and watch it (guided screens; README.md)
     strata connect opencode           the setup for a coding app on the running server (also codex, claude-code, omp, pi, hermes, openclaw)
     strata --version                  the version and the interpreter it runs on
     strata doctor                     read-only component inventory

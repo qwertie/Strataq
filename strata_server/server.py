@@ -927,7 +927,7 @@ def igpu_split_warning(cfg: dict, archs: dict[int, str] | None = None) -> str | 
         return None
     return ("[strata] note: GPU " + ", ".join(str(i) for i in sorted(ig)) + " is built-in graphics (its memory is the system RAM, and it "
             "usually draws the desktop). Running part of the model on it can freeze the screen and uses RAM twice; the cards with memory of "
-            "their own are faster alone (docs/STRIX_HALO.md). Turn it Off in the card roles, or name only the other card, to leave it out")
+            "their own are faster alone. Turn it Off in the card roles, or name only the other card, to leave it out")
 
 
 def card_note(cfg: dict, env: dict) -> str | None:

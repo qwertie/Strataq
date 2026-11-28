@@ -85,7 +85,7 @@ strata-cuda-build` and build again.
 - A commit that fills a new folder also updates that folder's README and the path map in
   [UPSTREAM_PORTING.md](UPSTREAM_PORTING.md).
 - The commit message says what the step changed in `loc_report.py --compare`.
-- Upstream's [CONTRIBUTING.md](../CONTRIBUTING.md) rules about byte-identical default paths and agreeing a
+- Upstream's CONTRIBUTING.md rules about byte-identical default paths and agreeing a
   refactor in an issue first do not apply to this fork; the scope will be raised in an upstream issue.
 
 ## Open issues

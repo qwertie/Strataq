@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the frozen fixture bundle of the Strata standard benchmark (docs/BENCHMARK_PROTOCOL.md).
+"""Build the frozen fixture bundle of the Strata standard benchmark.
 
     python tools/build_standard_corpus.py --tokenizer PACK/tokenizer [--out bench/prompts/standard-v1]
 

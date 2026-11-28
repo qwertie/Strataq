@@ -1,4 +1,4 @@
-"""A build folder made by the manual build in docs/INSTALL.md (CMake's default generator) does not stop setup --build (#4038).
+"""A build folder made by a manual CMake build (CMake's default generator) does not stop setup --build (#4038).
 
 CMake refuses a folder configured with another generator ("Does not match the generator used previously: Unix Makefiles"), and setup
 always asks for Ninja. The folder is configured afresh, with one plain line; a folder made with Ninja, or never configured, is left alone.

@@ -486,7 +486,6 @@ class Pins(unittest.TestCase):
         notice = (folder / "NOTICE.md").read_text(encoding="utf-8")
         self.assertIn(drafting.TUNED_SHA256, notice)
         self.assertIn("a22a1744e85c17364dcc54a6a420af7135d4c7f6", notice)
-        self.assertIn("dflash2-tuned", (ROOT / "docs" / "DETAILS.md").read_text(encoding="utf-8"), "the third-party notices name it")
 
     def test_the_base_revision_is_the_one_the_stock_drafter_is_pinned_to(self):
         self.assertIn(drafting.REVISION, drafting.TUNED_BASE)

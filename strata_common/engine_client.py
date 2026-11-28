@@ -51,7 +51,7 @@ def popen(what: str, args: list, role: str = "engine", **kw):
             raise OSError(f"Windows blocked {what} ({args[0]}): Smart App Control, or an application-control policy, does "
                           "not let a program that is not signed run. Turn Smart App Control off (Windows Security > App "
                           "& browser control > Smart App Control settings), or - for the image encoder only - run setup "
-                          "with --vision no (see docs/TROUBLESHOOTING.md)") from e
+                          "with --vision no") from e
         raise
 
 
@@ -3671,8 +3671,7 @@ _POOL_CORES_OK = re.compile(r"^[0-9]+(-[0-9]+(:[0-9]+)?)?(,[0-9]+(-[0-9]+(:[0-9]
 
 def pool_cores_args(cfg: dict, args: list[str]) -> list[str]:
     """Experimental, off by default: "pool_cores": "0,2,4,6" (or "2-14:2", or a list of numbers) in the config pins the CPU
-    expert workers to exactly those logical processors (--pool-cores; docs/DETAILS.md, "Which logical processors the CPU
-    workers use").  The engine warns about two entries on one core or the host's own and leaves out processors the process may
+    expert workers to exactly those logical processors (--pool-cores).  The engine warns about two entries on one core or the host's own and leaves out processors the process may
     not use; a text this cannot read is said here and ignored (recommend, never force).  An engine option already in the args wins."""
     value = cfg.get("pool_cores")
     if value is None or value is False or value == "" or value == []:

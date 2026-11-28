@@ -3,7 +3,7 @@
 
     claude mcp add strata -- python /path/to/Strata/tools/strata_mcp.py
 
-Add it to Claude Code, Claude Desktop, Cursor, VS Code, Codex ... (docs/MCP_SERVER.md has every client's snippet) and
+Add it to Claude Code, Claude Desktop, Cursor, VS Code, Codex ... and
 ask your AI "install Strata for this PC", "start Strata", "is Strata running?".  It speaks MCP (JSON-RPC 2.0, one
 message per line) over stdin/stdout, uses the Python standard library only (it runs before setup made .venv; Python
 3.10 or newer), and offers a fixed set of tools: strata_status, strata_models, strata_install, strata_start,
@@ -2439,7 +2439,7 @@ class Tools:
                                                    "Continue, Open WebUI, LM Studio clients, aider "
                                                    f"(--openai-api-base {base}/v1)"}},
             "other_devices": "the server listens on this PC only; to reach it from your network, run setup with "
-                             "--host 0.0.0.0 --api-key <secret> (docs/DETAILS.md, 'Using it')"}
+                             "--host 0.0.0.0 --api-key <secret>"}
 
 
 # ------------------------------------------------------------------------------------------------ MCP over stdio
@@ -2613,7 +2613,7 @@ def install_job(spec_path: str) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Strata's MCP server (stdio): install, start, check and stop Strata "
-                                             "from an AI assistant. See docs/MCP_SERVER.md.")
+                                             "from an AI assistant.")
     ap.add_argument("--root", help="the Strata folder (default: the one this file is in)")
     ap.add_argument("--src", help="where setup.py, tools/ and strata_server/ are, when that is not the Strata folder (the app)")
     ap.add_argument("--install-job", help=argparse.SUPPRESS)

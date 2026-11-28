@@ -1,7 +1,7 @@
 // strata_server/web/history.js - what the chat history does to a list of messages. Pure functions: no page, no storage, no clock of
 // their own, so they can be tested alone (strata_server/test_web_history.js). app.js draws the controls and keeps the state.
 //
-// One design for five proposals (see docs/DETAILS.md, "The web page"):
+// One design for five proposals:
 //   #2615 (uppet)         edit your question, correct an answer, regenerate, go back, undo
 //   #1787 (Scotty-Hudson)  saved chats in a list, kept in this browser (IndexedDB), renamed, deleted, searched
 //   #3823 (xvcezrqpbxtpzblrt) "Rewind to here" asks: edit and send again HERE, or BRANCH into a new chat

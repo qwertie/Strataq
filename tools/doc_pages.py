@@ -1,7 +1,7 @@
 """Which Markdown files are current pages and which are archived history.
 
-One list, used by the release check (tools/release_manifest.py) and the link check (tools/check_links.py), so the two
-agree about what "current" means.  Standard library only.
+Used by the link check (tools/check_links.py) and the bench results index (tools/bench_results_index.py).
+Standard library only.
 """
 import os
 import subprocess
@@ -11,14 +11,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Folders that are never scanned: dependencies, build output, version control, other people's code.
 SKIP_DIRS = {".git", "node_modules", "third_party", "dist", "target", "build", "__pycache__", ".venv", "venv"}
 
-# Archived material: dated reports, finished campaigns, release notes, measurement logs.  They keep the versions and
-# the links they had when they were written.  (Folders end in "/"; "docs/release-notes-" is a file-name prefix.)
-ARCHIVE_PREFIXES = (
-    "history/",
-    "bench/results/",
-    "phaseA-tests/",
-    "docs/release-notes-",
-)
+# Archived material: dated measurement reports.  They keep the links they had when they were written.
+ARCHIVE_PREFIXES = ("bench/results/",)
 
 
 def rel(path):

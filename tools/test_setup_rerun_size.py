@@ -1,7 +1,7 @@
 """0.1.44.1: setup run again over an installed model keeps its size.
 
 0.1.44 made IQ3_S the recommended Qwen size on a PC with 64 GB or more (IQ3_S: about 15% slower decode than IQ3_XXS on an
-RTX 5070, docs/MODELS.md, and about 7 GB more RAM).  A first install takes the recommendation; SETUP.bat / --setup on a
+RTX 5070, and about 7 GB more RAM).  A first install takes the recommendation; SETUP.bat / --setup on a
 folder that already has a model pre-selects the installed size (and `--yes` takes it), so Enter never moves a working
 install to a slower size.  The recommended size stays marked, every size stays a choice.
 

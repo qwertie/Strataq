@@ -1,4 +1,4 @@
-"""`strata bench run` for the standard benchmark protocol (docs/BENCHMARK_PROTOCOL.md).
+"""`strata bench run` for the standard benchmark protocol.
 
 The runner sends the frozen requests of bench/prompts/standard-v1 to a Strata server through streaming chat completions, in the
 protocol's order, and writes a `strata-standard-benchmark` result that other people's results can be compared with:

@@ -11,7 +11,7 @@ Codex CLI is the first client.  What it needs, and what this does:
   * function tools, also inside `namespace` tools (Codex's MCP and agent tools: the model sees `namespace.name`) and
     `custom` tools (a free-form `input` string); hosted tools (web search, ...) are left out, the model cannot run them;
   * reasoning items: the model's thinking is returned as `reasoning_text` content (no summaries: this model does not
-    write them, see docs/DETAILS.md) and, when `include` asks for `reasoning.encrypted_content`, also as an opaque
+    write them) and, when `include` asks for `reasoning.encrypted_content`, also as an opaque
     `encrypted_content` string (base64, not encrypted: the client already holds the text).  Either form sent back is
     put into the conversation again, so the prompt matches what the model wrote and the cache is reused;
   * the official event order: response.created, response.in_progress, response.output_item.added, deltas,
@@ -444,7 +444,7 @@ def check_request(req: dict) -> None:
         raise ResponsesError("stored prompt templates are not supported: send instructions and input",
                              "prompt", "unsupported_parameter")
     n = req.get("max_output_tokens")
-    # -1 and 0 mean no cap, as max_tokens does on the chat path (docs/DETAILS.md); anything lower is a mistake
+    # -1 and 0 mean no cap, as max_tokens does on the chat path; anything lower is a mistake
     if n is not None and (isinstance(n, bool) or not isinstance(n, int) or n < -1):
         raise ResponsesError("max_output_tokens must be a whole number, 1 or more, or -1 or 0 for no cap",
                              "max_output_tokens")

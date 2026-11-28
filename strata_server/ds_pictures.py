@@ -18,7 +18,7 @@ import struct
 import tempfile
 from pathlib import Path
 
-#: The picture formats Pillow is allowed to open (docs/DETAILS.md: JPEG, PNG, WebP, GIF, BMP, TIFF, AVIF; a phone's MPO file
+#: The picture formats Pillow is allowed to open (JPEG, PNG, WebP, GIF, BMP, TIFF, AVIF; a phone's MPO file
 #: is opened by the JPEG entry).  Pillow picks the decoder from the file's first bytes, never from its name or the client's
 #: Content-Type, so without this list a crafted JPEG 2000 (GHSA-78g4-xqwv-q3g8: OpenJPEG heap overflow in Pillow
 #: 11.1.0 to 12.3.0) or any other rarely used decoder was reachable from a picture request.  Pillow 13 has the fix;

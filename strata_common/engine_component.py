@@ -13,7 +13,7 @@ Layout (``components_dir()``)::
         *.dll | *.so                 the GPU runtime libraries, hashed in the manifest too
         BUILD.json                   optional, the engine's own build record
 
-Manifest (``engine-component.json``, schema 2; schema 1 packages still load). packaging/README.md has the full table::
+Manifest (``engine-component.json``, schema 2; schema 1 packages still load)::
 
     {"schema_version": 2, "id": "strata-engine", "name": "strata-engine", "version": "0.1.45",
      "platform": "linux-x86_64", "backend": "cuda", "archs": ["sm_86", "compute_89"],
@@ -1074,7 +1074,7 @@ def hip_family(arch: str) -> str:
 #: that has none: a family in this table gets the plain "no ready-made engine" line instead of "Ask for the X build".
 NO_PACKAGE_HIP: dict[str, str] = {}
 NO_PACKAGE_SENTENCE = ("This release has no ready-made Strata engine for the AMD {0} series. Strata can only run on it with an engine built for "
-                       "that card (docs/AMD_HIP.md, \"RDNA2\").")
+                       "that card.")
 
 
 def no_package_note(archs) -> str | None:

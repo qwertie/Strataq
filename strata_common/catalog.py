@@ -224,16 +224,16 @@ MODELS = {
                   "download_gb": 93.7, "ram_gb": 48, "arena_gb": 59.5, "families": ("unsloth",), "budget": True,
                   "shards": 3, "file": "Qwen3.8-Flash-Next-{q}-0000{i}-of-00003.gguf", "engine": (0, 1, 38),
                   "vision": True},
-    # Unsloth's 4-bit file (docs/UNSLOTH_Q4.md); experimental until MODEL-UPDATE Phase 2.  Its 77 GB of experts stay in
+    # Unsloth's 4-bit file; experimental until MODEL-UPDATE Phase 2.  Its 77 GB of experts stay in
     # RAM from ~94 GB of RAM (unsloth_budget); on a 64 GB PC the engine keeps a RAM budget of them
     # (--resident-budget-gib, chosen below) and reads the rest from the GGUF on the SSD.  It runs on AMD too (R9700:
-    # the quality yardstick and the decode/prompt numbers in docs/QUANTS.md), so it is no longer NVIDIA-only (#429).
+    # the quality yardstick and the decode/prompt numbers), so it is no longer NVIDIA-only (#429).
     "UD-Q4_K_XL": {"about": "4-bit (Unsloth Dynamic): K-quant experts, between UD-IQ4_XS and UD-Q5_K_XL in quality",
                    "download_gb": 111.3, "ram_gb": 48, "arena_gb": 77.0, "families": ("unsloth",), "budget": True,
                    # #967 / MODEL-UPDATE: images run end to end with this file (CUDA: RTX A4000, GPU encoder; HIP:
                    # R9700, CPU encoder; the test picture's text and shapes as the IQ3_XXS pack answers them)
                    "vision": True},
-    # MODEL-UPDATE: Unsloth's larger files (docs/QUANTS.md).  The same GGUF-in-place mode: every expert in RAM where it
+    # MODEL-UPDATE: Unsloth's larger files.  The same GGUF-in-place mode: every expert in RAM where it
     # fits with UNSLOTH_RESIDENT_BESIDE_GB more (unsloth_budget), else a RAM budget of them and the rest read from the
     # SSD while it answers - so "ram_gb" is the all-in-RAM need, and below it setup asks first (default no).  Their
     # shards 2 (the head) and 3 (the 54 GB Q8_0 PLE table) are the same bytes in all three files.  UD-Q5_K_XL and
@@ -478,7 +478,7 @@ FAMILIES = {
               "mmproj": "mmproj-Qwen3.8-Flash-Next-BF16.gguf", "name": "qwen3.8-flash-next-coder",
               "profile": "expert-profile-coder.bin"},
     # Unsloth's UD-IQ4_XS (three shards, #621), UD-Q4_K_XL (four), UD-Q5_K_XL, UD-Q6_K_XL and Q8_0 (six) of the original
-    # model (docs/QUANTS.md): regular choices since f-quants; the shard count and "vision" are per model (MODELS)
+    # model: regular choices since f-quants; the shard count and "vision" are per model (MODELS)
     "unsloth": {"title": "Qwen3.8-Flash-Next (Unsloth)", "by": "Unsloth's 1- to 8-bit quantizations",
                 "about": "UD-IQ1_M, UD-Q2_0, UD-IQ2_XS, UD-Q2_K_XL, UD-IQ3_XXS, UD-Q3_K_XL, UD-IQ4_XS, UD-IQ4_XS-v31, "
                          "UD-Q4_K_XL, UD-Q5_K_XL, UD-Q6_K_XL or Q8_0 (68 to 188 GB downloads): every expert in "
@@ -573,7 +573,7 @@ DSV41_FILES = {
 # included, so pack_gguf needs no --engram-meta), shards 2-5 the tensors, and shard 6 is the ONE Engram table every set
 # shares (110.6 GB, DeepSeek-V4.1-Flash-Engram-IQ4_NL.gguf: there is no file named ...-00006-of-00006.gguf; downloaded
 # once into the shared folder).  The DSpark drafter comes from Unsloth's repository (pinned in DSV41_FILES above).
-# This is the set a normal PC runs (64 GB RAM + a 12 GB card; docs/DEEPSEEK41.md); the UD-Q8_K_XL entry stays for the
+# This is the set a normal PC runs (64 GB RAM + a 12 GB card); the UD-Q8_K_XL entry stays for the
 # big machines.
 DSV41_ISTA_REPO = "ISTA-DASLab/DeepSeek-V4.1-Flash-1017-GSQ-RCO-GGUF"
 DSV41_ISTA_ENGRAM = "DeepSeek-V4.1-Flash-Engram-IQ4_NL.gguf"

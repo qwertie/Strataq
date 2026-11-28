@@ -107,7 +107,6 @@ class ExactArch(unittest.TestCase):
         self.assertTrue(setup.ROCM_INDEXES["gfx1151"].endswith("/gfx1151/"))
         for a in ("gfx1150", "gfx1152", "gfx1103"):                                  # never supported by accident
             self.assertNotIn(a, setup.AMD_ARCHS)
-        self.assertIn("docs/STRIX_HALO.md", setup.AMD_CARDS)
 
 # gfx1151 arch defaults that setup does not copy to gfx1103 / gfx1150: HCD_EXACT copies the gfx1151 hipBLASLt table's
 # solutions, TOPK_REG_MIN_BLOCKS (#1943: the top-k register-kernel line at 4096 blocks, the crossover with the
@@ -435,7 +434,6 @@ class WindowsZip(unittest.TestCase):
         self.assertEqual(len(self.warnings), 1)
         msg = self.warnings[0]
         self.assertIn("no gfx1151 code", msg)
-        self.assertIn("docs/STRIX_HALO.md", msg)
         self.assertIn("--build", msg)
         self.assertFalse((self.root / "engine" / "strata-windows-x64-hip.zip").exists())   # dropped
         self.assertFalse((self.root / "engine" / setup.Q38EXE).exists())                   # nothing installed
@@ -487,7 +485,6 @@ class Recommendation(unittest.TestCase):
             g = {**self.halo(), "shared_gb": 60.0, "vram_gb": 62.0}
             notes = setup.strix_halo_notes(g, AURORA_RAM_GB)
             joined = "\n".join(notes)
-            self.assertIn("docs/STRIX_HALO.md", joined)
             self.assertIn("UD-IQ4_XS", joined)
             self.assertTrue(any(n.startswith("!") and "ttm.pages_limit" in n for n in notes))   # a small GTT: a warning
             self.assertIn("changes no host setting", joined)
@@ -526,7 +523,6 @@ class IgpuTextIsArchExact(unittest.TestCase):
                 text = chr(10).join(setup.igpu_notes(self.gpu("gfx1103", "AMD Radeon 780M Graphics"), 61.0))
             self.assertIn("gfx1103", text)
             self.assertIn("STRATA_EXPERIMENTAL_GFX1103=1", text)
-            self.assertIn("RADEON_780M.md", text)
             for bad in ("gfx1151", "Ryzen AI Max", "STRIX_HALO", "Recommended model"):
                 self.assertNotIn(bad, text)
             self.assertNotIn("Strix Halo (gfx1151", text)
@@ -537,7 +533,6 @@ class IgpuTextIsArchExact(unittest.TestCase):
             text = chr(10).join(setup.igpu_notes(self.gpu("gfx1151", "AMD Radeon 8060S"), 121.0))
         self.assertIn("Strix Halo (gfx1151, Ryzen AI Max)", text)
         self.assertIn("compiled here for gfx1151", text)
-        self.assertIn("docs/STRIX_HALO.md", text)
         self.assertNotIn("gfx1103", text)
 
     def test_other_chips_get_nothing(self):

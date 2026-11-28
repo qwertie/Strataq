@@ -1,7 +1,6 @@
 """The replica serving profile (opt-in): on two or more GPUs, one engine per card behind the server instead of one layer split.
 
-Measured on 4 x Radeon AI PRO R9700 (Qwen3.8-Flash-Next IQ3_S, 1k-token prompts, 128 tokens out, total tokens per second;
-docs/BATCHING.md, "Replicas as a serving profile"):
+Measured on 4 x Radeon AI PRO R9700 (Qwen3.8-Flash-Next IQ3_S, 1k-token prompts, 128 tokens out, total tokens per second):
 
 * 2 cards: 2 engines of one card each reach 1.8 to 1.9 times what a layer split of the two cards does with `parallel` 8 or
   16 (116.6 against 63.8 tok/s at 8 requests, 126.9 against 65.7 at 16);

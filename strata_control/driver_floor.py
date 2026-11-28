@@ -7,7 +7,7 @@ the package that would run:
 
 1. an installed cuda12 package of this platform (the components folder, setup's own engine-feed folder): its manifest's `min_driver`;
 2. else the signed feed (best effort, a few seconds, never an error): the newest cuda12 package of this platform;
-3. else FALLBACK, the figure the shipped packages carry today (packaging/ENGINE-COMPONENT.md).
+3. else FALLBACK, the figure the shipped packages carry today.
 
 Nothing here refuses anything: the callers say the number, and say where it came from.
 """
@@ -16,7 +16,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-#: What the cuda12 packages carry (packaging/ENGINE-COMPONENT.md: min_driver nvidia 575.51). Only used when no package or feed can be read.
+#: What the cuda12 packages carry (min_driver nvidia 575.51). Only used when no package or feed can be read.
 FALLBACK = "575.51"
 VARIANT = "cuda12"
 FEED_SECONDS = 10.0

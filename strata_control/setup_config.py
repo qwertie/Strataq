@@ -243,7 +243,7 @@ def config_for(inp: SetupInputs, lib) -> SetupConfig:
         args += ["--mmap-experts"]
         ok("unified memory: the experts are read from the model files in place (--mmap-experts), so the GPU's cache holds them "
            "instead of a second copy in RAM")
-        # the measured settings of this part (docs/DGX_SPARK_LINUX.md): the 32,768-token prompt chunk (auto's 8,192 measured 2-6% slower
+        # the measured settings of this part: the 32,768-token prompt chunk (auto's 8,192 measured 2-6% slower
         # here); the draft layer as 4-bit copies (+3.5% decode, 3 paired rounds, answers identical: the drafter's proposals are verified
         # by the target); one norm per hyper-connection stream in the draft layer (llama.cpp's graph: acceptance 0.60 -> 0.63, decode +4.3%
         # [1.009, 1.078], 5 of 5 greedy answers identical)

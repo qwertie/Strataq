@@ -267,7 +267,7 @@ A same-GPU split cannot validate dense transfers or hops; forced same-GPU hops r
 Local validation on the Radeon 8060S (2026-11-04, Windows HIP): the single-stage, fixed split
 and cut-10-to-20 runs matched all 96 output tokens. The quarter-pool stress run moved 20 -> 11 -> 20
 but diverged at token 71. Settings, limits and the observed GPU expert shortfall are recorded in
-[DETAILS.md](../../docs/DETAILS.md#deepseek-paged-stages-dense-weights-and-expert-hops).
+[ENGINE_NOTES.md](../../docs/ENGINE_NOTES.md#deepseek-paged-stages-dense-weights-and-expert-hops).
 Separate-card migration and hop execution remain for the NVIDIA kit.
 
 DeepSeek pipeline groups use `dsgroups --conversations 1|2|3|4`. The memory phase runs

@@ -223,7 +223,7 @@ class Catalog:
         if any(g.get("usable", True) for g in gpus):
             return gpus
         return [({**g, "usable": True, "problem": None,
-                  "note": "experimental: the CUDA 12 engine (docs/OLDER_GPUS.md)"} if g in old else g) for g in gpus]
+                  "note": "experimental: the CUDA 12 engine"} if g in old else g) for g in gpus]
 
     def computer(self, fresh: bool = False) -> Computer:
         hw = self.hardware(fresh)

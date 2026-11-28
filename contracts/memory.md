@@ -175,7 +175,7 @@ these fields, so readers must allow missing discovery and cost information.
 Paged engines report the draft acceptance rule as `MEMORY_DETAIL draft_rule <rule>`, a text rather than a
 number in `SETTINGS`: `exact`, `speculative`, `typical`, `lower-temperature` or `top-<N>` (N from 1 to 99).
 `CHANGE_SETTINGS draft_rule=<rule>` takes the same text and applies from the next step; saved defaults use
-`--draft-rule`. It decides which drafted tokens a sampled request keeps (docs/DETAILS.md). `strata-q38` starts
+`--draft-rule`. It decides which drafted tokens a sampled request keeps. `strata-q38` starts
 with `exact`, `strata-ds41` with `speculative`.
 
 Paged engines report `has_drafter`, `suffix_draft` and `lookup_chain` alongside

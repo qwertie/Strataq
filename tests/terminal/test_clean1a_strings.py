@@ -15,14 +15,12 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class Wording(unittest.TestCase):
-    def test_launch_help_and_the_docs_row_say_the_size_depends_on_the_model(self):
+    def test_launch_help_says_the_size_depends_on_the_model(self):
         top = argparse.ArgumentParser()
         parsers = launch_cmd.add_parsers(top.add_subparsers(dest="command"))
         helptext = " ".join(" ".join(p.format_help() for p in parsers).split())
         self.assertIn("dflash2 (downloads its drafter once, 0.3 to 1.2 GB depending on the model; the size is shown before the download)", helptext)
         self.assertNotIn("1.2 GB drafter once", helptext)
-        docs = (ROOT / "docs" / "TERMINAL_LAUNCH.md").read_text(encoding="utf-8")
-        self.assertIn("and downloads its drafter once (0.34 GB for the models that have a tuned drafter, else 1.2 GB).", docs)
 
     def test_the_adopted_files_line_names_what_was_not_downloaded(self):
         src = (ROOT / "strata_cli" / "launch" / "runner.py").read_text(encoding="utf-8")

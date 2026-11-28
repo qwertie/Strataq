@@ -48,9 +48,9 @@ class Readme(unittest.TestCase):
         self.assertIn("`strata launch`", text)
 
     def test_the_launch_doc_it_points_at_is_in_the_archive(self):
-        self.assertIn("docs/TERMINAL_LAUNCH.md", self.readme("linux-x86_64"))
-        self.assertIn("docs/TERMINAL_LAUNCH.md", package_terminal.PAYLOAD)
-        self.assertTrue((ROOT / "docs" / "TERMINAL_LAUNCH.md").is_file())
+        self.assertIn("README.md", self.readme("linux-x86_64"))
+        self.assertIn("README.md", package_terminal.PAYLOAD)
+        self.assertTrue((ROOT / "README.md").is_file())
 
     def test_free_memory_guidance_fits_the_system(self):
         win, lin, mac = (self.readme(t) for t in ("windows-x86_64", "linux-x86_64", "darwin-arm64"))

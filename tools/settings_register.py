@@ -5,7 +5,6 @@
     python tools/settings_register.py --check     # scan only; print what is missing from / extra in the register; exit 1 on a difference
     python tools/settings_register.py --names     # print the names the engine reads, one per line
     python tools/settings_register.py --no-git    # regenerate without the git history fields (fast)
-    python tools/settings_register.py --docs      # write docs/SETTINGS.md from the register
 
 What counts as "the engine reads it": the name is the string literal argument of a ``getenv`` call or of one of the engine's env
 helpers (``env_on``, ``env_int``, ``pipe_dbg_env`` ...) in src/ or include/. Calls that write or remove a
@@ -32,7 +31,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 REGISTER = ROOT / "data" / "settings-register.json"
-SETTINGS_PAGE = "docs/SETTINGS.md"
 
 ENGINE_DIRS = ("src", "include")
 LAUNCH_PATHS = ("strata_control", "strata_cli", "setup.py", "apps/host/server", "serve")
@@ -439,8 +437,6 @@ def scan_docs(names):
     out = collections.defaultdict(list)
     for p in _files(DOC_PATHS, (".md",)):
         rel = _rel(p)
-        if rel == SETTINGS_PAGE:   # the generated page lists the names itself; it is not a source of documentation
-            continue
         for i, l in enumerate(_read_lines(p)):
             if "STRATA_" not in l:
                 continue
@@ -497,77 +493,6 @@ def scan_git(names):
         }
     return res
 
-
-
-# ---------------------------------------------------------------- the settings page (docs/SETTINGS.md)
-
-_BACKEND_WORDS = {"cuda-hip": "NVIDIA and AMD", "cuda": "NVIDIA", "hip": "AMD", "cpu": "CPU"}
-
-
-def _where(e):
-    have = set(e["backends"])
-    if "cuda-hip" in have:
-        have -= {"cuda", "hip"}
-    words = [_BACKEND_WORDS[b] for b in ("cuda-hip", "cuda", "hip", "cpu") if b in have]
-    return ", ".join(words)
-
-
-def _kind(e):
-    return {"flag": "on / off", "int": "number", "float": "number", "string": "text", "debug-gated": "on / off"}.get(e["parse"], e["parse"])
-
-
-def _doc_links(e, limit=3):
-    seen, out = set(), []
-    for m in e["doc_mentions"]:
-        f = m.rsplit(":", 1)[0]
-        if f in seen or f.startswith(("docs/work", "docs/paper")):
-            continue
-        seen.add(f)
-        out.append(f"[{os.path.basename(f)}]({os.path.relpath(f, 'docs').replace(os.sep, '/') if f.startswith('docs/') else '../' + f})")
-        if len(out) == limit:
-            break
-    return ", ".join(out) or "-"
-
-
-def render_page(entries):
-    optin = [e for e in entries if e.get("status") == "opt-in"]
-    roll = [e for e in entries if e.get("status") == "rollback"]
-    out = [
-        "# Engine settings",
-        "",
-        "<!-- Generated from data/settings-register.json by tools/settings_register.py --docs. Do not edit by hand; change the register. -->",
-        "",
-        "The engine reads its settings from environment variables whose names start with `STRATA_`. The Terminal and the app choose what",
-        "your hardware needs, so most people never set one. This page lists the ones meant for people: switches that are off until you",
-        "turn them on, and switches that take a newer default back to the earlier behaviour. The other settings are for measuring and",
-        "debugging and are kept in `data/settings-register.json`.",
-        "",
-        "A number or a word is set like any environment variable, for example `STRATA_KVA=1`. In the Terminal, `strata launch --set NAME=value`",
-        "puts it in the model's run configuration.",
-        "",
-        f"## Switches you can turn on ({len(optin)})",
-        "",
-        "Off unless you set them. The last column says where each one is described.",
-        "",
-        "| Setting | Value | Applies to | Described in |",
-        "|---|---|---|---|",
-    ]
-    for e in optin:
-        out.append(f"| `{e['name']}` | {_kind(e)} | {_where(e)} | {_doc_links(e)} |")
-    out += [
-        "",
-        f"## Switches that go back to earlier behaviour ({len(roll)})",
-        "",
-        "These behaviours are on by default. Setting the switch returns the earlier behaviour; the notes in the register say which",
-        "version made it the default.",
-        "",
-        "| Setting | Value | Applies to | Named in the engine since | Described in |",
-        "|---|---|---|---|---|",
-    ]
-    for e in roll:
-        out.append(f"| `{e['name']}` | {_kind(e)} | {_where(e)} | {e.get('since') or '-'} | {_doc_links(e)} |")
-    out.append("")
-    return "\n".join(out)
 
 
 # ---------------------------------------------------------------- build
@@ -648,7 +573,6 @@ def main(argv=None):
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--names", action="store_true")
     ap.add_argument("--no-git", action="store_true")
-    ap.add_argument("--docs", action="store_true", help="write docs/SETTINGS.md from the register (opt-in and rollback entries)")
     a = ap.parse_args(argv)
     if a.names:
         print("\n".join(sorted(engine_names())))
@@ -664,11 +588,6 @@ def main(argv=None):
         for n in extra:
             print("in the register, not read by the engine:", n)
         return 1 if (missing or extra) else 0
-    if a.docs:
-        entries = json.loads(REGISTER.read_text(encoding="utf-8"))["settings"]
-        (ROOT / SETTINGS_PAGE).write_text(render_page(entries), encoding="utf-8", newline="\n")
-        print(f"wrote {ROOT / SETTINGS_PAGE}")
-        return 0
     doc = build(with_git=not a.no_git)
     write(doc)
     print(f"wrote {REGISTER} with {len(doc['settings'])} settings")
