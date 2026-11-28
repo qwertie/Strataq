@@ -143,7 +143,8 @@ class SetupAndApp(unittest.TestCase):
         options = (ROOT / "src" / "models" / "deepseekv41" / "ds4_options.cpp").read_text(encoding="utf-8", errors="replace")
         self.assertIn('o.max_context = std::atoll(val("--max-context").c_str());', options)
         self.assertNotRegex(options, r"max_context\s*=\s*std::(min|clamp)")
-        model = (ROOT / "src" / "models" / "deepseekv41" / "ds4_model.cu").read_text(encoding="utf-8", errors="replace")
+        model = "".join(p.read_text(encoding="utf-8", errors="replace")
+                        for p in (ROOT / "src" / "models" / "deepseekv41").glob("ds4_*.[ch]*"))
         self.assertNotRegex(model, r"max_context\s*=\s*std::(min|clamp)")
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")

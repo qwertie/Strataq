@@ -64,7 +64,7 @@ conversations, route prior 0 and 1000; one with DSpark drafting), and by decode 
 | Step | Work | Status |
 |---|---|---|
 | D-1 | Delete what `strata-dsv41` alone used from `ds4::Model`: its API, `--parallel`, the slots, its RAM store, the PCIe lane, the VRAM swaps, the lookahead, tensor-parallel sums | done: `ds4_model.cu` 16,139 → about 9,200 lines |
-| D-2 | Split `ds4_model.cu` by job (loading, prompt path, CPU lane, DSpark, window decode, paged entry points) behind a private header | |
+| D-2 | Split `ds4_model.cu` by job (loading, prompt path, CPU lane, DSpark, window decode, paged entry points) behind a private header | done: `ds4_model_impl.hpp` and `ds4_{model,load,prefill,verify,cpu_lane,dspark,engram,vision_tower,checkpoints}.cu`; function bodies unchanged |
 | D-3 | One place for DeepSeek's `DS4_*` settings; CUDA calls through `src/base/gpu` | |
 | D-4 | A shared per-card stage interface (`launch`, `poll`, `wait`) and a base class that both `PagedQwen` and `PagedDeepSeek` derive from | |
 | D-5 | A shared CPU-expert service | not planned: see the open issue below |

@@ -595,7 +595,9 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
       set_tests_properties(ds4_kv_rows_parity_split PROPERTIES ENVIRONMENT "DS4_ATTN_SPLIT=1")
     endif()
     # the model (strata::ds4::Model), which strata-ds41 runs
-    add_library(strata_dsv41 STATIC ${_ds4}/ds4_model.cu ${_ds4}/ds4_options.cpp ${_ds4}/ds4_vision.cu
+    add_library(strata_dsv41 STATIC ${_ds4}/ds4_model.cu ${_ds4}/ds4_load.cu ${_ds4}/ds4_prefill.cu
+                ${_ds4}/ds4_verify.cu ${_ds4}/ds4_cpu_lane.cu ${_ds4}/ds4_dspark.cu ${_ds4}/ds4_engram.cu
+                ${_ds4}/ds4_vision_tower.cu ${_ds4}/ds4_checkpoints.cu ${_ds4}/ds4_options.cpp ${_ds4}/ds4_vision.cu
                 ${_ds4}/ds4_gguf.cu ${_ds4}/ds4_gguf_cpu.cpp ${_ds4}/ds4_iq.cu ${_ds4}/ds4_iq_cpu.cpp
                 ${_ds4}/ds4_tq.cu ${_ds4}/ds4_tq_cpu.cpp ${_ds4}/ds4_gg_cpu.cpp
                 src/base/platform/io_priority.cpp)
