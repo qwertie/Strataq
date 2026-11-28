@@ -31,6 +31,9 @@ int main() {
         const bool valid = v != "top-0" && v != "top-100" && v != "on";   // (empty: the model's rule)
         check(parse_option("--draft-rule", value) == (valid ? -1 : 2), "draft-rule acceptance");
     }
+    const auto label = strata::serve::get_expert_labels(40);
+    check(label({39, 7}, 1 << 20).category == "experts", "trunk experts' category");
+    check(label({40, 7}, 1 << 20).category == "drafter_experts", "drafter experts' category");
     const char* const names[] = {"STRATA_PREFILL_LAYER_MAJOR", "STRATA_LM_HIP", "DS4_LAYER_MAJOR"};
     for (const char* order : {"auto", "layer", "chunk"}) {
         strata::serve::PagedSettings settings;

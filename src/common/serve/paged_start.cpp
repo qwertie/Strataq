@@ -250,7 +250,7 @@ PagedCard& add_paged_card(PagedCards& cards, int dev, int64_t lb, int64_t le, co
 
 std::function<strata::core::MemoryLabel(strata::core::ExpertKey, uint64_t)> get_expert_labels(int64_t n_layers) {
     return [n_layers](strata::core::ExpertKey key, uint64_t bytes) {
-        return strata::core::MemoryLabel{"experts", "", (key.layer >= n_layers ? "Drafter / " : "") +
+        return strata::core::MemoryLabel{key.layer >= n_layers ? "drafter_experts" : "experts", "",
             strata::core::get_expert_memory_label(key.layer, bytes)};
     };
 }
