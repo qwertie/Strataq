@@ -56,7 +56,7 @@ function(strata_utf8_manifest target)
   endif()
 endfunction()
 
-# The AVX kernels exist for x86 only.  On aarch64 (DGX Spark / GB10) portable.cpp stands in for them and
+# The AVX kernels exist for x86 only.  On aarch64 portable.cpp stands in for them and
 # native experts run on ggml-cpu's NEON dot products.
 if(NOT CMAKE_SYSTEM_PROCESSOR OR CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64|x64|X64|i[3-6]86|x86|X86)$")   # an unset processor stays the x86 build, as before
   set(STRATA_CPU_X86 ON)
@@ -160,7 +160,7 @@ endif()
 # (arm64 stays off by default: -DSTRATA_BUILD_TESTS=ON still builds what builds there).  GPU tests are registered only
 # when STRATA_ENABLE_CUDA / STRATA_ENABLE_HIP is on, and the configure summary below says which kinds were registered, so
 # a missing GPU is a stated skip and never a silent pass.  Release builds say -DSTRATA_BUILD_TESTS=OFF themselves
-# (packaging/, setup.py, Dockerfile, spark/).
+# (packaging/, setup.py).
 set(_strata_tests_default OFF)
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/core AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/bench/micro AND STRATA_CPU_X86)
   set(_strata_tests_default ON)
