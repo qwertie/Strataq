@@ -63,9 +63,9 @@ conversations, route prior 0 and 1000; one with DSpark drafting), and by decode 
 
 | Step | Work | Status |
 |---|---|---|
-| D-1 | Delete what `strata-dsv41` alone used from `ds4::Model`: its API, `--parallel`, the slots, its RAM store, the PCIe lane, the VRAM swaps, the lookahead, tensor-parallel sums | done: `ds4_model.cu` 16,139 → about 9,200 lines |
+| D-1 | Delete what `strata-dsv41` alone used from `ds4::Model`: its API, `--parallel`, the slots, its RAM store, the PCIe lane, the VRAM swaps, the lookahead, tensor-parallel sums | done: `ds4_model.cu` 16,139 → about 9,200 lines; the kernels only it called went too |
 | D-2 | Split `ds4_model.cu` by job (loading, prompt path, CPU lane, DSpark, window decode, paged entry points) behind a private header | done: `ds4_model_impl.hpp` and `ds4_{model,load,prefill,verify,cpu_lane,dspark,engram,vision_tower,checkpoints}.cu`; function bodies unchanged |
-| D-3 | One place for DeepSeek's `DS4_*` settings; CUDA calls through `src/base/gpu` | |
+| D-3 | One place for DeepSeek's `DS4_*` settings; CUDA calls through `src/base/gpu` | not done: Qwen3.8 breaks the same two rules as much (about 420 CUDA runtime calls in `verify.cpp` and `model.cpp`, 160 environment reads), and `src/base/gpu` offers only memory, copies and stream waits, so doing it for DeepSeek alone would make the two less alike. It needs one settings reader and a wider runtime interface for both families first |
 | D-4 | Share per-card execution through `CardStage` (`launch`, `poll`, `wait_writes`) and `CardPipelineModel`, which both paged models derive from | done: `include/strata/models/common/card_stage.hpp`; preparing, finishing and keeping a group stay in each family, which do them for the whole group |
 | D-5 | A shared CPU-expert service | not planned: see the open issue below |
 
@@ -298,3 +298,5 @@ alternating runs of the two builds. Models on this PC: Qwen3.8 IQ3_S (`strata-iq
 | B2 | `b1002bd0` | 489,879 | −3,269 | DeepSeek's plain draw on the shared sampler; ~710 never-compiled lines removed |
 | B1 | `35311604` | 486,846 | −6,302 | `src/kernels` and `src/prefill` split into the layered folders; 5 never-compiled SYCL copies removed |
 | B3 | `46a56add` | 486,724 | −6,424 | multi-GPU expert code's duplicates merged (it stays in `src/core`) |
+| D-1 | `7f4789df6` | 493,274 | +126 | the old DeepSeek engine's code left in `ds4::Model` deleted (−8,409; the merge of `main` before it had added Strataq's later work) |
+| D-1 | `4349f4c4f` | 493,302 | +154 | the kernels only the old DeepSeek engine called deleted (−384); counted after D-2 (+296, `82d2bb514`) and D-4 (+77, `69accdf9f`) |
