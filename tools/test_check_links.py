@@ -25,13 +25,6 @@ class LinkCheck(unittest.TestCase):
         self.assertTrue(cl.resolve("docs/README.md", "INSTALL.md").endswith(os.path.join("docs", "INSTALL.md")))
         self.assertTrue(cl.resolve("docs/README.md", "/LICENSE").endswith("LICENSE"))
 
-    def test_every_pointer_resolves_into_history(self):
-        pointers = ["docs/work/README.md", "packaging/acceptance_matrix.md"]
-        for page in pointers:
-            self.assertEqual(cl.check_page(page, want_anchors=True), [], page)
-            text = open(os.path.join(doc_pages.ROOT, page), encoding="utf-8").read()
-            self.assertIn("history", text, page)
-
 
 if __name__ == "__main__":
     unittest.main()

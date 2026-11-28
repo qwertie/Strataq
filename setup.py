@@ -8369,7 +8369,7 @@ def install_dsv41(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopted, 
              "Windows with the AMD DeepSeek engine package. "
              + dsv41_manual_steps(eng)
              + " Or update Strata later (a newer version may add your card), pick another model, or build the engine for your card yourself "
-             "(cmake -DSTRATA_BUILD_DSV41=ON). Nothing has been downloaded.")
+             "(run setup again with --build). Nothing has been downloaded.")
 
     step(5, f"downloading {fam['title']} {model}")
     for f in shards:
