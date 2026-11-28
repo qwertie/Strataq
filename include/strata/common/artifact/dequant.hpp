@@ -11,11 +11,6 @@
 //   4 codes per byte, LSB-first: byte j/4, bits (j%4)*2
 //   QK2_0 = 64 is PROVEN from the artifact's own offset brackets, not assumed (the llama.cpp PR that
 //   introduced the type used 128; this artifact is 64).
-//
-// Validation: `--check <file.gguf>` dequantizes real blocks and asserts the STRUCTURAL invariant that
-// every output value is one of {-d, 0, +d, +2d} for that block's own scale. That catches bit-order,
-// sign and stride bugs, which are the failure modes a dequantizer actually has. It is deliberately
-// not a correctness-vs-ggml test - that needs ggml linked, which is P1.S3's next step.
 
 #include <cstdint>
 #include <cstdio>
@@ -24,7 +19,6 @@
 #include <string>
 #include <vector>
 
-#define STRATA_GGUF_MAIN_DISABLED 1
 #include "strata/common/artifact/gguf_reader.hpp"
 
 namespace strata {

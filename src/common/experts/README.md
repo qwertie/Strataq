@@ -38,7 +38,7 @@ own hybrid slots in `src/models/qwen36/q36_engine.cu`, DeepSeek its own store in
 `src/models/deepseekv41/ds4_store.hpp`.
 
 The multi-GPU parts stay in `src/core/` too (B3): the peer tier (`peer_experts`) and the helper caches
-(`remote_experts`, `remote_expert_opt`). Besides calling the CUDA runtime directly, they use the shared S2 expert backend
+(`remote_experts`). Besides calling the CUDA runtime directly, they use the shared S2 expert backend
 (`include/strata/models/common/kernels/s2_expert_grouped.hpp`), a layer above this one.
 
 See [docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) for the layers and

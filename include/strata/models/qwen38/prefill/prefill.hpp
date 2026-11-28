@@ -120,13 +120,6 @@ public:
     /// --prefill-pipe for this run: 0 off (the buffers' chunks), 1 today's chunk count evened out (STRATA_PREFILL_EQUAL's
     /// rule), a number > 1 the rig's b/a in tokens (setup's --calibrate measures it). Default: STRATA_PREFILL_PIPE, else 0.
     static void set_pipe(double value);
-    /// The same for the next prompts only (the `pipe=` request key, setup's calibration); < 0 = the run's own value.
-    static void set_pipe_request(double value);
-    /// The --prefill-pipe value in force (the request's, else the run's).
-    static double pipe_setting();
-    /// What a --prefill-pipe value plans by: -1 off, 0 today's chunk count evened out, else b/a in whole tokens (two
-    /// spellings of one value, e.g. a request key and the flag, compare equal).
-    static int64_t pipe_key(double value);
     /// The stages of the prompt path from this one on (1 without a layer split).
     int stage_count() const;
     /// --prefill-pipe on a layer split's first stage: the chunk an `n`-token segment is read in when it is read whole
@@ -134,43 +127,13 @@ public:
     /// value 0, or a later stage) and the buffers' chunk applies.  The engine plans a segment once, on its whole
     /// length, and reads every part of it with force_chunk, so its chunks do not depend on how it is cut into runs.
     int64_t plan_chunk(int64_t n) const;
-    /// The next run on this (first) stage only: chunks of `chunk` tokens (at most chunk()) instead of a plan, from
-    /// its first token; `single`: the segment is one chunk (the stage helper may bind); `planned`: the chunks came
-    /// from a --prefill-pipe plan (such a read takes no CPU share: its chunks overlap on the stages by design).
-    void force_chunk(int64_t chunk, bool single, bool planned);
     /// One log line for a planned segment (the same as a whole read logs when its plan differs from chunk()).
     static void log_plan(int64_t n, int64_t chunk, int stages);
-    /// The expert blobs this stage and the later ones copied host -> device so far (PrefillStats::experts_streamed).
-    int64_t chain_experts_streamed() const;
     /// #340: the streamed ring's slot count for chunks that stream every expert, instead of the pinned-share rule
     /// (0 = that rule). Set before any `bytes_needed`/`init` (both count the ring); STRATA_PREFILL_RING still wins.
     static void set_ring_override(int slots);
-    /// #583: the auto chunk scan's byte-budget ring, for chunks above `small_max` (0.1.39's auto chunk: a prompt that
-    /// fits it keeps 0.1.39's ring).  0 slots = none.  A layer split's set_ring_override and STRATA_PREFILL_RING win.
-    static void set_ring_budget(int slots, int64_t small_max);
 
-    /// THE PROMPT ROOM (STRATA_MTP_ROOM_MIN): `slots` ring slots ON TOP of the rule above, POINTED AT another device
-    /// user's bytes - the MTP drafter's 512 routed experts, which only the decode reads (MtpDrafter::experts_lend).
-    /// A slot at or past the rule's ring is `base + (i - rule) * max_blob`: nothing is allocated for it, nothing is
-    /// owned and nothing spills, so the room costs no VRAM of its own and `relayout` keeps working.  The layout holds
-    /// them for the instance's life; ONE PROMPT takes them by `set_ring_room_active(true)`, which moves the ring's
-    /// count (the rule's <-> the rule's + the room's) and nothing else.
-    /// Never past ring_cap() (the ring's events are sized for that), never past what `set_ring_room_base` says the
-    /// lender has, and only where the ring is a big one (a chunk at or above stream_all_min(): below it the ring is
-    /// STAGE slots of a different mechanism).  Set before `init`/`relayout`; 0 (the default): the rule's ring exactly,
-    /// as before.
-    void set_ring_room(int slots) { ring_room_ = slots > 0 ? slots : 0; }
     int ring_room() const { return ring_room_; }
-
-    /// The memory the room's slots are carved from: `bytes` of another device user's, given to this path's ring for
-    /// the length of one prompt (the drafter's expert block).  Null (the default): no room, whatever `slots` says.
-    void set_ring_room_base(void* base, uint64_t bytes) { ring_room_base_ = base; ring_room_bytes_ = bytes; }
-
-    /// While true the room is THIS prompt's: `ring()` (the streamed ring's slot count) counts it too, and an
-    /// `init`/`relayout` after this re-carves with it.  False (the default): the rule's ring, so a slot of the room
-    /// is never staged into and the lender's bytes are left alone.
-    void set_ring_room_active(bool on);
-    bool ring_room_active() const { return ring_room_active_; }
 
     /// True when every stream of this path has finished.  The room's close needs it: what a prompt staged into those
     /// slots is written over by the lender's own bytes, and a prompt pass still reading them would take the DMA.
@@ -190,35 +153,10 @@ public:
     static uint64_t bytes_needed_no_ring(const core::ModelGeometry& g, const core::SessionState& ss, int64_t chunk,
                                          bool src = true);
 
-    /// The streamed ring's byte budget as a slot count for this pack (the measured slot count x Q2_0's blob, over
-    /// max_blob, never past ring_cap()):
-    /// what the auto chunk scan treats as a full ring.  A slot is one whole blob, so a pack with bigger blobs than
-    /// Q2_0's gets fewer of them for the same bytes - 384 on Q2_0, 199 on a 2.54 MiB-blob IQ3_S pack.
-    static int64_t ring_max_slots();
-    /// 0.1.39's ring for this PC (1024 fused / 384 pinned / 96), within ring_cap().
-    static int64_t ring_default_slots();
-    /// #583: the ring the auto scan keeps full, given the chunk 0.1.39's rule picked: its byte budget where that rule's
-    /// chunk was small (< 6144), else 0.1.39's ring (measured: shrinking it for a bigger chunk lost there).
-    static int64_t ring_cap_for(int64_t old_chunk);
-
-    /// What the ring actually resolves to for a chunk of `chunk` tokens, after the override, STRATA_PREFILL_RING
-    /// and the pinned-share rule - the slot count `init` lays out.  The engine reports it on its INFO line so the
-    /// Monitor tab shows the pair the run really got, not what it asked for.
-    static int64_t ring_slots_for(int64_t chunk);
-
-    /// 0.1.39b (#583, the default): the ring as a byte budget, the loan's corrected count and the auto chunk scan that
-    /// keeps the ring full.  STRATA_RING_BYTES=0: 0.1.39's ring, loan and chunk list.
-    static bool ring_bytes_enabled();
-
     /// STRATA_MMQ_DIRECT: the guard each sized expert-cache slot keeps after its blob (ExpertCache::set_slot_guard),
     /// so the prompt MMQ can read a resident expert in its slot.  0 unless STRATA_MMQ_DIRECT is 1 or 2 on a CUDA
     /// build with the pointer-table MMQ (STRATA_MMQ_TAB).
     static size_t slot_guard_bytes();
-
-    /// STRATA_EXPERT_NIBBLE=1: whether every converted layer's experts reach the prompt path's MMQ gather only (the
-    /// GGUF blocks rebuilt from the 4-bit slots); false with the first layer and the reason in `why`.  Pure: the
-    /// layers' formats, the environment and the visible GPUs (generate.cpp asks once, before anything is allocated).
-    static bool nibble_prompt_check(std::string& why);
 
     /// Positions [pos0, pos0 + n) holding `tokens`; `ss.ple_prev` must be the two tokens before pos0 (oldest
     /// first, -1 for none) and is advanced to the last two of these.
@@ -226,25 +164,10 @@ public:
 
     const PrefillStats& stats() const { return stats_; }
 
-    /// multi-GPU: the experts the peer GPU holds are computed THERE for every prompt chunk (up to `cap_rows` routed
-    /// rows per layer; the rest of the peer's experts are read by this GPU over P2P).  Allocates the peer's buffers for
-    /// chunks of up to init's `chunk` tokens.  Needs P2P between the two cards.
-    bool set_peer(core::PeerExperts* peer, int64_t cap_rows, std::string& err);
-
     /// Plan v0.3 P6: called after every chunk with the chunk's final multi-stream residual rows (device,
     /// T x hc*n_embd, valid until the next chunk) and the chunk's first position; the MTP draft layer builds its
     /// K/V from them.  The prefill stream is synchronized before the call.
     std::function<bool(const float* R_rows, int64_t T, int64_t pos0, std::string& err)> on_chunk;
-    /// DFlash2 prompt taps (CUDA / HIP, single stage): before `run`, ask for the completed output of each layer in `layers` (zero-based; the
-    /// mean of the hc streams) for the prompt rows at positions >= `first_pos`, at most `cap_rows` rows per chunk (a staging buffer of
-    /// cap_rows x layers x n_embd floats is allocated at the first chunk).  After each chunk that has such rows, on_taps(taps
-    /// [rows][layers][n_embd] device, rows, first position, err) runs with the stream synchronized.  clear_taps frees the staging.
-    void set_taps(const std::vector<int>& layers, int64_t first_pos, int64_t cap_rows) { tap_layers_ = layers; tap_first_ = first_pos; tap_cap_ = cap_rows; }
-    void clear_taps();
-    /// Allocate the staging now (serve: so a request never fails on it): `cap_rows` rows of `layers` x `n_embd` floats.  False: the card has no room.
-    bool reserve_taps(const std::vector<int>& layers, int64_t cap_rows, int64_t n_embd, std::string& err);
-    std::function<bool(const float* taps, int64_t rows, int64_t pos0, std::string& err)> on_taps;
-
     /// Layer split: called by every stage when it has read a chunk, with the position reached, while its own state
     /// is still at that chunk's end (its stream synchronized; the last stage calls it just before `on_chunk`).  An
     /// earlier stage is a chunk or more ahead of the last one by the time `on_chunk` runs, so this is where a
@@ -262,7 +185,6 @@ public:
     /// experts' use: the old engine's STRATA_RAM_ADAPT2 seed and the paged engine's adaptive tier.  Setting it costs
     /// one download of the ids per layer on the path that groups them on the GPU (STRATA_PF_FUSED).
     std::function<void(int64_t layer, const int32_t* ids, int64_t n)> on_routes;
-    int64_t stopped_at() const { return stopped_at_; }
     /// KVA: the end of the positions the last run approximated (they are a prefix: chunks from the run's first position
     /// on), i.e. the first position whose final rows are real; 0 when that run approximated nothing.  Raised chunk by
     /// chunk, before on_chunk reports the chunk, so the draft layer can skip the chunk's cells.  Reset by every run.
@@ -286,15 +208,6 @@ public:
         stage_lb_ = layer_begin; stage_le_ = layer_end; next_ = next;
     }
 
-    /// LAYER SPLIT: `helper` is another stage's prompt path (another GPU).  A prompt of one chunk runs the stages one
-    /// after the other, so while this stage reads it the helper's GPU idles: it then streams a share of this stage's
-    /// non-resident experts over its own PCIe link into its own (lent) prompt buffers, computes their rows, and sends
-    /// them back - the --peer-device peer's streaming, without P2P (activations and rows through mapped host memory,
-    /// read by copy kernels).  Only on the MMQ prompt path, only for chunks of stream_all_min() tokens and more, up to
-    /// the size where the measured share stops paying.  Opt-in: STRATA_PREFILL_HELP=1 (not bit-identical to the default).  Both stages must have
-    /// run `init`.
-    bool set_stage_helper(Prefill* helper, std::string& err);
-
     /// The CPU expert pool (decode's, idle while a prompt is read). With STRATA_PREFILL_CPU_SHARE set, a chunk below
     /// stream_all_min() tokens - an agent's tool output - hands it the non-resident experts routed by at most MAXT of
     /// its tokens, fewest first, up to a share of the experts it would stream (`auto`: measured, where both sides end
@@ -310,9 +223,6 @@ public:
     /// `by_default`: this path is one the share was measured on (CUDA, one GPU, no batch slots), so with the variable unset
     /// the share is on for chunks below 1024 tokens (STRATA_PREFILL_CPU_SHARE=0 turns it off).
     static void arm_cpu_share(bool applies, bool by_default = false);
-    /// STRATA_PREFILL_CPU_SHARE_BATCH=1 (batch slots beside the pool): set before each read - true while a slot decodes
-    /// (its windows use the pool), so no chunk of that read takes the share; false lets the read's chunks take it.
-    static void set_share_blocked(bool blocked);
 
     /// Layer-major prefill (STRATA_PREFILL_LAYER_MAJOR=1): true while `on_chunk` reports a sub-chunk before the end of
     /// its super-chunk.  The session state is already at the super-chunk's end then, so no checkpoint may be taken.
@@ -325,19 +235,10 @@ public:
         int64_t pos0 = 0;
         std::vector<core::SessionState*> stage_ss;
     };
-    /// Several prompts in ONE layer-major pass (the streamed experts of a layer are read once for all of them).  Each
-    /// prompt fills its own sessions; `on_chunk` / `on_stage_chunk` report the FIRST prompt only.  Returns false with `err`
-    /// when the layer-major walk does not apply (then nothing was read; the caller reads the prompts one by one).
-    bool run_multi(const std::vector<Seg>& segs, std::string& err);
 
     /// Tells whether a run of two chunks or more goes layer by layer (STRATA_PREFILL_LAYER_MAJOR, or the default
     /// here), unless the walk declines it (lm_prepare: an image prompt, no VRAM for it, ...).
     bool is_layer_major_on() const;
-    bool layer_major_mid() const {
-        const Prefill* p = this;
-        while (p->next_ != nullptr) p = p->next_;
-        return p->lm_mid_;
-    }
 
 private:
     static uint64_t bytes_needed_impl(const core::ModelGeometry& g, const core::SessionState& ss, int64_t chunk,
@@ -367,10 +268,6 @@ private:
     bool drain_pipeline(std::string& err);
 
     int64_t stage_lb_ = 0, stage_le_ = -1;
-    std::vector<int> tap_layers_;
-    std::vector<int> tap_local_;                  ///< the tapped layers this stage runs (run)
-    int64_t tap_first_ = 0, tap_cap_ = 0;
-    float* tap_dev_ = nullptr;
     Prefill* next_ = nullptr;
     Prefill* helper_ = nullptr;         ///< set_stage_helper
     bool single_chunk_ = false;         ///< a later stage: the prompt is one chunk (set by the stage before)

@@ -1,6 +1,6 @@
 // include/strata/common/spec/window_planner.hpp - what one verify window holds after its first row: the drafter's
-// drafts (the MTP's or DFlash2's), a lookup (suffix) window, or the drafts with a lookup chain after them; and what
-// the draft policy learns from the window's verdict. Used by the original Qwen decode loops and the shared paged step.
+// drafts (the MTP's), a lookup (suffix) window, or the drafts with a lookup chain after them; and what the draft
+// policy learns from the window's verdict. Used by the shared paged step.
 #pragma once
 
 #include "strata/common/spec/draft_policy.hpp"
@@ -28,8 +28,8 @@ inline WindowRows get_window_rows(int rows, int model_rows, int suffix_draft, in
 struct Window {
     int T = 1;              ///< rows before the chained lookup tokens: the fed-back token, then the drafts
     bool first = false;     ///< the request's first window (no drafts of its own; not timed)
-    bool mtp = false;       ///< the MTP drafter is loaded (it may only be DFlash2's fallback)
-    bool drafted = false;   ///< a drafter (the MTP or DFlash2) proposed the drafts the window starts from
+    bool mtp = false;       ///< the MTP drafter is loaded
+    bool drafted = false;   ///< the drafter proposed the drafts the window starts from
     bool lookup = false;    ///< rows 1 .. T - 1 are WindowPlanner::lookup_drafts, not the drafter's
     int proposed = 0;       ///< tokens in the suffix drafter's last proposal (WindowPlanner::lookup_drafts)
     int match = 0;          ///< the context match behind the suffix drafter's last proposal (tokens)
@@ -134,14 +134,6 @@ public:
                                                      : policy.choose(w.T, w.proposed, w.match);
         w.lookup = pick.lookup;
         if (pick.lookup) w.T = pick.t;
-    }
-    /// Makes `w` the lookup window of `t` rows (of at most `look_rows`, context match `match`) that the policy chose
-    /// before this round's draft, which was skipped for it (window_rule.hpp, skip_draft_for_lookup).
-    void take_lookup(Window& w, int t, int match, int look_rows) {
-        w.proposed = propose_lookup(look_rows);
-        w.lookup = true;
-        w.T = t;
-        w.match = match;
     }
     /// Gets the lookup root of a gated proposal (gated_proposal.hpp) for a window of at most `room` rows: the suffix
     /// drafter's proposal, eligible where `source` would take it.  Only the context decides, never a draw.

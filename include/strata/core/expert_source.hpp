@@ -627,9 +627,6 @@ public:
     bool open(const std::string& pack_dir, int64_t n_layers, int64_t n_expert, std::string& err);
     /// CS-T: the --native shard (native_experts.txt names the other files beside it); see `open`.
     void set_gguf(const std::string& native) { gguf_ = native; }
-    /// STRATA_NUMA_SPLIT: files the engine read at start outside this source (the pack's dense.bin, the MTP head),
-    /// whose cached pages the placement's drop gives back too.  Set BEFORE `pin_cache_complement`.
-    void set_extra_drop_files(std::vector<std::string> paths) { extra_drop_files_ = std::move(paths); }
     /// Whether the experts are read from the GGUF shards in place (no experts.bin).
     bool gguf_mode() const { return !role_ptr_.empty(); }
     /// Pin a compact host mirror of experts absent from a fully filled static GPU cache. The mmap remains open
@@ -673,7 +670,6 @@ public:
     int64_t blobs() const { return blobs_; }
     uint64_t pinned_bytes() const { return complement_pinned_ ? complement_pin_limit_ : 0; }
     uint64_t resident_bytes() const { return complement_bytes_; }
-    bool complement_pinned() const { return complement_pinned_; }
     bool complement_ready() const { return complement_ready_; }
     uint64_t locked_bytes() const { return complement_locked_; }
     /// Lend-region slots whose experts the compact copy holds (the last ones of the cache).
@@ -692,17 +688,11 @@ public:
     /// `bounce`: how many of the last buffers are only staged through and never hold an exchange (STRATA_EXCHANGE_ROTATE
     /// keeps those in the largest block size alone).
     bool reserve_exchanges(int64_t n, std::string& err, int64_t bounce = 0);
-    int64_t exchange_capacity() const { return xstage_cap_; }
-    /// The exchange buffers are page-locked (cudaHostAlloc): copies to and from them are asynchronous.
-    bool exchange_pinned() const { return xstage_pinned_; }
     /// Buffer `q`.  `layer` >= 0: the buffer an exchange of that layer's experts stages into (STRATA_EXCHANGE_ROTATE with
     /// several block sizes keeps one per size); without it, one that holds any layer's block.
     uint8_t* exchange_buffer(int64_t q, int64_t layer = -1) const;
     /// Requires `has_resident(layer, in)`, `!has_resident(layer, out)` and `exchange_buffer(q)` holding out's blob.
     bool stage_exchange(int64_t layer, int64_t in, int64_t out, int64_t q);
-    /// --pipeline-windows: size the exchange table now, so a `stage_exchange` on the adaptive tier's thread never
-    /// reallocates it under a concurrent `blob` (the pool reads it while windows are in flight).
-    void prepare_overrides() { if (override_.empty()) override_.assign((size_t) blobs_, nullptr); }
     /// After the GPU copies of every staged swap have landed.  Returns how many exchanges were applied.
     int64_t commit_exchanges();
     /// 0.1.43 (STRATA_ADAPT_OVERLAP): BEFORE the GPU copies of the staged swaps have landed, make each staged `out` look to the
@@ -742,9 +732,6 @@ public:
     bool ram_stage(int64_t layer, int64_t in, int64_t out);
     int64_t ram_install(const int32_t* host_res, int64_t n_expert);
     bool ram_queued(int64_t layer, int64_t expert) const;   ///< `expert` is the `in` or `out` of a staged promotion
-    int64_t ram_staged_reads() const { return ram_staged_reads_.load(std::memory_order_relaxed); }
-    int64_t ram_install_skips() const { return ram_install_skips_.load(std::memory_order_relaxed); }
-    int64_t ram_install_gpu() const { return ram_install_gpu_.load(std::memory_order_relaxed); }   ///< skipped: the GPU tier took in or out
     /// Where an expert outside the GPU is now: 0 the RAM copy, 1 the files with its pages in the page cache, 2 the files, cold
     /// (Linux: four sampled pages; elsewhere 2).
     int tier_of(int64_t layer, int64_t expert) const;
@@ -757,9 +744,6 @@ public:
     /// With the compact copy ready: blobs read from the mapped file since (what the plain mmap mode may read from
     /// the SSD).  0 in a steady resident mode; lend-region experts that did not fit the RAM count here.
     int64_t file_reads() const { return file_reads_.load(std::memory_order_relaxed); }
-    /// CS-T per-tier counters: blobs served from the RAM copy, and the bytes read from the mapped files (the blobs
-    /// `file_reads` counts, plus the prompt path's copies of them).
-    int64_t ram_reads() const { return ram_reads_.load(std::memory_order_relaxed); }
     uint64_t file_read_bytes() const { return file_read_bytes_.load(std::memory_order_relaxed); }
     /// Of those, the bytes `blob` read (decode windows, adaptive swaps; the rest are the prompt path's copies), and
     /// the time spent reading the files, summed over threads.
@@ -779,9 +763,6 @@ public:
     /// expert bytes outside it; switches either way (startup only, nothing reading).  Returns whether unbuffered.
     bool recheck_unbuffered(std::string& why);
     bool unbuffered() const { return !direct_.empty(); }
-    /// strata-q38 (RamExperts): reads the experts straight from the drive from now on, whatever the RAM; false (and
-    /// `why`) when the files cannot be opened so.
-    bool read_unbuffered(std::string& why) { return unbuffered() || open_direct(why); }
     /// MODEL-UPDATE round 2 (Linux, opt-in STRATA_PROMPT_DIRECT=1): with the file tier read through the file cache (the
     /// decode's choice: re-routed experts come back from it), the prompt path's batched stager reads (copy_blobs) go
     /// unbuffered instead - the same bytes, read in merged O_DIRECT requests.  False when not opened (and why).
@@ -804,7 +785,6 @@ public:
     bool begin_startup_unbuffered(std::string& why);
     /// False when the view could not be mapped again: then the file tier stays unbuffered, `why` says so.
     bool end_startup_unbuffered(std::string& why);
-    bool startup_unbuffered() const { return startup_ub_; }
     /// Every expert's bytes (n_layers x n_expert blobs).
     uint64_t expert_bytes() const;
     /// #286, unbuffered: assembles the blobs of these pairs ahead of the `blob` calls that will ask for them (the
@@ -850,8 +830,6 @@ public:
     bool wants_scores() const override { return io_sched_ && io_pf_; }
     /// Not when the reads are unbuffered: the warmed pages would be read through the file cache, a second time.
     bool warms() const override { return (!role_ptr_.empty() || io_pf_) && direct_.empty(); }
-    /// Of the blobs the file tier read for the decode, how many had been warmed for their layer beforehand.
-    int64_t warmed_hits() const { return warm_hits_.load(std::memory_order_relaxed); }
     int64_t warmed() const { return warm_count_.load(std::memory_order_relaxed); }
     /// #286: blobs an unbuffered read could not deliver, read through the mapping instead (0 when all went direct).
     int64_t direct_fallbacks() const { return direct_fallbacks_.load(std::memory_order_relaxed); }
@@ -878,7 +856,6 @@ public:
     /// Counts the cached / uncached bytes of every blob read from the files (mincore, page-granular).  Free with
     /// io_prefetch; otherwise opt in with STRATA_IO_STATS=1 (the check costs a few microseconds per blob).
     void set_io_stats(bool on) { io_stats_ = on || io_pf_; }
-    bool io_stats() const { return io_stats_; }
     struct IoCounters {
         uint64_t cached_bytes = 0, uncached_bytes = 0;       ///< file reads at hand-out, by page-cache residency
         uint64_t pread_bytes = 0, pread_us = 0, pread_n = 0; ///< bytes read with pread, thread time, calls
@@ -920,7 +897,6 @@ public:
     /// STRATA_IO_PF_GATE_LO 0.55 and opens above STRATA_IO_PF_GATE_HI 0.65.  Closed, the decode reads as without io
     /// prefetch; the prompt path is not gated.  (A held share at demand would not do: the read-ahead itself raises it.)
     /// `DecodeScope` marks the decode thread (and the fetch threads it starts).
-    double gate_ratio() const { return gate_ratio_; }
     struct DecodeScope {
         bool prev;
         DecodeScope();
@@ -947,9 +923,6 @@ public:
     /// experts' bytes; 0 when unknown.  The decode gate's room test (STRATA_IO_PF_GATE_LO), asked once at start.
     double cache_room_ratio() const;
     bool gate_on() const { return gate_on_; }
-    double gate_held() const { return gate_ewma_; }
-    int64_t gate_closed_windows() const { return gate_closed_w_; }
-    int64_t gate_flips() const { return gate_flips_; }
 private:
     void gate_tick();
     void gate_capacity();
@@ -960,7 +933,6 @@ private:
     double gate_useful_ = 1.0, gate_min_useful_ = 0.10;
     bool gate_useless_ = false;
 public:
-    double gate_useful() const { return gate_useful_; }
 private:
     std::atomic<bool> gate_open_{true};
     mutable std::atomic<uint64_t> gate_c_{0}, gate_u_{0};
@@ -1234,12 +1206,6 @@ public:
     const std::string& ram_warning() const { return ram_warning_; }
     uint64_t pinned_arena_bytes() const { return pinned_bytes_; }   ///< what the driver registered (the pinned prefix, or the total by need)
     double load_gib_per_second() const { return gib_per_s_; }
-    // Loader fix: the load, split.  `load_seconds()` is the wall clock of the load loop; the other two are
-    // sums over the reader threads (see LoadStats), so on their own they say how much of that wall was spent
-    // waiting for the disk and how much in memcpy + FNV-1a.
-    double load_seconds() const { return load_seconds_; }
-    double load_read_seconds() const { return load_read_s_; }
-    double load_copy_seconds() const { return load_copy_s_; }
 
 private:
     void* arena_ = nullptr;          ///< the PinnedArena, owned

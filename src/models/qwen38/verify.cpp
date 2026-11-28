@@ -19,7 +19,6 @@
 #if defined(STRATA_VERIFY_HGL)
 #include "strata/base/gpu/host_graph_launch.hpp"
 #endif
-#include "strata/core/remote_expert_opt.hpp"
 #include "strata/base/gpu/dma_batch.hpp"
 #include "strata/common/kernels/spec_prob.hpp"
 #include "strata/common/kernels/spec_proposal.hpp"
@@ -73,9 +72,6 @@
 #include "strata/common/state/progress.hpp"
 #include "strata/models/qwen38/kernels/shared_expert.hpp"
 #include "strata/models/qwen38/kernels/verify_kernels.hpp"
-#if defined(STRATA_HAVE_DFLASH2)
-#include "strata/models/qwen38/kernels/dflash2.hpp"
-#endif
 
 #include <algorithm>
 #include <atomic>
@@ -724,13 +720,6 @@ Verifier::~Verifier() {
         strata::core::release_device(qcnt_);
     if (d_spec_)
         strata::core::release_device(d_spec_);
-    if (tap_file_) std::fclose(tap_file_);
-    if (tap_dev_)
-        strata::core::release_device(tap_dev_);
-    if (tap_scratch_)
-        strata::core::release_device(tap_scratch_);
-    if (h_tap_)
-        strata::core::release_host(h_tap_);
     if (logit_bias_device_)
         strata::core::release_device(logit_bias_device_);
     for (float* b : slot_bias_dev_)
@@ -766,97 +755,6 @@ Verifier::~Verifier() {
     for (void* h : hosts)
         if (h)
             strata::core::release_host(h);
-}
-
-int Verifier::tap_total() const {
-    int n = 0;
-    if (g_ == nullptr) return 0;
-    for (int l : tap_req_) if (l >= 0 && l < g_->n_layers - 1) ++n;
-    return n;
-}
-
-bool Verifier::tapping_chain() const {
-    if (g_ == nullptr || tap_req_.empty()) return false;
-    int have = 0;
-    for (const Verifier* v = this; v != nullptr; v = v->next_) {
-        have += (int) v->tap_layers_.size();
-        if (v->tap_layers_.size() > 0 && !v->tap_on_) return false;
-        if (v->le_ >= g_->n_layers) break;
-    }
-    return have == tap_total();
-}
-
-bool Verifier::gather_taps_host(float* dst, int row0, int rows, std::string& err) {
-    const int64_t N = g_->n_embd;
-    const int nt_all = tap_total();
-    for (Verifier* v = this; v != nullptr; v = v->next_) {
-        if (!v->tap_layers_.empty() && v->tap_on_) {
-            const OnDevice on_stage(v->device_);
-            if (v->tap_cs_ == nullptr &&
-                (cudaStreamCreateWithFlags(&v->tap_cs_, cudaStreamNonBlocking) != cudaSuccess ||
-                 cudaEventCreateWithFlags(&v->tap_ev_, cudaEventDisableTiming) != cudaSuccess)) {
-                err = "verify: the tap gather stream could not be created";
-                return false;
-            }
-            int slot0 = 0;
-            for (int l : tap_req_) if (l >= 0 && l < g_->n_layers - 1 && l < v->lb_) ++slot0;
-            const int64_t nv = (int64_t) v->tap_layers_.size();
-            for (int r = 0; r < rows; ++r) {
-                const cudaError_t ce = cudaMemcpyAsync(dst + ((size_t) r * (size_t) nt_all + (size_t) slot0) * (size_t) N,
-                                                       v->tap_dev_ + (size_t) (row0 + r) * (size_t) (nv * N), (size_t) (nv * N) * 4,
-                                                       cudaMemcpyDeviceToHost, v->tap_cs_);
-                if (ce != cudaSuccess) { err = std::string("verify: the tap gather to the host: ") + cudaGetErrorString(ce); return false; }
-            }
-            if (cudaStreamSynchronize(v->tap_cs_) != cudaSuccess) { err = "verify: the tap gather to the host did not finish"; return false; }
-        }
-        if (v->le_ >= g_->n_layers) break;
-    }
-    return true;
-}
-
-bool Verifier::gather_taps(float* landing, int landing_device, int row0, int rows, int dst_row0, cudaStream_t wait_stream, std::string& err) {
-    const int64_t N = g_->n_embd;
-    const int nt_all = tap_total();
-    for (Verifier* v = this; v != nullptr; v = v->next_) {
-        if (!v->tap_layers_.empty() && v->tap_on_) {
-            const OnDevice on_stage(v->device_);
-            if (v->tap_cs_ == nullptr &&
-                (cudaStreamCreateWithFlags(&v->tap_cs_, cudaStreamNonBlocking) != cudaSuccess ||
-                 cudaEventCreateWithFlags(&v->tap_ev_, cudaEventDisableTiming) != cudaSuccess)) {
-                err = "verify: the tap gather stream could not be created";
-                return false;
-            }
-            // this stage's first tap among all of them: the requested layers below its first layer
-            int slot0 = 0;
-            for (int l : tap_req_) if (l >= 0 && l < g_->n_layers - 1 && l < v->lb_) ++slot0;
-            const int64_t nv = (int64_t) v->tap_layers_.size();
-            for (int r = 0; r < rows; ++r) {
-                const float* src = v->tap_dev_ + (size_t) (row0 + r) * (size_t) (nv * N);
-                float* dst = landing + ((size_t) (dst_row0 + r) * (size_t) nt_all + (size_t) slot0) * (size_t) N;
-                const cudaError_t ce = v->device_ == landing_device
-                    ? cudaMemcpyAsync(dst, src, (size_t) (nv * N) * 4, cudaMemcpyDeviceToDevice, v->tap_cs_)
-                    : cudaMemcpyPeerAsync(dst, landing_device, src, v->device_, (size_t) (nv * N) * 4, v->tap_cs_);
-                if (ce != cudaSuccess) { err = std::string("verify: the tap gather copy: ") + cudaGetErrorString(ce); return false; }
-            }
-            if (cudaEventRecord(v->tap_ev_, v->tap_cs_) != cudaSuccess) { err = "verify: the tap gather event"; return false; }
-            const OnDevice on_dst(landing_device);
-            if (cudaStreamWaitEvent(wait_stream, v->tap_ev_, 0) != cudaSuccess) { err = "verify: the drafter stream cannot wait on a stage's taps"; return false; }
-        }
-        if (v->le_ >= g_->n_layers) break;
-    }
-    return true;
-}
-
-// STRATA_TAP_FILE: one record per row of the window: int32 position, int32 input token, then n_taps x n_embd floats
-void Verifier::tap_write(int T, const int32_t* tokens, int64_t pos0) {
-    if (tap_file_ == nullptr) return;
-    const size_t per = tap_layers_.size() * (size_t) g_->n_embd;
-    for (int t = 0; t < T; ++t) {
-        const int32_t hdr[2] = {(int32_t) (last_batch_ ? last_pos_b_[t] : pos0 + t), tokens[t]};
-        std::fwrite(hdr, sizeof hdr, 1, tap_file_);
-        std::fwrite(h_tap_ + (size_t) t * per, sizeof(float), per, tap_file_);
-    }
-    std::fflush(tap_file_);
 }
 
 bool Verifier::set_logit_bias(const std::vector<float>& bias, std::string& err) {
@@ -968,52 +866,6 @@ bool Verifier::init(const WeightTable& wt, const ModelGeometry& g, SessionState&
               mapped(64, (void**) &h_plan_err_, (void**) &m_plan_err_) &&
               mapped(T * K * N * 4, (void**) &h_ymiss_, (void**) &m_ymiss_);
     if (!ok) { err = "verify: mapped staging allocation failed " + strata::core::pin_exhausted_hint(); return false; }
-    // DFlash2 taps: set_taps (the drafter) or STRATA_TAP_FILE (the research dump); off, and nothing is allocated or captured, otherwise
-    const char* tap_path = std::getenv("STRATA_TAP_FILE");
-    if (tap_path != nullptr && tap_path[0] == '\0') tap_path = nullptr;
-    // A layer split's stage taps the requested layers inside its own range [lb_, le_) into its own buffer [max_t][its taps][n_embd];
-    // gather_taps() lands every stage's rows on the drafter's card.  The research dump (STRATA_TAP_FILE) needs the whole model in one verifier.
-    const bool tap_whole = lb_ == 0 && le_ == g.n_layers;
-    if (!tap_whole) tap_path = nullptr;
-    if (tap_path != nullptr || !tap_req_.empty()) {
-        tap_layers_.clear();
-        if (tap_path == nullptr) {
-            for (int l : tap_req_) if (l >= lb_ && l < le_ && l < g.n_layers - 1) tap_layers_.push_back(l);
-        } else {
-            const char* tl = std::getenv("STRATA_TAP_LAYERS");
-            std::string list = tl != nullptr && tl[0] != '\0' ? tl : "5,15,25,35,45";
-            for (size_t i = 0; i < list.size();) {
-                const size_t j = list.find(',', i);
-                const int l = std::atoi(list.substr(i, j == std::string::npos ? std::string::npos : j - i).c_str());
-                if (l >= 0 && l < g.n_layers - 1) tap_layers_.push_back(l);
-                if (j == std::string::npos) break;
-                i = j + 1;
-            }
-        }
-        tap_slot_.assign((size_t) g.n_layers, -1);
-        for (size_t i = 0; i < tap_layers_.size(); ++i) tap_slot_[(size_t) tap_layers_[i]] = (int) i;
-        const size_t nt = tap_layers_.size();
-        if (nt == 0 && tap_path == nullptr) {
-            // a stage that holds none of the tapped layers: nothing to keep, nothing captured
-        } else
-        if (nt == 0 || strata::core::allocate_device((void**) &tap_dev_, (size_t) T * nt * N * 4,
-            {"other", "Device allocations", "Verifier"}) != cudaSuccess ||
-            (tap_path != nullptr && (strata::core::allocate_device((void**) &tap_scratch_, (size_t) HC * N * 4,
-                {"other", "Device allocations", "Verifier"}) != cudaSuccess ||
-                                     !mapped((size_t) T * nt * N * 4, (void**) &h_tap_, (void**) &m_tap_)))) {
-            err = "verify: the DFlash2 tap buffers could not be allocated";
-            return false;
-        }
-        if (tap_path != nullptr) {
-            tap_file_ = std::fopen(tap_path, "wb");
-            if (tap_file_ == nullptr) { err = std::string("verify: cannot write STRATA_TAP_FILE ") + tap_path; return false; }
-            const int32_t hdr[4] = {0x50415453 /* 'STAP' */, 1, (int32_t) N, (int32_t) nt};
-            std::fwrite(hdr, sizeof hdr, 1, tap_file_);
-            for (int l : tap_layers_) { const int32_t v = l; std::fwrite(&v, sizeof v, 1, tap_file_); }
-            std::fprintf(stderr, "strata: STRATA_TAP_FILE %s: %zu taps of %lld floats per row\n", tap_path, nt, (long long) N);
-        }
-        tap_on_ = true;
-    }
     if (bal_ != nullptr) {   // set_pcie_balance: four stamp words per (layer, group)
         if (!mapped((size_t) g.n_layers * 2 * 4 * 8, (void**) &h_bal_, (void**) &m_bal_)) {
             err = "verify: mapped balance stamps allocation failed";
@@ -1334,8 +1186,6 @@ bool Verifier::init(const WeightTable& wt, const ModelGeometry& g, SessionState&
                  ar_on() ? " (100% VRAM resident: zero-doorbell graph)" : "");
     return true;
 }
-
-const float* Verifier::final_R(int t) const { return R_ + (size_t) t * (size_t) (g_->hc * g_->n_embd); }
 
 // ================================ THE WINDOW, AS CAPTURED ================================
 //
@@ -2264,9 +2114,8 @@ bool Verifier::record_window(int T, cudaStream_t cs, std::string& err) {
                                        m_ids_ + tb * K, m_w_ + tb * K, m_seq_, (uint32_t) ((l - lb_) * G + grp + 1), cs);
             else
 #endif
-            // #578: the helper GPUs reduce with the routing weights - publish them; set_always_publish: the rows
-            // whatever the device's residency table says (pipelined windows)
-            if (remote_opt_ || always_publish_)
+            // set_always_publish: the rows whatever the device's residency table says (pipelined windows)
+            if (always_publish_)
                 doorbell_publish(xm, ids_ + tb * K, w_ + tb * K, (int64_t) n * N, (int64_t) n * K, m_x_ + tb * N,
                                  m_ids_ + tb * K, m_w_ + tb * K, m_seq_, cs);
             else {
@@ -2391,7 +2240,7 @@ bool Verifier::record_window(int T, cudaStream_t cs, std::string& err) {
             grouped(p_ptr, p_start, p_counts, 0, parts_out, true);
             stamp(l, 20, grp);
         } else {
-            strata::dispatch::notef("experts layer: partial residency, plan from %ld (1 = device plan, 0 = host pool), pcie_mode=%ld, remote_opt=%ld", (long) device_plan_, (long) sink_.pcie_mode, (long) (remote_opt_ != nullptr));
+            strata::dispatch::notef("experts layer: partial residency, plan from %ld (1 = device plan, 0 = host pool), pcie_mode=%ld", (long) device_plan_, (long) sink_.pcie_mode);
             if (device_plan_) {   // E-6: skipped when the device planned this group (all its experts resident)
                 wait_flag_ge_or(m_flagA_, ring, skip_ + grp, cs);
                 copy_i32_from_mapped_unless(pl, m_plan_ + (size_t) grp * (size_t) plan_i32_, plan_i32_, skip_ + grp, ring, cs);
@@ -2430,7 +2279,7 @@ bool Verifier::record_window(int T, cudaStream_t cs, std::string& err) {
                 copy_or_zero_from_mapped(parts_out, m_ymiss_ + (size_t) tb * K * N, (long long) n * K * N,
                                          skip_ + grp, ring, cs);
             } else {
-                const bool fuse_rows = fuse_rows_on() && !prof_on_ && !remote_opt_ && dec_batch && m_bal_ == nullptr;   // 143-amdk
+                const bool fuse_rows = fuse_rows_on() && !prof_on_ && dec_batch && m_bal_ == nullptr;   // 143-amdk
                 if (!fuse_rows) {
                     if (m_bal_ != nullptr)   // set_pcie_balance: ... and ends as it waits for the CPU's rows
                         wait_flag_ge_stamped(m_flag_, ring, m_bal_ + ((l - lb_) * 2 + grp) * 4 + 2, nullptr, cs);
@@ -2438,9 +2287,7 @@ bool Verifier::record_window(int T, cudaStream_t cs, std::string& err) {
                         wait_flag_ge(m_flag_, ring, cs);           // the CPU's share is in the mapped rows
                 }
                 stamp(l, 23, grp);
-                if (remote_opt_)   // #578: the helper's rows come back reduced; skip them as well
-                    remote_opt_->copy_rows(parts_out, m_ymiss_ + (size_t) tb * K * N, tb, n, p_dst, p_counts + 1, cs);
-                else if (fuse_rows)   // the wait folded into the copy's blocks
+                if (fuse_rows)   // the wait folded into the copy's blocks
                     copy_rows_from_mapped_after(m_flag_, ring, parts_out, m_ymiss_ + (size_t) tb * K * N, (int64_t) n * K, N,
                                                 p_dst, p_counts + 1, cs);
                 else if (dec_batch)   // only the CPU rows cross PCIe (p_dst[0, counts[1]) = the GPU's own rows)
@@ -2450,10 +2297,10 @@ bool Verifier::record_window(int T, cudaStream_t cs, std::string& err) {
                     copy_from_mapped(parts_out, m_ymiss_ + (size_t) tb * K * N, (int64_t) n * K * N, cs);
             }
             // 143-amdk: the add of the GPU's hit rows is done by the combine that follows (one launch fewer)
-            hits_in_combine = fuse_hits_on() && !prof_on_ && !remote_opt_ && !sg_gated_[grp] && dec_batch && n > 1 &&
+            hits_in_combine = fuse_hits_on() && !prof_on_ && !sg_gated_[grp] && dec_batch && n > 1 &&
                               native_moe_combine_enabled() && n <= 8 &&
                               native_moe_combine_hits_supported(parts_ + (size_t) tb * K * N, shared_ + tb * N, bo_ + tb * N, N, K, n);
-            strata::dispatch::notef("experts layer: cpu rows via %ld (1 = fused wait+copy, 0 = wait then copy), hits in combine=%ld", (long) (fuse_rows_on() && !prof_on_ && !remote_opt_ && dec_batch && m_bal_ == nullptr), (long) hits_in_combine);
+            strata::dispatch::notef("experts layer: cpu rows via %ld (1 = fused wait+copy, 0 = wait then copy), hits in combine=%ld", (long) (fuse_rows_on() && !prof_on_ && dec_batch && m_bal_ == nullptr), (long) hits_in_combine);
             if (!hits_in_combine) moe_hit_add(parts_out, hit_out, p_dst, p_counts + 1, cap, N, cs);
         }
         if (sh_fork) {
@@ -2481,25 +2328,7 @@ bool Verifier::record_window(int T, cudaStream_t cs, std::string& err) {
             mb.weights = w_ + t * K; mb.shared = shared_ + t * N;
             if (!moe_combine_parts(g, l, K, mb, parts_ + (size_t) t * K * N, bo_ + t * N, cs, err)) return false;
         }
-        if (remote_opt_) remote_opt_->combine(bo_ + tb * N, y_dummy_ + tb * N, tb, n,
-                              device_plan_ ? skip_ + grp : nullptr, ring, cs);
         stamp(l, 24, grp);
-        if (tap_on_ && (!batch_rec_ || tap_batch_ || tap_file_ != nullptr) && l < (int64_t) tap_slot_.size() &&
-            tap_slot_[(size_t) l] >= 0) {
-            // the layer's completed output: R with this FFN half's write applied (the next layer's read would fold it), the mean of
-            // the hc streams, all rows of the group in one launch
-            const int64_t nt = (int64_t) tap_layers_.size();
-#if defined(STRATA_HAVE_DFLASH2)
-            strata::kernels::df2_tap_gr(Rt(tb), HC * N, bo_ + tb * N, N, inj2_ + tb * HC, HC, tap_dev_ + ((size_t) tb * nt + (size_t) tap_slot_[(size_t) l]) * N,
-                                        nt * N, n, N, (int) HC, cs);
-#else   // builds without the DFlash2 kernels: the research dump's per-row path
-            for (int t = tb; t < te; ++t) {
-                cudaMemcpyAsync(tap_scratch_, Rt(t), (size_t) HC * N * 4, cudaMemcpyDeviceToDevice, cs);
-                gr_write(tap_scratch_, bo_ + t * N, inj2_ + t * HC, gs, tap_scratch_, cs);
-                hc_mean_streams(tap_scratch_, tap_dev_ + ((size_t) t * nt + (size_t) tap_slot_[(size_t) l]) * N, N, (int) HC, cs);
-            }
-#endif
-        }
         if (l == g.n_layers - 1) {
             if (!fuse_head_gr) {
                 if (dec_batch && !g_no_multi_gr) gr_write_multi(Rt(tb), bo_ + tb * N, inj2_ + tb * HC, gs, Rt(tb), n, cs);
@@ -2644,69 +2473,7 @@ bool Verifier::record_window(int T, cudaStream_t cs, std::string& err) {
         if (nan_guard_on()) strata::kernels::logits_nonfinite_rows(head_logits_, T, (int) n_vocab_, m_nf_, cs);
     }
     stamp(g.n_layers, 1, 0);
-    if (tap_on_ && tap_file_ != nullptr)
-        copy_from_mapped(m_tap_, tap_dev_, (int64_t) T * (int64_t) tap_layers_.size() * N, cs);
     return true;
-}
-
-std::string Verifier::profile_by_t_report() {
-    if (!prof_on_) return std::string();
-    static const char* names[kProfPer] = {"-", "hc-read0", "qkv gemv", "conv", "ab", "z", "rec", "q8+kv-idx",
-                                          "k/v+norm-rope", "kv+idx append", "q+q-idx", "scores+topk", "kv-resolve",
-                                          "attention", "gate", "", "out-proj", "router+plan", "shared+quant",
-                                          "waitA", "VRAM hits", "waitB", "PCIe grp", "waitCPU", "copy+combine",
-                                          "(gap)", "head", "hc0 norm", "hc0 down", "hc0 up", "hc1 norm", "hc1 down", "hc1 up"};
-    std::string out;
-    char b[96];
-    for (int T = 1; T <= 16; ++T) {
-        if (prof_t_win_[T] == 0) continue;
-        double total = 0;
-        std::snprintf(b, sizeof b, "T%d (n=%lld):", T, (long long) prof_t_win_[T]);
-        out += b;
-        for (int k = 0; k < 2; ++k) {
-            out += k == 0 ? " GDN[" : " | QSA[";
-            for (int i = 0; i < kProfPer; ++i) {
-                if (prof_t_sum_[T][k][i] <= 0) continue;
-                total += prof_t_sum_[T][k][i];
-                std::snprintf(b, sizeof b, " %s %.3f", names[i], prof_t_sum_[T][k][i] / 1e6 / (double) prof_t_win_[T]);
-                out += b;
-            }
-            out += " ]";
-        }
-        std::snprintf(b, sizeof b, " | total %.2f ms\n", total / 1e6 / (double) prof_t_win_[T]);
-        out += b;
-    }
-    std::memset(prof_t_sum_, 0, sizeof prof_t_sum_);
-    std::memset(prof_t_win_, 0, sizeof prof_t_win_);
-    return out;
-}
-
-std::string Verifier::route_stats_report() {
-    if (!rs_on_ || rs_dev_ == nullptr || g_ == nullptr) return std::string();
-    const int64_t L = g_->n_layers;
-    std::vector<unsigned long long> h((size_t) 17 * (size_t) L * 16);
-    cudaMemcpy(h.data(), rs_dev_, h.size() * 8, cudaMemcpyDeviceToHost);
-    std::string out;
-    char b[160];
-    for (int T = 1; T <= 16; ++T) {
-        if (rs_win_[T] == 0) continue;
-        double row[16] = {};
-        for (int64_t l = 0; l < L; ++l)
-            for (int r = 0; r < 16; ++r) row[r] += (double) h[((size_t) T * (size_t) L + (size_t) l) * 16 + (size_t) r];
-        const double denom = (double) rs_win_[T] * (double) L;
-        double sum = 0;
-        for (int r = 0; r < T; ++r) sum += row[r] / denom;
-        std::snprintf(b, sizeof b, "T%d (n=%lld): distinct experts per layer %.2f; new per row:", T, (long long) rs_win_[T], sum);
-        out += b;
-        for (int r = 0; r < T; ++r) {
-            std::snprintf(b, sizeof b, " %.2f", row[r] / denom);
-            out += b;
-        }
-        out += "\n";
-    }
-    cudaMemset(rs_dev_, 0, h.size() * 8);
-    std::memset(rs_win_, 0, sizeof rs_win_);
-    return out;
 }
 
 std::string Verifier::profile_report() {
@@ -3451,11 +3218,9 @@ bool Verifier::run(int T, const int32_t* tokens, int64_t pos0, PoolMultiFn pool,
         set_plan_slot(grp);
         const int tb = gtb[grp], n = gte[grp] - gtb[grp];
         progress_at("verify window: the CPU experts of layer", l);
-        if (remote_opt_) remote_opt_->begin(h_w_ + (size_t) tb * ss.k, tb, n);
         if (pool != nullptr)
             pool(user, h_x_ + (size_t) tb * g.n_embd, h_ids_ + (size_t) tb * ss.k, n, ss.k,
                  h_ymiss_ + (size_t) tb * ss.k * g.n_embd, l);
-        if (remote_opt_) remote_opt_->end();
         VDBG("layer %lld served\n", (long long) l);
         if (g_trace) trace_ev(*(volatile uint32_t*) h_flagA_ == want ? "SERVED" : "SERVED-NO-PLAN-YET", k, l,
                               (int64_t) ms_since(b));   // aux: ms the CPU experts took
@@ -3601,7 +3366,6 @@ bool Verifier::run(int T, const int32_t* tokens, int64_t pos0, PoolMultiFn pool,
             }
     }
     for (int t = 0; t < T; ++t) out[t] = ((volatile int32_t*) h_out_)[t];
-    if (tap_file_ != nullptr && !batch_rec_) tap_write(T, tokens, pos0);
     note_nonfinite(T, nullptr);
     // STRATA_LOGITS_DUMP=<path> (debug tap, off by default): the window's logits as the sampler saw them, written
     // AFTER the window (the stream is synchronised above and the graph capture is over, so a plain copy is legal -
@@ -3686,9 +3450,6 @@ void Verifier::set_plan_slot(int grp) {
     sink_.staging = (unsigned long long) (staging_ + (size_t) (grp * per) * strata::kernels::cpu::expert_layout().max_blob);
     sink_.staging_cap = per;
 }
-
-// Flag B only rises: a host function of an earlier layer may run after a later layer already raised it directly.
-void Verifier::raise_flag(uint32_t* flag, uint32_t value) { strata::core::flag_raise_max(flag, value); }
 
 // Flag B for layer `want - 1`, behind every copy queued on the copy stream (PR #5096, @AlanJager).  The counter only
 // rises and the graph waits for "flag B >= layer + 1", so raising it on the spot for a layer with nothing to copy
@@ -4259,24 +4020,6 @@ bool Verifier::batch_launch_rows(const int* rows, int S, int hbase, const int32_
     return true;
 }
 
-bool Verifier::batch_commit_rows(const int* rows, int S, int hbase, const int* keep, const int32_t* tokens,
-                                 const int64_t* pos, std::string& err) {
-    const OnDevice on_device(device_);
-    const auto it = dcommit_bm_.find(bkey(rows, S, hbase));
-    if (it == dcommit_bm_.end() || it->second == nullptr) { err = "verify: a deferred commit without its window"; return false; }
-    // Each slot's accepted prefix.  The graph reads it from mapped memory when it runs; this slot's entry is written
-    // again only at its next verdict, which comes after its next window has passed this stage - behind this commit.
-    if (!write_slot_prefixes(rows, S, keep, pos, h_commitd_, err))
-        return false;
-    std::atomic_thread_fence(std::memory_order_seq_cst);
-    const cudaError_t le = cudaGraphLaunch(it->second, cs_);
-    if (le != cudaSuccess) { err = std::string("verify: deferred commit launch: ") + cudaGetErrorString(le); return false; }
-    (void) cudaStreamQuery(cs_);
-    if (ple_stage())
-        advance_ple_prev(rows, S, keep, tokens);
-    return true;
-}
-
 bool Verifier::evict_batch_graph(const std::vector<int>& keep, bool& evicted, std::string& err) {
     evicted = false;
     auto old = exec_bm_.end();
@@ -4569,13 +4312,6 @@ bool Verifier::stage_batch(const int* rows, int S, int hbase, const int32_t* tok
     return true;
 }
 
-bool Verifier::run_slots(int S, const int32_t* tokens, const int64_t* pos, PoolMultiFn pool, void* user, int32_t* out,
-                         std::string& err) {
-    int rows[strata::kernels::kVerifyMaxT] = {};
-    for (int t = 0; t < S && t < strata::kernels::kVerifyMaxT; ++t) rows[t] = t;
-    return run_slot_rows(rows, S, tokens, pos, pool, user, out, err);
-}
-
 bool Verifier::run_slot_rows(const int* rows, int S, const int32_t* tokens, const int64_t* pos, PoolMultiFn pool,
                              void* user, int32_t* out, std::string& err) {
     using namespace strata::kernels;
@@ -4649,11 +4385,7 @@ bool Verifier::run_slot_rows(const int* rows, int S, const int32_t* tokens, cons
         cur_layer_ = want - 1;
         set_plan_slot(0);
         progress_at("verify batch: the CPU experts of layer", l);
-        // The recorded graph consumes the helper mask and weighted sum just as
-        // the solo graph does. Reset both and supply this layer's routing weights.
-        if (remote_opt_) remote_opt_->begin(h_w_, 0, S);
         if (pool != nullptr) pool(user, h_x_, h_ids_, S, ss_->k, h_ymiss_, l);
-        if (remote_opt_) remote_opt_->end();
         progress_tick();
         std::atomic_thread_fence(std::memory_order_seq_cst);
         strata_store_fence();
@@ -4790,7 +4522,6 @@ int Verifier::slot_row_draw(int S, int t, strata::kernels::SamplerParams& sp, co
 }
 
 bool Verifier::sample_rows(int S, std::string& err) {
-    tap_write(S, last_tokens_, 0);
     bool any = false;
     if (batch_histories_.empty()) {
         // the old engine's slots: each row's history is built from its slot's reply tail (set_slot_history)
@@ -4945,13 +4676,6 @@ bool Verifier::finish_slot_rows(int base, std::vector<int32_t>& picks, std::stri
     return true;
 }
 
-uint64_t Verifier::get_pipeline_scratch_bytes() const {
-    uint64_t bytes = 0;
-    for (const auto& entry : group_scratch_)
-        bytes += entry.second.bytes;
-    return bytes;
-}
-
 std::vector<std::pair<void*, size_t>> Verifier::get_group_buffers() const {
     const auto& g = *g_;
     const size_t T = (size_t) max_t_, C = (size_t) g.ssm_conv_channels, HV = (size_t) g.ssm_v_heads;
@@ -5058,9 +4782,7 @@ int Verifier::batch_serve(PoolMultiFn pool, void* user) {
         const Clock::time_point b = Clock::now();
         cur_layer_ = want - 1;
         set_plan_slot(0);
-        if (remote_opt_) remote_opt_->begin(h_w_, 0, S);
         if (pool != nullptr) pool(user, h_x_, h_ids_, S, ss_->k, h_ymiss_, lb_ + k);
-        if (remote_opt_) remote_opt_->end();
         progress_tick();
         std::atomic_thread_fence(std::memory_order_seq_cst);
         strata_store_fence();
@@ -5236,23 +4958,9 @@ namespace {
 double now_ms() { return std::chrono::duration<double, std::milli>(Clock::now().time_since_epoch()).count(); }
 }  // namespace
 
-void Verifier::diag_pipelined(std::FILE* f, const char* name) const {
-    auto rd = [](const uint32_t* p) { return p ? *(const volatile uint32_t*) p : 0u; };
-    auto ev = [](cudaEvent_t e) {
-        if (e == nullptr) return "none";
-        const cudaError_t q = cudaEventQuery(e);
-        return q == cudaSuccess ? "done" : q == cudaErrorNotReady ? "PENDING" : "error";
-    };
-    std::fprintf(f, "  %s: %s T=%d pos %lld served %lld/%lld; GPU rang %u, flags served %u A %u B %u; window event %s, "
-                    "commit event %s (commit launched %d)\n", name, fl_active_ ? "IN FLIGHT" : "idle", last_t_,
-                 (long long) last_pos0_, (long long) fl_k_, (long long) fl_total_, rd(h_seq_), rd(h_flag_), rd(h_flagA_),
-                 rd(h_flagB_), ev(ev_done_), ev(ev_commit_), (int) commit_live_);
-}
-
 bool Verifier::capture_all(std::string& err) {
     const OnDevice on_device(device_);
     if (g_ == nullptr) { err = "verify: capture_all before init"; return false; }
-    if (remote_opt_ != nullptr) { err = "verify: pipelined windows do not serve --remote-expert-opt"; return false; }
     if (released_.load()) { err = "verify: an earlier window never finished on the GPU (#267); restart the engine"; return false; }
     struct NoEvict {   // every size is wanted at once here: a capture must not free another size's graph
         bool& f;
@@ -5280,80 +4988,6 @@ bool Verifier::capture_all(std::string& err) {
         cudaGetLastError();
     }
     pl_ple_rows_.assign((size_t) strata::kernels::kVerifyMaxT * strata::kernels::PLE_N_HEADS, 0u);
-    return true;
-}
-
-// The host staging of a pipelined window: run()'s (stage_inputs), and its PLE rows from `ple_prev` with their pages
-// prefetched (they are gathered into the mapped rows when layer 0 is served, as run() does).
-void Verifier::pl_stage(int T, const int32_t* tokens, int64_t pos0, const int32_t ple_prev[2]) {
-    using namespace strata::kernels;
-    stage_inputs(T, tokens, pos0);
-    staged_ = false;   // a later run() stages its own window
-    SessionState& ss = *ss_;
-    fl_ple_ = ss.ple.ready() && ple_stage();
-    if (fl_ple_) {
-        int32_t prev[2] = {ple_prev[0], ple_prev[1]};
-        for (int t = 0; t < T; ++t) {
-            ngram_rows(&tokens[t], prev, 1, ss.ple.consts, pl_ple_rows_.data() + t * PLE_N_HEADS);
-            prev[0] = prev[1];
-            prev[1] = tokens[t];
-            ss.ple.table->prefetch_rows(pl_ple_rows_.data() + t * PLE_N_HEADS);
-        }
-    }
-    pl_prev_[0] = ple_prev[0];
-    pl_prev_[1] = ple_prev[1];
-}
-
-bool Verifier::prestage(int T, const int32_t* tokens, int64_t pos0, const int32_t ple_prev[2], std::string& err) {
-    if (fl_active_) { err = "verify: a window is in flight on this verifier"; return false; }
-    if (T < 1 || T > max_t_) { err = "verify: window size out of range"; return false; }
-    if (pl_ple_rows_.empty()) { err = "verify: pipelined window not prepared (capture_all)"; return false; }
-    const Clock::time_point t0 = Clock::now();
-    pl_stage(T, tokens, pos0, ple_prev);
-    pl_prestaged_ = true;
-    ms_host += ms_since(t0);
-    return true;
-}
-
-bool Verifier::pl_launch(int T, const int32_t* tokens, int64_t pos0, std::string& err) {
-    const OnDevice on_device(device_);
-    if (fl_active_) { err = "verify: a window is already in flight on this verifier"; return false; }
-    if (released_.load()) { err = "verify: an earlier window never finished on the GPU (#267); restart the engine"; return false; }
-    if (T < 1 || T > max_t_ || T > strata::kernels::kVerifyMaxT) { err = "verify: window size out of range"; return false; }
-    SessionState& ss = *ss_;
-    if (pos0 + T > ss.qsa_states[ss.qsa_primary()].max_cells) { err = "verify: the window runs past the context"; return false; }
-    const int sl = select_long_on() && pos0 + T >= select_long_at() ? 1 : 0;   // the variant this window's context pays off with
-    if (exec_[sl][T] == nullptr || commit_exec_ == nullptr || ev_done_ == nullptr || pl_ple_rows_.empty()) {
-        err = "verify: pipelined window not prepared (capture_all)";
-        return false;
-    }
-    if (pre_launch_ && !pre_launch_(cs_, err)) return false;
-    const Clock::time_point t0 = Clock::now();
-    last_batch_ = false;
-    bool staged = pl_prestaged_ && last_t_ == T && last_pos0_ == pos0;
-    for (int t = 0; staged && t < T; ++t) staged = last_tokens_[t] == tokens[t];
-    if (staged && ss.ple.ready() && ple_stage())
-        staged = pl_prev_[0] == ss.ple_prev[0] && pl_prev_[1] == ss.ple_prev[1];
-    pl_prestaged_ = false;
-    if (!staged) pl_stage(T, tokens, pos0, ss.ple_prev);
-    const int G = groups_[T] > 0 ? groups_[T] : 1;
-    fl_T_ = T;
-    fl_k_ = 0;
-    fl_total_ = (le_ - lb_) * G;
-    fl_prof_ = prof_on_ && G == 1 && prof_pin_ != nullptr;
-    if (trace_h_ != nullptr) std::memset(trace_h_, 0, trace_n_ * 8);   // #649: this window's breadcrumbs only
-    std::atomic_thread_fence(std::memory_order_seq_cst);
-    trace_ev("WINDOW (pipelined)", -1, -1, pos0 * 16 + T);
-    ms_host += ms_since(t0);
-    strata::dispatch::Stats::get().graph_launch(T, ar_on() ? 0 : 1);
-    const cudaError_t le = cudaGraphLaunch(exec_[sl][T], cs_);
-    trace_ev("LAUNCHED", -1, -1, (int64_t) le);
-    if (le != cudaSuccess) { err = std::string("verify: launch: ") + cudaGetErrorString(le); return false; }
-    if (fl_prof_) cudaMemcpyAsync(prof_pin_, prof_, prof_h_.size() * 8, cudaMemcpyDeviceToHost, cs_);
-    if (cudaEventRecord(ev_done_, cs_) != cudaSuccess) { err = "verify: event record failed"; return false; }
-    (void) cudaStreamQuery(cs_);   // WDDM: submit now
-    fl_active_ = true;
-    fl_since_ms_ = fl_flush_ms_ = fl_launch_ms_ = now_ms();
     return true;
 }
 
@@ -5468,72 +5102,6 @@ bool Verifier::done(std::string& err) {
         copy_used_ = false;
     }
     return true;
-}
-
-bool Verifier::pl_finish(int32_t* out, std::string& err) {
-    using namespace strata::kernels;
-    const OnDevice on_device(device_);
-    const ModelGeometry& g = *g_;
-    fl_active_ = false;
-    if (fl_prof_) accumulate_profile(prof_pin_);
-    ++windows;
-    trace_ev("DONE (pipelined)", -1, -1, (int64_t) (now_ms() - fl_launch_ms_));
-    if (le_ < g.n_layers) return true;   // an earlier stage: the hand-off is written
-    const int T = fl_T_;
-    const bool sampled = !sampling_.greedy && sampling_.temperature > 0.0f;
-    if (head_sampling_ && (sampled || hist_d_ != nullptr || sampling_.logit_bias != nullptr)) {   // run()'s host-side sampling, Philox(seed, pos0 + t)
-        SamplerParams sp = sampling_;
-        sp.counter = (uint64_t) last_pos0_;
-        sample_tokens(head_logits_, T, (int) n_vocab_, hist_d_, hist_len_, sp, m_out_, cs_);
-        if (cudaStreamSynchronize(cs_) != cudaSuccess) {
-            err = "verify: the head sampling failed";
-            return false;
-        }
-    }
-    if (out != nullptr)
-        for (int t = 0; t < T; ++t) out[t] = ((volatile int32_t*) h_out_)[t];
-    note_nonfinite(T, nullptr);
-    progress_beat();
-    return true;
-}
-
-bool Verifier::pl_commit_async(int n_keep, std::string& err) {
-    const OnDevice on_device(device_);
-    if (n_keep < 1 || n_keep > last_t_) { err = "verify: commit count out of range"; return false; }
-    if (commit_exec_ == nullptr || ev_commit_ == nullptr) { err = "verify: pipelined commit not prepared"; return false; }
-    const Clock::time_point t0 = Clock::now();
-    if (commit_live_) {   // its graph reads the words below when it starts: the previous one has (a window ago)
-        cudaError_t q;
-        while ((q = cudaEventQuery(ev_commit_)) == cudaErrorNotReady) strata_cpu_pause();
-        if (q != cudaSuccess) { err = std::string("verify: commit: ") + cudaGetErrorString(q); return false; }
-    }
-    h_commit_[0] = n_keep;
-    h_commit_[1] = n_keep - 1;
-    for (int t = 0; t < max_t_; ++t) h_commit_[2 + t] = t < n_keep ? (int32_t) (last_pos0_ + t) : -1;
-    std::atomic_thread_fence(std::memory_order_seq_cst);
-    const cudaError_t le = cudaGraphLaunch(commit_exec_, cs_);
-    if (le != cudaSuccess) { err = std::string("verify: commit launch: ") + cudaGetErrorString(le); return false; }
-    if (cudaEventRecord(ev_commit_, cs_) != cudaSuccess) { err = "verify: event record failed"; return false; }
-    (void) cudaStreamQuery(cs_);
-    commit_live_ = true;
-    if (ple_stage())
-        for (int t = 0; t < n_keep; ++t) {
-            ss_->ple_prev[0] = ss_->ple_prev[1];
-            ss_->ple_prev[1] = last_tokens_[t];
-        }
-    ms_commit += ms_since(t0);
-    return true;
-}
-
-void Verifier::absorb_stats(Verifier& o) {
-    ms_wait += o.ms_wait; ms_pool += o.ms_pool; ms_host += o.ms_host; ms_commit += o.ms_commit;
-    windows += o.windows;
-    o.ms_wait = o.ms_pool = o.ms_host = o.ms_commit = 0;
-    o.windows = 0;
-    for (int k = 0; k < 2; ++k)
-        for (int i = 0; i < kProfPer; ++i) { prof_sum_[k][i] += o.prof_sum_[k][i]; o.prof_sum_[k][i] = 0; }
-    prof_windows_ += o.prof_windows_;
-    o.prof_windows_ = 0;
 }
 
 bool Verifier::can_self_commit(const int* rows, int count) const {

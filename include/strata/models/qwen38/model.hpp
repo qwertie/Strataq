@@ -15,7 +15,6 @@
 #include "strata/core/expert_source.hpp"
 #include "strata/core/geometry.hpp"
 #include "strata/core/peer_experts.hpp"
-#include "strata/core/remote_expert_opt.hpp"
 #include "strata/core/remote_experts.hpp"
 #include "strata/core/weights.hpp"
 #include "strata/models/qwen38/kernels/ngram.hpp"
@@ -26,9 +25,6 @@
 #include "strata/models/qwen38/prefill/prefill.hpp"
 #include "strata/models/qwen38/session.hpp"
 #include "strata/models/qwen38/verify.hpp"
-#if defined(STRATA_HAVE_DFLASH2)
-#include "strata/models/qwen38/dflash2.hpp"
-#endif
 
 #include <cuda_runtime.h>
 
@@ -141,13 +137,8 @@ public:
     /// and again after unload_drafter; false (and `err`) when it could not.
     bool load_drafter(std::string& err);
     /// Gets the layer split's stage whose card runs the MTP drafter, which binds that stage's weights and head; null
-    /// when the drafter is on CUDA0 (no split, or mtp_first).
-    GpuStage* get_drafter_stage() const { return last_st != nullptr && !mtp_first ? last_st : nullptr; }
-    /// Gets the draft vocabulary file DFlash2 binds its head from: the subset df2_vocab_resolve chose with DFlash2 alone
-    /// (`df2_solo`), else the MTP's (--mtp-draft-vocab, or <mtp>/draft_vocab.bin).
-    std::string get_df2_vocab_path() const;
-    /// Gets the VRAM DFlash2's own draft head and logits take when it binds (0 when it shares the MTP's head).
-    int64_t get_df2_head_bytes() const;
+    /// when the drafter is on CUDA0 (no split).
+    GpuStage* get_drafter_stage() const { return last_st; }
     /// Gets how many (layer, expert) pairs a live slot of their stage's expert cache holds (a slot past the live ones
     /// was given back).
     int64_t count_gpu_held() const;
@@ -179,8 +170,6 @@ public:
 
     /// Gets the stage that runs layer `l` with a layer split (0: CUDA0's).
     int stage_of(int64_t l) const;
-    /// Gets the bytes of the GDN state that one snapshot of session `s0` copies.
-    size_t gdn_snapshot_bytes(const strata::core::SessionState& s0) const;
     /// Gets the canonical tensors of layers [lb, le) that a card of a layer split loads into its arenas (the PLE's,
     /// which every card holds, and `card_skip` left out).
     std::set<std::string> get_layer_names(int64_t lb, int64_t le) const;
@@ -248,13 +237,10 @@ public:
     float* d_parts = nullptr;         ///< the CPU pool's expert outputs, K rows, on the device
     std::vector<std::unique_ptr<GpuStage>> stages;   ///< a layer split's later stages, in layer order
     GpuStage* last_st = nullptr;      ///< the last of `stages` (it holds the head), or null without a split
-    bool mtp_first = false;           ///< --pipeline-windows: the drafter runs on the first stage's card
-    bool df2_first = false;           ///< a layer split's DFlash2 runs on the first stage's card (STRATA_DF2_STAGE=first)
     std::vector<std::pair<int32_t, int32_t>> profile;          ///< CUDA0's (layer, expert) pairs, hottest first
     std::vector<std::pair<int32_t, int32_t>> profile_loaded;   ///< --expert-profile-save: the whole ranking as loaded
     bool pf_borrow = false;           ///< the prompt path borrows expert-cache slots instead of owning its buffers
     int64_t split_pf_mib = 0;         ///< a layer split's own prompt buffers per stage, MiB (0: none or borrowed)
-    int64_t pipe_window_mib = 0;      ///< --pipeline-windows: the second verifier each stage allocates, MiB
     std::vector<std::pair<int32_t, int32_t>> profile_all;      ///< a layer split's whole ranking, before stages' shares
     /// The layer ranges a session is carved in, one per stage (the engine's own session and each batch slot's alike)
     std::vector<std::pair<int64_t, int64_t>> session_layers;
@@ -265,20 +251,6 @@ public:
     /// --batch: each slot's session, one per stage
     std::vector<std::vector<std::unique_ptr<strata::core::SessionState>>> bslot_ss;
     strata::core::MtpDrafter mtp;
-#if defined(STRATA_HAVE_DFLASH2)
-    strata::core::Dflash2Drafter df2;   ///< --draft dflash2
-    bool use_df2 = false;
-    /// STRATA_BATCH_DF2: one drafter per batch slot (the solo drafter's pack, each its own ring)
-    std::vector<std::unique_ptr<strata::core::Dflash2Drafter>> slot_df2;
-    bool batch_df2 = false;           ///< the slots draft with DFlash2 (set once the slot drafters are allocated)
-#else
-    static constexpr bool use_df2 = false;
-    static constexpr bool batch_df2 = false;
-#endif
-    /// --draft dflash2 without --draft-fallback mtp: no MTP layer is loaded (o.mtp is cleared) and DFlash2 drafts alone
-    bool df2_solo = false;
-    std::string df2_vocab_file;       ///< the draft vocabulary DFlash2 alone binds its head from (get_df2_vocab_path)
-    bool df2_expect_share = false;    ///< DFlash2 will share the MTP drafter's draft head (offer_df2_head)
     /// The draft layer's geometry (the canonical model's MTP head), `static` because MtpDrafter keeps a reference; the
     /// batch slots' draft-KV copies use this one too
     static inline const strata::core::ModelGeometry draft_geometry = strata::core::kCompiledGeometry;
@@ -310,7 +282,6 @@ public:
     std::vector<strata::core::NibbleCache> nib_st;   ///< ... and each layer-split stage's, in `stages` order
     bool reserve_adapted = false;       ///< #496: the auto sizing lowered the reserve so a small card's cache fits
     std::array<strata::core::RemoteExperts, 3> remote_experts;   ///< --expert-cache-remote: the helper GPUs' caches
-    std::unique_ptr<strata::core::RemoteExpertOpt> remote_opt;   ///< --remote-expert-opt
     strata::core::PeerExperts peer;     ///< --peer-device: the second GPU's expert tier
     Drive drive;                        ///< the CPU pool's adapter, which the layers call with their missed experts
     strata::core::RouterLookahead lookahead;   ///< routing-aware prefetch of the file tier

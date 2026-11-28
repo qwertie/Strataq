@@ -2,8 +2,8 @@
 
 Speculative decoding: drafting, accepting and rejecting drafts, rolling back. Headers: `include/strata/common/spec/`.
 
-Only the Qwen3.8 engines use it. `window_planner.hpp` chooses what each verify window of `strata`'s two decode
-loops (`--serve` and `--spec`) holds: the MTP's drafts, a lookup window or a lookup chain. Qwen3.6's MTP steps and
+Only the Qwen3.8 engine uses it. `window_planner.hpp` chooses what each verify window of `strata-q38`'s decode step
+holds: the MTP's drafts, a lookup window or a lookup chain. Qwen3.6's MTP steps and
 DeepSeek's NextN drafts have no lookup and keep their own short loops.
 
 `step.hpp` is the decode step of [docs/MEMORY_MANAGER_PLAN.md](../../../docs/MEMORY_MANAGER_PLAN.md) (steps M3

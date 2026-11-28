@@ -23,14 +23,11 @@ struct Inputs {
     int64_t prompt_buffers_mib = 0; ///< the prompt path's own buffers (0 when they are borrowed from the cache)
     bool later = false;             ///< a stage after the first
     bool drafter = false;           ///< the stage that carries the MTP drafter and the head
-    int64_t pipe_window_mib = 0;    ///< --pipeline-windows: a second verifier on every stage
-    int64_t pipe_snap_mib = 0;      ///< --pipeline-windows 2 or more: the first stage's second GDN state
 };
 
 /// What the plan keeps free on the card, in MiB (stage_room's `reserve` before the shift).
 inline int64_t reserve_mib(const Inputs& in) {
-    return in.base_reserve_mib + in.prompt_buffers_mib + (in.later ? kWindowMib : in.pipe_snap_mib) + in.pipe_window_mib +
-           (in.drafter ? kDrafterMib : 0);
+    return in.base_reserve_mib + in.prompt_buffers_mib + (in.later ? kWindowMib : 0) + (in.drafter ? kDrafterMib : 0);
 }
 
 /// The room the cache may use: the free bytes less the reserve, never below 0.

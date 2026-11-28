@@ -96,11 +96,11 @@ struct KvaConfig {
     }
 
     /// Why this read cannot take the approximate path, or nullptr when it can: a cold read of one prompt (not a
-    /// continuation, no layer split, no pictures, no DFlash2 taps), on an engine that allows it, long enough for a
+    /// continuation, no layer split, no pictures), on an engine that allows it, long enough for a
     /// suffix to leave approximated positions behind it.  `routine` (optional) is set when the reason is an
     /// everyday one (a continuation, a short prompt) that is not worth a log line.
     const char* decline(const KvaEngine& e, int64_t pos0, int64_t n, int64_t lb, int64_t le, int64_t n_layers,
-                        bool pictures = false, bool taps = false, bool* routine = nullptr,
+                        bool pictures = false, bool* routine = nullptr,
                         bool unmeasured_shape = false) const {
         if (routine) *routine = false;
         if (!on) return "off (STRATA_KVA is not 1)";
@@ -112,7 +112,6 @@ struct KvaConfig {
         }
         if (lb != 0 || (le >= 0 && le != n_layers)) return "a layer split (not the whole trunk)";
         if (pictures) return "a prompt with pictures";
-        if (taps) return "the DFlash2 drafter reads the late layers' hidden states";
         if (n < min_prompt) {
             if (routine) *routine = true;
             return "the prompt is shorter than STRATA_KVA_MIN_PROMPT";

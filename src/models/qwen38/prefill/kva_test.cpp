@@ -76,31 +76,30 @@ int main() {
         CHECK(c.decline(eng, 0, 14600, 0, -1, 48) == nullptr);
         CHECK(c.decline(eng, 0, 14600, 0, 48, 48) == nullptr);   // le == n_layers is the whole trunk too
         // a continuation (turn 2 of a chat, a resumed prompt): routine
-        CHECK(is(c.decline(eng, 9000, 14600, 0, -1, 48, false, false, &routine), "a continuation read (pos0 != 0)") && routine);
+        CHECK(is(c.decline(eng, 9000, 14600, 0, -1, 48, false, &routine), "a continuation read (pos0 != 0)") && routine);
         // short prompts and a prompt the tail would swallow: routine
-        CHECK(is(c.decline(eng, 0, 3000, 0, -1, 48, false, false, &routine), "the prompt is shorter than STRATA_KVA_MIN_PROMPT") && routine);
+        CHECK(is(c.decline(eng, 0, 3000, 0, -1, 48, false, &routine), "the prompt is shorter than STRATA_KVA_MIN_PROMPT") && routine);
         CHECK(c.decline(eng, 0, 4096, 0, -1, 48) == nullptr);   // 4096 is the first prompt that is long enough
         set_env("STRATA_KVA_SUFFIX", "5000");   // a longer tail swallows a prompt of 5000 and not one of 5065
         { const KvaConfig s = kva_config_from_env();
-          CHECK(is(s.decline(eng, 0, 5000, 0, -1, 48, false, false, &routine), "the suffix leaves too few positions to approximate") && routine);
+          CHECK(is(s.decline(eng, 0, 5000, 0, -1, 48, false, &routine), "the suffix leaves too few positions to approximate") && routine);
           CHECK(s.decline(eng, 0, 5065, 0, -1, 48) == nullptr); }
         unset_env("STRATA_KVA_SUFFIX");
         // not routine: the user may want to know
-        CHECK(is(c.decline(eng, 0, 14600, 24, -1, 48, false, false, &routine), "a layer split (not the whole trunk)") && !routine);
+        CHECK(is(c.decline(eng, 0, 14600, 24, -1, 48, false, &routine), "a layer split (not the whole trunk)") && !routine);
         CHECK(is(c.decline(eng, 0, 14600, 0, 24, 48), "a layer split (not the whole trunk)"));
         CHECK(is(c.decline(eng, 0, 14600, 0, -1, 48, true), "a prompt with pictures"));
-        CHECK(is(c.decline(eng, 0, 14600, 0, -1, 48, false, true), "the DFlash2 drafter reads the late layers' hidden states"));
         // the engine rules the whole process out (batch slots, a layer split, a peer device)
         KvaEngine blocked = eng;
         blocked.blocked = "batch slots (--batch)";
-        CHECK(is(c.decline(blocked, 0, 14600, 0, -1, 48, false, false, &routine), "batch slots (--batch)") && !routine);
+        CHECK(is(c.decline(blocked, 0, 14600, 0, -1, 48, false, &routine), "batch slots (--batch)") && !routine);
         // a model whose shape KVA was not measured on (not 48 layers / 512 experts) is turned away, not warned about;
         // the routine reasons (a short prompt, a continuation) still come first
-        CHECK(is(c.decline(eng, 0, 14600, 0, -1, 40, false, false, &routine, true), kKvaShapeReason) && !routine);
-        CHECK(is(c.decline(eng, 0, 3000, 0, -1, 40, false, false, &routine, true), "the prompt is shorter than STRATA_KVA_MIN_PROMPT") && routine);
-        CHECK(c.decline(eng, 0, 14600, 0, -1, 48, false, false, &routine, false) == nullptr);   // the measured shape applies
+        CHECK(is(c.decline(eng, 0, 14600, 0, -1, 40, false, &routine, true), kKvaShapeReason) && !routine);
+        CHECK(is(c.decline(eng, 0, 3000, 0, -1, 40, false, &routine, true), "the prompt is shorter than STRATA_KVA_MIN_PROMPT") && routine);
+        CHECK(c.decline(eng, 0, 14600, 0, -1, 48, false, &routine, false) == nullptr);   // the measured shape applies
         set_env("STRATA_KVA_ANY_MODEL", "1");   // the research override allows it (prefill.cpp then warns once)
-        { const KvaConfig a = kva_config_from_env(); CHECK(a.any_model && a.decline(eng, 0, 14600, 0, -1, 40, false, false, nullptr, true) == nullptr); }
+        { const KvaConfig a = kva_config_from_env(); CHECK(a.any_model && a.decline(eng, 0, 14600, 0, -1, 40, false, nullptr, true) == nullptr); }
         unset_env("STRATA_KVA_ANY_MODEL");
         CHECK(!kva_config_from_env().any_model);
         // capture wins over the rest
