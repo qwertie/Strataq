@@ -9,9 +9,6 @@
 #include "strata/core/run_manifest.hpp"
 #include "strata/common/artifact/gguf_reader.hpp"
 #include "strata/common/kernels/prefill/pf_fused_override.hpp"
-#if defined(STRATA_HAVE_DFLASH2)
-#include "strata/models/qwen38/kernels/dflash2.hpp"
-#endif
 #include "strata/models/qwen38/prefill/warm_policy.hpp"
 #include "strata/models/qwen38/prefill/share_rules.hpp"
 #include "strata/core/arch_defaults.hpp"
@@ -1455,40 +1452,7 @@ strata::kernels::QsaAttnPools pools_of(const strata::kernels::KvHostPools& h, co
 
 Prefill::Prefill() : impl_(new Impl) {}
 Prefill::~Prefill() {
-    clear_taps();
     release();
-}
-
-bool Prefill::reserve_taps(const std::vector<int>& layers, int64_t cap_rows, int64_t n_embd, std::string& err) {
-#if defined(STRATA_HAVE_DFLASH2)
-    tap_layers_ = layers;
-    tap_cap_ = cap_rows;
-    if (tap_dev_ != nullptr) return true;
-    size_t mine = 0;   // a layer split's stage keeps the taps of the layers it runs (the others arrive from the other stages)
-    for (int l : layers) if (l >= stage_lb_ && (stage_le_ < 0 || l < stage_le_)) ++mine;
-    if (mine == 0) return true;
-    if (strata::core::allocate_device((void**) &tap_dev_, (size_t) cap_rows * mine * (size_t) n_embd * 4,
-                                      {"other", "Device allocations", "Prompt processing"}) != cudaSuccess) {
-        (void) cudaGetLastError();
-        tap_dev_ = nullptr;
-        err = "the prompt staging of the DFlash2 taps does not fit in VRAM";
-        return false;
-    }
-    return true;
-#else
-    (void) layers; (void) cap_rows; (void) n_embd;
-    err = "no DFlash2 in this build";
-    return false;
-#endif
-}
-
-void Prefill::clear_taps() {
-    if (tap_dev_ != nullptr) {
-        strata::core::release_device(tap_dev_);
-        tap_dev_ = nullptr;
-    }
-    tap_layers_.clear();
-    on_taps = nullptr;
 }
 
 void Prefill::reset() {
@@ -2429,13 +2393,6 @@ int64_t Prefill::chunk() const { return impl_->T; }
 
 void Prefill::set_session(core::SessionState& ss) { impl_->ss = &ss; }
 
-void Prefill::set_ring_room_active(bool on) {
-    ring_room_active_ = on;
-    Impl& m = *impl_;
-    // the slots' own pointers do not move: the room is taken and given back by the ring's count alone
-    if (m.ring_room > 0) m.ring = on ? m.ring_room_at + m.ring_room : m.ring_rule;
-}
-
 bool Prefill::idle(std::string& err) {
     Impl& m = *impl_;
     if ((m.cs && cudaStreamSynchronize(m.cs) != cudaSuccess) ||
@@ -2660,47 +2617,6 @@ void peer_had_signs(PeerPrefill& P) {
 }
 }  // namespace
 
-bool Prefill::set_stage_helper(Prefill* helper, std::string& err) {
-    Impl& m = *impl_;
-    m.help_pp.reset();
-    if (helper == nullptr || helper == this || !split_help_env()) return true;
-    const Impl& h = *helper->impl_;
-    if (m.device < 0 || h.device < 0 || h.device == m.device || !mmq_plan().any) return true;
-    auto pp = std::make_unique<PeerPrefill>();
-    pp->peer = nullptr;   // stream-only: it holds no experts, it streams a share of this stage's
-    pp->compact = true;
-    pp->p2p = false;      // the mapped host route, whether or not the cards could reach each other (measured there)
-    pp->out_pipe = true;
-    bool ok;
-    {
-        const core::OnDevice on(m.device);
-        ok = cudaEventCreateWithFlags(&pp->ev_in, cudaEventDisableTiming) == cudaSuccess;
-    }
-    int prev = 0;
-    cudaGetDevice(&prev);
-    pp->dev = h.device;
-    cudaSetDevice(pp->dev);
-    ok = ok && cudaStreamCreateWithFlags(&pp->s, cudaStreamNonBlocking) == cudaSuccess &&
-         cudaStreamCreateWithFlags(&pp->s_out, cudaStreamNonBlocking) == cudaSuccess &&
-         cudaStreamCreateWithFlags(&pp->s_cp, cudaStreamNonBlocking) == cudaSuccess &&
-         cudaEventCreateWithFlags(&pp->ev_done, cudaEventDisableTiming) == cudaSuccess;
-    for (int i = 0; ok && i < PeerPrefill::kGrpEv; ++i)
-        ok = cudaEventCreateWithFlags(&pp->ev_grp[i], cudaEventDisableTiming) == cudaSuccess;
-    for (int b = 0; ok && b < 2; ++b) ok = cudaEventCreateWithFlags(&pp->ev_dm[b], cudaEventDisableTiming) == cudaSuccess;
-    // the ring's events; its slots are the helper stage's own ring, bound per prompt (bind_stage_helper)
-    pp->pcopied.assign((size_t) kSplitHelpRing, nullptr);
-    pp->pused.assign((size_t) kSplitHelpRing, nullptr);
-    for (int i = 0; ok && i < kSplitHelpRing; ++i)
-        ok = cudaEventCreateWithFlags(&pp->pcopied[(size_t) i], cudaEventDisableTiming) == cudaSuccess &&
-             cudaEventCreateWithFlags(&pp->pused[(size_t) i], cudaEventDisableTiming) == cudaSuccess;
-    if (ok) peer_had_signs(*pp);   // APR: on the helper's device
-    cudaSetDevice(prev);
-    if (!ok) { err = "prefill: the layer split's prompt help (streams and events)"; return false; }
-    helper_ = helper;
-    m.help_pp = std::move(pp);
-    return true;
-}
-
 // A one-chunk prompt of T tokens on a layer split: binds the stream-only peer to the helper stage's prompt buffers
 // (that stage idles until this one hands its rows over).  False when it cannot help this prompt.
 bool Prefill::bind_stage_helper(int64_t T) {
@@ -2768,200 +2684,8 @@ bool Prefill::bind_stage_helper(int64_t T) {
     return true;
 }
 
-bool Prefill::set_peer(core::PeerExperts* peer, int64_t cap_rows, std::string& err) {
-    Impl& m = *impl_;
-    if (peer == nullptr || !peer->valid()) { m.pp.reset(); return true; }
-    // Without P2P the activations and the result rows take the mapped host route of the layer split's helper
-    // (STRATA_PF_PEER_HOST=0: refuse as before, the prompt path then stays on the primary)
-    const bool host_route_ok = [] { const char* v = std::getenv("STRATA_PF_PEER_HOST"); return v == nullptr || std::atoi(v) != 0; }();
-    if (!peer->p2p() && !host_route_ok) { err = "prefill peer: the two GPUs cannot access each other (no P2P)"; return false; }
-    if (!mmq_plan().any) { err = "prefill peer: needs the MMQ prompt path"; return false; }
-    {   // NVFP4: the peer's MMQ products have no per-expert scales (grp_tail, row_sd); its decode rows do
-        const auto& lay = strata::kernels::cpu::expert_layout();
-        for (const auto& f : lay.fmt)
-            if (lay.native && f.tail_off) { err = "prefill peer: not for NVFP4 experts yet"; return false; }
-    }
-    if (strata::kernels::cpu::hadamard_spec().any()) {   // APR: the peer's MMQ share does not rotate; declined
-        std::fprintf(stderr, "strata: prefill peer: not used for a Hadamard-folded (APR) pack\n");
-        m.pp.reset();
-        return true;
-    }
-    auto pp = std::make_unique<PeerPrefill>();
-    pp->peer = peer;
-    pp->p2p = peer->p2p();
-    pp->T_max = m.T_max;
-    pp->cap_rows = std::max<int64_t>(1, std::min<int64_t>(cap_rows, m.T_max * K));
-    const int64_t R = pp->cap_rows;
-    const MmqPlan& mp = mmq_plan();
-    if (cudaEventCreateWithFlags(&pp->ev_in, cudaEventDisableTiming) != cudaSuccess) { err = "prefill peer: event"; return false; }
-    if (!pp->p2p) {   // the host route's copies on a stream of their own (STRATA_PF_PEER_XSTREAM=0: the compute stream)
-        const char* xv = std::getenv("STRATA_PF_PEER_XSTREAM");
-        if ((xv == nullptr || std::atoi(xv) != 0) &&
-            (cudaStreamCreateWithFlags(&pp->x_stream, cudaStreamNonBlocking) != cudaSuccess ||
-             cudaEventCreateWithFlags(&pp->ev_x, cudaEventDisableTiming) != cudaSuccess)) {
-            err = "prefill peer: copy stream";
-            return false;
-        }
-    }
-    int prev = 0;
-    cudaGetDevice(&prev);
-    pp->dev = peer->device();
-    cudaSetDevice(pp->dev);
-    bool ok = cudaStreamCreateWithFlags(&pp->s, cudaStreamNonBlocking) == cudaSuccess &&
-              cudaEventCreateWithFlags(&pp->ev_done, cudaEventDisableTiming) == cudaSuccess;
-    {
-        const char* v = std::getenv("STRATA_PF_PEER_OUT_PIPE");   // =0: one copy after the last group (the A/B)
-        pp->out_pipe = (v == nullptr || std::atoi(v) != 0) || pp->compact;   // compact always pipes
-    }
-    if (ok && pp->out_pipe) {
-        ok = cudaStreamCreateWithFlags(&pp->s_out, cudaStreamNonBlocking) == cudaSuccess;
-        for (int i = 0; ok && i < PeerPrefill::kGrpEv; ++i)
-            ok = cudaEventCreateWithFlags(&pp->ev_grp[i], cudaEventDisableTiming) == cudaSuccess;
-    }
-    auto take = [&](size_t bytes) -> void* {
-        void* p = nullptr;
-        if (!ok || strata::core::allocate_device(&p, bytes,
-            {"other", "Device allocations", "Prompt processing"}) != cudaSuccess) { ok = false; return nullptr; }
-        pp->owned.push_back(p);
-        return p;
-    };
-    pp->mixed = (float*) take((size_t) m.T_max * N * 4);
-    {
-        const char* v = std::getenv("STRATA_PF_PEER_COMPACT");
-        pp->compact = (v == nullptr || std::atoi(v) != 0) || !pp->p2p;   // the layer-sized path copies over P2P only
-    }
-    if (pp->compact) {
-        pp->cap_rows = m.T_max * K;   // no row cap: only the row tables grow with it
-        pp->G = m.T_max;              // one expert never has more rows than the chunk has tokens
-        const int64_t Gr = pp->G;
-        pp->Xq_g = take(mmq::q8_bytes(Gr, N));
-        pp->Hq_g = take(mmq::q8_bytes(Gr, kFF));
-        pp->GU_g = (float*) take((size_t) Gr * kFF2 * 4);
-        pp->H_g = (float*) take((size_t) Gr * kFF * 4);
-        pp->Dm_b[0] = (float*) take((size_t) Gr * N * 4);
-        pp->Dm_b[1] = (float*) take((size_t) Gr * N * 4);
-        for (int b = 0; b < 2 && ok; ++b) ok = cudaEventCreateWithFlags(&pp->ev_dm[b], cudaEventDisableTiming) == cudaSuccess;
-        const char* fs = std::getenv("STRATA_PF_PEER_STREAM");
-        pp->ps_frac = fs ? std::atof(fs) : 0.35;   // measured: 0.25-0.5 all ~1950-1970 at 32K, 0.35 best
-        if (pp->ps_frac > 0.0 && !mp.fallback && m.T_max >= stream_all_min()) {
-            pp->RP = 48;
-            if (const char* pr = std::getenv("STRATA_PF_PEER_RING"); pr != nullptr) pp->RP = std::atoi(pr);
-            pp->pstage.assign((size_t) pp->RP, nullptr);
-            pp->pcopied.assign((size_t) pp->RP, nullptr);
-            pp->pused.assign((size_t) pp->RP, nullptr);
-            pp->plive.assign((size_t) pp->RP, 0);
-            ok = ok && cudaStreamCreateWithFlags(&pp->s_cp, cudaStreamNonBlocking) == cudaSuccess;
-            for (int i = 0; ok && i < pp->RP; ++i) {
-                pp->pstage[(size_t) i] = (uint8_t*) take((size_t) MAXBLOB());
-                ok = ok && cudaEventCreateWithFlags(&pp->pcopied[(size_t) i], cudaEventDisableTiming) == cudaSuccess &&
-                     cudaEventCreateWithFlags(&pp->pused[(size_t) i], cudaEventDisableTiming) == cudaSuccess;
-            }
-        } else {
-            pp->ps_frac = 0.0;
-        }
-    } else {
-        pp->Xq = take(mmq::q8_bytes(R, N));
-        pp->Hq = take(mmq::q8_bytes(R, kFF));
-        pp->GU = (float*) take((size_t) R * kFF2 * 4);
-        pp->H = (float*) take((size_t) R * kFF * 4);
-        pp->Dm = (float*) take((size_t) R * N * 4);
-    }
-    const int64_t Rt = pp->cap_rows;
-    if (!pp->p2p && pp->compact) {
-        const char* v = std::getenv("STRATA_PF_PEER_SUMS");
-        pp->sums = v == nullptr || std::atoi(v) != 0;
-    }
-    if (pp->sums) {
-        const char* v = std::getenv("STRATA_PF_PEER_F16");
-        pp->f16 = (v == nullptr || std::atoi(v) != 0) && N % 8 == 0;
-        if (pp->f16) pp->sum16 = (uint16_t*) take((size_t) m.T_max * N * 2);
-        const char* gv = std::getenv("STRATA_PF_PEER_GATHER");
-        pp->gather = gv == nullptr || std::atoi(gv) != 0;
-        if (pp->gather) {   // tokens and starts (<= 2 rows + 1 per group) and rows: <= 3 x the rows + 2 per expert
-            pp->adds_cap = 3 * (size_t) Rt + 2 * NE + 64;
-            pp->adds = (int32_t*) take(pp->adds_cap * 4);
-            pp->tcur.assign((size_t) m.T_max, 0);
-        }
-        pp->sum = (float*) take((size_t) m.T_max * N * 4);
-        pp->wk = (float*) take((size_t) m.T_max * K * 4);
-        pp->pair = (int32_t*) take((size_t) Rt * 4);
-    }
-    pp->src = (int32_t*) take((size_t) Rt * 4);
-    const uint64_t ident_rows = mmq::mmq_ids_table_rows((uint64_t) Rt, (uint64_t) m.T_max);   // + the stream-k fixup's over-read
-    if (ident_rows == 0) ok = false;
-    pp->ident = (int32_t*) take((size_t) ident_rows * 4);
-    pp->bounds = (int32_t*) take((size_t) (2 * (NE + NE / MMQ_GROUP + 2)) * 4);
-    pp->grp_gu = (uint8_t*) take(MMQ_GROUP * mp.gu_max + MMQ_TAIL);
-    pp->grp_d = (uint8_t*) take(MMQ_GROUP * mp.d_max + MMQ_TAIL);
-    if (ok) {
-        pp->ctx = std::make_unique<mmq::Context>();
-        pp->run_ctx = pp->ctx.get();
-        mmq::iota(pp->ident, (int64_t) ident_rows, pp->s);
-        peer_had_signs(*pp);   // APR: on the peer's device
-        ok = cudaStreamSynchronize(pp->s) == cudaSuccess;
-    }
-    if (ok && !pp->p2p) {   // the host route's mapped buffers, sized for the largest chunk
-        auto host = [&](auto*& ptr, size_t& cap, size_t n) {
-            if (strata::core::allocate_host((void**) &ptr, n * sizeof(*ptr), cudaHostAllocPortable |
-                cudaHostAllocMapped,
-                {"other", "Device allocations", "Prompt processing"}) != cudaSuccess) {
-                cudaGetLastError();
-                ptr = nullptr;
-                ok = false;
-                return;
-            }
-            cap = n;
-        };
-        size_t bounds_cap = 0, w_cap = 0, sum_cap = 0, pair_cap = 0;
-        size_t x16_cap = 0, sum16_cap = 0;
-        if (pp->f16) host(pp->host_x16, x16_cap, (size_t) m.T_max * N);
-        else host(pp->host_x, pp->host_x_cap, (size_t) m.T_max * N);
-        if (ok && pp->sums) {
-            host(pp->host_w, w_cap, (size_t) m.T_max * K);
-            if (ok && pp->f16) host(pp->host_sum16, sum16_cap, (size_t) m.T_max * N);
-            else if (ok) host(pp->host_sum, sum_cap, (size_t) m.T_max * N);
-            if (ok) host(pp->host_pair, pair_cap, (size_t) pp->cap_rows);
-            size_t adds_cap = 0;
-            if (ok && pp->gather) host(pp->host_adds, adds_cap, pp->adds_cap);
-        } else if (ok) {
-            host(pp->host_rows, pp->host_rows_cap, (size_t) pp->cap_rows * N);
-        }
-        if (ok) host(pp->host_src, pp->host_src_cap, (size_t) pp->cap_rows);
-        if (ok) host(pp->host_bounds, bounds_cap, PeerPrefill::kHostBounds);
-        if (!ok) {
-            cudaSetDevice(prev);
-            err = "prefill peer: the host route's pinned buffers (" +
-                  std::to_string(((size_t) pp->cap_rows * N * 4 + (size_t) m.T_max * N * 4) >> 20) + " MiB) do not fit in RAM";
-            return false;
-        }
-    }
-    size_t fb = 0, tb = 0;
-    cudaMemGetInfo(&fb, &tb);
-    cudaSetDevice(prev);
-    if (!ok) { err = "prefill peer: the peer's buffers do not fit (raise --peer-reserve-mib or lower --peer-prefill-rows)"; return false; }
-    std::fprintf(stderr, "strata prefill: peer GPU %d computes its experts' rows of each prompt chunk (up to %lld rows per "
-                         "layer%s%s); %zu MiB left free on it\n", pp->dev, (long long) pp->cap_rows,
-                 pp->p2p ? "" : (pp->sums ? (pp->f16 ? ", no P2P: through mapped host memory in FP16, one weighted sum per token back"
-                                                     : ", no P2P: through mapped host memory, one weighted sum per token back")
-                                          : ", no P2P: through mapped host memory"),
-                 pp->compact ? (pp->ps_frac > 0.0 ? (", compact group buffers, streams " + std::to_string((int) (pp->ps_frac * 100 + 0.5)) +
-                                                    "% of the primary's streamed experts through a " + std::to_string(pp->RP) + "-slot ring").c_str()
-                                                 : ", compact group buffers") : "", fb >> 20);
-    // APR: this path rotates on the peer too (peer_had_signs), but no P2P pair has run it end to end with a
-    // Hadamard-folded pack yet (the validated two-GPU runs had no P2P, so their prompts stayed on the first GPU)
-    if (strata::kernels::cpu::hadamard_spec().any())
-        std::fprintf(stderr, "strata prefill: warning: prompt processing on a P2P peer GPU is not validated end to end "
-                             "with Hadamard-folded experts yet\n");
-    m.pp = std::move(pp);
-    return true;
-}
-
 void Prefill::set_pinned_share(double share) { g_pinned_share = share; }
 void Prefill::set_ring_override(int slots) { g_ring_override = slots > 0 ? slots : 0; }
-void Prefill::set_ring_budget(int slots, int64_t small_max) {
-    g_ring_budget = slots > 0 ? slots : 0;
-    g_ring_small_max = small_max > 0 ? small_max : 0;
-}
 double Prefill::pinned_share() { return g_pinned_share; }
 int64_t Prefill::stream_all_min_tokens() { return stream_all_min(); }
 
@@ -2996,13 +2720,10 @@ double pipe_value() {
 }
 }  // namespace
 void Prefill::set_pipe(double value) { g_pipe = value; }
-void Prefill::set_pipe_request(double value) { g_pipe_req = value; }
-double Prefill::pipe_setting() { return pipe_value(); }
 namespace {
 // b/a in whole tokens: 0 for none (or NaN), at most 2^20 (llround of an infinity is undefined - `pipe=inf` parses)
 int64_t ratio_tokens(double ratio) { return ratio > 0.0 ? (int64_t) std::llround(std::min(ratio, 1048576.0)) : 0; }
 }  // namespace
-int64_t Prefill::pipe_key(double value) { return !(value > 0.0) ? -1 : value <= 1.0 ? 0 : ratio_tokens(value); }
 // In whole tokens (r rounded): integer sums and a 97/100 test, so a near-tie cannot fall one way in one build and the
 // other way in another (the same chunks as the double version for every whole r: an exact 97% is not better).
 int64_t Prefill::pipeline_chunk(int64_t n, int64_t cap, int stages, double ratio) {
@@ -3046,22 +2767,12 @@ int64_t Prefill::plan_chunk(int64_t n) const {
     if (pipe <= 0.0 || hand_in_ != nullptr || stages < 2) return 0;
     return pipeline_chunk(n, impl_->T, stages, pipe > 1.0 ? pipe : 0.0);
 }
-void Prefill::force_chunk(int64_t chunk, bool single, bool planned) {
-    force_chunk_ = chunk;
-    force_single_ = single;
-    force_planned_ = planned;
-}
 void Prefill::log_plan(int64_t n, int64_t chunk, int stages) {
     const double pipe = pipe_value();
     std::fprintf(stderr, "strata prefill: %lld tokens in %lld-token chunks over %d stages (--prefill-pipe %s)\n",
                  (long long) n, (long long) chunk, stages,
                  pipe > 1.0 ? (std::to_string((long long) ratio_tokens(pipe)) + ": b/a").c_str()
                             : "1: today's chunk count, evened out");
-}
-int64_t Prefill::chain_experts_streamed() const {
-    int64_t sum = 0;
-    for (const Prefill* p = this; p != nullptr; p = p->next_) sum += p->stats_.experts_streamed;
-    return sum;
 }
 
 uint64_t Prefill::bytes_needed(const core::ModelGeometry& g, const core::SessionState& ss, int64_t chunk, bool src) {
@@ -3144,26 +2855,6 @@ uint64_t Prefill::bytes_needed_no_ring(const core::ModelGeometry& g, const core:
     return bytes_needed(g, ss, chunk, src) - (uint64_t) stage_slots((size_t) chunk) * (uint64_t) MAXBLOB();
 }
 
-int64_t Prefill::ring_default_slots() {
-    const int r = g_pinned_share >= 0.9 ? (fused_ring() ? 1024 : 384) : 96;
-    return (int64_t) std::min(r, ring_cap());
-}
-
-int64_t Prefill::ring_cap_for(int64_t old_chunk) {
-    // 0.1.39b (#583, measured on the RTX 5070): giving up ring slots for a bigger chunk paid where 0.1.39's ring held
-    // the chunk at 4096 or less (IQ3_XXS 32K prompts +14% to +26%: 4096/384 -> 6656/56) and lost where 0.1.39 already
-    // read 6144-token chunks (the Coder: 6144/384 -> 7936/199, 32K -12%).  From kKeepRingChunk on the ring keeps its
-    // 0.1.39 size and the scan only looks for a bigger chunk next to it (IQ3_XXS unpinned 6144/96 -> 6912/96: +9%).
-    constexpr int64_t kKeepRingChunk = 6144;
-    return old_chunk >= kKeepRingChunk ? ring_default_slots() : ring_max_slots();
-}
-
-// the unpinned arm keeps its measured 96 (the PR's rule; the byte budget would have been ~49 slots on IQ3_S)
-int64_t Prefill::ring_max_slots() {
-    return g_pinned_share >= 0.9 ? (int64_t) ring_budget_slots() : (int64_t) std::min(96, ring_cap());
-}
-
-int64_t Prefill::ring_slots_for(int64_t chunk) { return ring_slots((size_t) chunk); }
 void Prefill::set_cpu_pool(kernels::cpu::ExpertPool* pool) { cpu_pool_ = pool; }
 void Prefill::arm_cpu_share(bool applies, bool by_default) {
 #if !defined(STRATA_USE_HIP) && !defined(STRATA_HIP_GFX906)
@@ -3195,34 +2886,7 @@ void Prefill::arm_cpu_share(bool applies, bool by_default) {
     if (applies && cpu_share_on()) g_stream_min_share = cpu_share_max();
 }
 
-void Prefill::set_share_blocked(bool blocked) { g_share_blocked.store(blocked, std::memory_order_release); }
-bool Prefill::ring_bytes_enabled() { return ring_bytes_on(); }
 size_t Prefill::slot_guard_bytes() { return mmq::direct_slot_guard(); }
-
-bool Prefill::nibble_prompt_check(std::string& why) {
-    const auto& lay = strata::kernels::cpu::expert_layout();
-    if (mmq::direct_mode() != 0) {
-        why = "STRATA_MMQ_DIRECT (the prompt MMQ would read the 4-bit slots in place)";
-        return false;
-    }
-    for (int64_t l = 0; lay.native && l < (int64_t) lay.fmt.size(); ++l) {
-        if (!core::nibble::layer(l).on) continue;
-        const auto& f = lay.fmt[(size_t) l];
-        const char* w = !mmq_plan().any || (size_t) l >= mmq_plan().layer.size() || !mmq_plan().layer[(size_t) l]
-                            ? "no prompt MMQ for it (the FP16 path dequantizes GGUF blocks)"
-                        : mmq_plan().wmma_only[(size_t) l] ? "the WMMA tiles read GGUF blocks"
-                        : fused::native_supported(f.gu_type, f.d_type) ? "the fused prompt kernels read GGUF blocks"
-                        : mmq::matrix_bytes(f.gu_type, kFF2, N) != (size_t) core::nibble::kRows * f.gu_row ||
-                                  mmq::matrix_bytes(f.d_type, N, kFF) != f.bytes - f.down_off
-                            ? "MMQ's matrices are not the blob's [gate | up] and down"
-                            : nullptr;
-        if (w != nullptr) {
-            why = "layer " + std::to_string(l) + ": " + w;
-            return false;
-        }
-    }
-    return true;
-}
 
 namespace {
 
@@ -3518,7 +3182,7 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
     const int64_t kva_suffix = kva.effective_suffix();
     bool kva_routine = false;
     const char* kva_why_not = kva.decline(kva_eng, pos0, n, LB, LE < 0 ? -1 : LE, (int64_t) g.n_layers,
-                                          embd_rows != nullptr, !tap_layers_.empty(), &kva_routine,
+                                          embd_rows != nullptr, &kva_routine,
                                           g.n_layers != 48 || g.n_expert != 512);
     if (kva_why_not == nullptr && (g.n_layers != 48 || g.n_expert != 512)) {
         // STRATA_KVA_ANY_MODEL=1 (research): allowed on a shape KVA was not measured on, with a warning once
@@ -3642,26 +3306,6 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
     int ple_buf = 0;
 
     if (hand_in_ == nullptr) stopped_at_ = -1;
-#if defined(STRATA_HAVE_DFLASH2)
-    std::vector<int> tap_slot;
-    // the taps of the layers THIS stage runs (the whole model without a split), at [row][its taps][n_embd]; on a split the callback of each stage
-    // gets its own share and the engine lands them on the drafter's card
-    tap_local_.clear();
-    for (int l : tap_layers_) if (l >= stage_lb_ && (stage_le_ < 0 || l < stage_le_) && l < g.n_layers - 1) tap_local_.push_back(l);
-    if (!tap_local_.empty()) {
-        if (tap_dev_ == nullptr &&
-            strata::core::allocate_device((void**) &tap_dev_, (size_t) tap_cap_ * tap_local_.size() * (size_t)
-                g.n_embd * 4,
-                {"other", "Device allocations", "Prompt processing"}) != cudaSuccess) {
-            (void) cudaGetLastError();
-            tap_dev_ = nullptr;
-            err = "prefill: the DFlash2 tap staging does not fit in VRAM";
-            return false;
-        }
-        tap_slot.assign((size_t) g.n_layers, -1);
-        for (size_t i = 0; i < tap_local_.size(); ++i) tap_slot[(size_t) tap_local_[i]] = (int) i;
-    }
-#endif
     for (int64_t c0 = 0; c0 < n; c0 += C) {
         if (should_stop && should_stop()) { err = "cancelled"; return false; }
         // the first stage: end the run before this chunk (every chunk before it is handed on; the caller's drain
@@ -3689,14 +3333,6 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
             kva_floor_ = p0 + T;   // the chunks are a prefix of the run: this is the first position with real rows
         }
         core::progress_at("reading the prompt (batched): preparing the chunk from token", p0);   // #251
-#if defined(STRATA_HAVE_DFLASH2)
-        // DFlash2 prompt taps: the rows of this chunk at positions >= tap_first_ (the drafter looks back one window)
-        const int64_t tap_t0 = tap_dev_ != nullptr && !tap_local_.empty() ? std::min<int64_t>(T, std::max<int64_t>(0, tap_first_ - p0)) : T;
-        const int64_t tap_rows = T - tap_t0;
-        if (tap_rows > tap_cap_) { err = "prefill: the DFlash2 tap staging is smaller than the chunk's tapped rows"; return false; }
-#else
-        const int64_t tap_t0 = 0, tap_rows = 0;
-#endif
         ++stats_.chunks;
         pt.mark(kPfStart, cs);
         const auto tsetup = Clock::now();
@@ -6403,11 +6039,6 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                 }
                 if (steered && !cv_fused)   // --control-vector-scaled
                     strata::kernels::cvec_apply(m.R, l, T, D, nullptr, 0, nullptr, 0, false, m.cs);
-#if defined(STRATA_HAVE_DFLASH2)
-                if (half == 1 && tap_rows > 0 && tap_slot[(size_t) l] >= 0)   // DFlash2: this layer's completed output, mean of the streams
-                    strata::kernels::df2_tap_rows(m.R + (size_t) tap_t0 * D, tap_dev_ + (size_t) tap_slot[(size_t) l] * N, (int64_t) tap_local_.size() * N, N,
-                                                  (int) HC, (int) tap_rows, m.cs);
-#endif
             }
         }
         if (!ple_land()) return false;   // a stage that ends before layer 1: the rows land anyway, the next gather starts
@@ -6515,12 +6146,6 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                 std::fclose(f);
             }
         }
-#if defined(STRATA_HAVE_DFLASH2)
-        if (tap_rows > 0 && on_taps) {
-            if (cudaStreamSynchronize(m.cs) != cudaSuccess) { err = std::string("prefill: ") + cudaGetErrorString(cudaGetLastError()); return false; }
-            if (!on_taps(tap_dev_, tap_rows, p0 + tap_t0, err)) return false;
-        }
-#endif
         if (on_chunk || on_stage_chunk) {
             const auto toc = Clock::now();
             if (cudaStreamSynchronize(m.cs) != cudaSuccess) {
@@ -6802,8 +6427,6 @@ int64_t Prefill::lm_prepare(int64_t n, std::string& why, int64_t cap) {
     }
     if (embd_rows != nullptr) { why = "an image prompt"; return 0; }
     // features of run_impl this walk does not carry: KVA's approximate late layers (a prompt that wants them takes the chunk-major path, which has it).
-    // The DFlash2 drafter's prompt taps it carries for one stage and one prompt (DF-08: lm_run taps a layer's completed output when the next layer starts)
-    if (!tap_layers_.empty() && (split || !on_taps || tap_cap_ <= 0)) { why = "the DFlash2 drafter's prompt taps on a layer split"; return 0; }
     if (kva_config().on) { why = "STRATA_KVA is on"; return 0; }
     if (stop_at_chunk) { why = "a batch read that yields at chunk boundaries"; return 0; }
     if (force_chunk_ > 0) { why = "a --prefill-pipe plan sets the chunks of this read"; return 0; }   // (left set for run_impl)
@@ -7005,32 +6628,6 @@ bool Prefill::run_layer_major(const int64_t* tokens, int64_t n, int64_t pos0, st
     one.n = n;
     one.pos0 = pos0;
     return lm_run(std::vector<Seg>{one}, 0, nullptr, err);
-}
-
-// Several prompts in ONE layer-major pass (PAR-H, 2026-10-30): the super-chunk is a list of sub-chunks, each from one
-// prompt ("segment") with its own sessions; a layer's attention halves run per sub-chunk against that segment's
-// session (GDN / QSA / PLE state), and the layer's experts are staged ONCE for every sub-chunk of the super-chunk -
-// the streamed experts cost is shared by the prompts.  A single segment with no sessions given is exactly the usual run.
-bool Prefill::run_multi(const std::vector<Seg>& segs, std::string& err) {
-    err.clear();
-    if (segs.empty()) { err = "prefill: no prompt"; return false; }
-    int64_t total = 0;
-    for (const Seg& sg : segs) total += sg.n;
-    std::string why;
-    if (hand_in_ != nullptr || !impl_) { err = "prefill: multi-prompt read declined (chunk hand-off in use)"; return false; }
-    if (!tap_layers_.empty()) { err = "prefill: multi-prompt read declined (the DFlash2 prompt taps are for one prompt)"; return false; }
-    for (Prefill* q = this; q != nullptr; q = q->next_) q->lm_force_ = true;
-    struct ForceOff { Prefill* h; ~ForceOff() { for (Prefill* q = h; q != nullptr; q = q->next_) q->lm_force_ = false; } } force_off{this};
-    if (lm_prepare_chain(total, why) <= 0) { err = "prefill: multi-prompt read declined: " + why; return false; }
-    bool ok = lm_run(segs, 0, nullptr, err);
-    std::string drain_err;
-    if (!drain_pipeline(drain_err) && ok) {
-        ok = false;
-        err = drain_err;
-    }
-    for (Prefill* q = this; q != nullptr; q = q->next_) q->lm_mid_ = false;
-    lm_release_chain();
-    return ok;
 }
 
 bool Prefill::lm_run(const std::vector<Seg>& segs, int depth, const std::vector<LmSub>* given_super, std::string& err) {
@@ -7471,40 +7068,10 @@ bool Prefill::lm_run(const std::vector<Seg>& segs, int depth, const std::vector<
         return true;
     };
 
-#if defined(STRATA_HAVE_DFLASH2)
-    // DFlash2 prompt taps (DF-08): one prompt, one stage (lm_prepare declined the rest).  A layer's completed output is the rows after the
-    // hyper-connection write of its FFN half, which this walk does when the NEXT layer starts (or in the final pass for the last one);
-    // each sub-chunk's tapped rows (positions >= tap_first_) go to their place in the staging, and the super-chunk's rows are handed to
-    // on_taps, in position order, once all its layers are done
-    std::vector<int> tap_slot;
-    const bool tap_on = !tap_layers_.empty() && on_taps && segs.size() == 1 && LB == 0 && LE == L && tap_cap_ > 0;
-    if (tap_on) {
-        if (tap_dev_ == nullptr &&
-            strata::core::allocate_device((void**) &tap_dev_, (size_t) tap_cap_ * tap_layers_.size() * (size_t) g.n_embd * 4,
-                                          {"other", "Device allocations", "Prompt processing"}) != cudaSuccess) {
-            (void) cudaGetLastError();
-            tap_dev_ = nullptr;
-            err = "prefill: the DFlash2 tap staging does not fit in VRAM";
-            return false;
-        }
-        tap_slot.assign((size_t) g.n_layers, -1);
-        for (size_t i = 0; i < tap_layers_.size(); ++i) tap_slot[(size_t) tap_layers_[i]] = (int) i;
-    } else if (!tap_layers_.empty()) {
-        err = "prefill (layer-major): the DFlash2 taps are not supported for this read";
-        return false;
-    }
-#endif
     for (size_t sci = 0; sci < supers.size(); ++sci) {
         const std::vector<LmSub>& subs = supers[sci];
         int64_t Sn = 0;
         for (const LmSub& sb : subs) Sn = std::max(Sn, sb.t0 + sb.T);
-#if defined(STRATA_HAVE_DFLASH2)
-        // the super-chunk's tapped rows: those at positions >= tap_first_ (the super-chunk's row r is position segs[0].pos0 + subs[0].c0 + r)
-        const int64_t super_pos = segs[0].pos0 + subs[0].c0;
-        const int64_t tap_s0 = tap_on ? std::min<int64_t>(Sn, std::max<int64_t>(0, tap_first_ - super_pos)) : Sn;   // first tapped row
-        const int64_t tap_super_rows = Sn - tap_s0;
-        if (tap_on && tap_super_rows > tap_cap_) { err = "prefill: the DFlash2 tap staging is smaller than the super-chunk's tapped rows"; return false; }
-#endif
         const int64_t nc = (int64_t) subs.size();
         int64_t last_seg0 = -1;
         for (int64_t c = 0; c < nc; ++c) if (subs[(size_t) c].seg == 0) last_seg0 = c;
@@ -7602,15 +7169,6 @@ bool Prefill::lm_run(const std::vector<Seg>& segs, int depth, const std::vector<
                     gr_write(m.R, acc, m.inj, HC, T, cs);
                     if (strata::kernels::cvec().covers(l - 1))
                         strata::kernels::cvec_apply(m.R, l - 1, T, D, nullptr, 0, nullptr, 0, false, cs);
-#if defined(STRATA_HAVE_DFLASH2)
-                    if (tap_on && tap_slot[(size_t) (l - 1)] >= 0) {   // layer l - 1 is complete: its tapped rows of this sub-chunk, mean of the streams
-                        const int64_t lo = std::min<int64_t>(T, std::max<int64_t>(0, tap_s0 - t0));
-                        if (lo < T)
-                            strata::kernels::df2_tap_rows(m.R + lo * D,
-                                                          tap_dev_ + (size_t) (t0 + lo - tap_s0) * tap_layers_.size() * (size_t) N + (size_t) tap_slot[(size_t) (l - 1)] * (size_t) N,
-                                                          (int64_t) tap_layers_.size() * N, N, (int) HC, (int) (T - lo), cs);
-                    }
-#endif
                 }
                 if (l == LE && next_ != nullptr) {
                     // ---- a layer split: this sub-chunk's rows into the next stage's R_host (on the copy stream, as
@@ -7971,12 +7529,6 @@ bool Prefill::lm_run(const std::vector<Seg>& segs, int depth, const std::vector<
             if (l == LE) break;
             if (!lm_experts(l, Sn)) return false;
         }
-#if defined(STRATA_HAVE_DFLASH2)
-        if (tap_on && tap_super_rows > 0) {   // every layer of the super-chunk is done: its tapped rows, in position order (DF-08)
-            if (cudaStreamSynchronize(cs) != cudaSuccess) { err = std::string("prefill: ") + cudaGetErrorString(cudaGetLastError()); return false; }
-            if (!on_taps(tap_dev_, tap_super_rows, super_pos + tap_s0, err)) return false;
-        }
-#endif
         if (next_ != nullptr) {   // the super-chunk's rows are in the next stage's R_host: it reads them on a thread
             if (cudaStreamSynchronize(cs) != cudaSuccess || cudaStreamSynchronize(m.copy) != cudaSuccess) {
                 err = std::string("prefill (layer-major): the layer split's hand-off: ") +

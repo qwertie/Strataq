@@ -8,8 +8,7 @@
 // holds one row's 8 consecutive k), the activations the A operand (16 entries = the 16 rows, split x = hi + lo in two fp16
 // so the product keeps ~2^-22), D[entry][weight row] in F32: a lane holds the entries 8 kg .. 8 kg + 7 of its row, so the
 // block scale d is the lane's own.  Lane l = r + 16 kg owns row r and the 16 steps 16 kg .. 16 kg + 15 of every block, whose
-// 15-bit states are one 128-bit window of the stream (the tile code of tools/dsv41_lab/wmma_emu.hpp, checked there against a
-// double reference and on the card by tests/dsv41/tqw_hip_test.cpp).  Elsewhere the same lane mapping in plain FMAs.
+// 15-bit states are one 128-bit window of the stream.  Elsewhere the same lane mapping in plain FMAs.
 #include "ds4_launch.h"   // strata_ds4_launch
 #include "ds4_iq.cuh"
 

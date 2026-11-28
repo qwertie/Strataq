@@ -1,8 +1,7 @@
 # Strata Engine - top-level build.
 #
-# One project builds the engine for every backend: CUDA (STRATA_ENABLE_CUDA), HIP (STRATA_ENABLE_HIP; the layer-split
-# and DeepSeek engines are the STRATA_BUILD_SPLIT / STRATA_BUILD_DSV41 options), the CPU-only build, and the test
-# programs.  CMakePresets.json has the CPU check preset (`cmake --preset cpu-check`) and the compile-only backend
+# One project builds the engine for every backend: CUDA (STRATA_ENABLE_CUDA), HIP (STRATA_ENABLE_HIP; the DeepSeek
+# engine is the STRATA_BUILD_DSV41 option), the CPU-only build, and the test programs.  CMakePresets.json has the CPU check preset (`cmake --preset cpu-check`) and the compile-only backend
 # presets used by tools/check and the CI workflows; the release scripts in packaging/ pass their own flags.
 #
 # The CUDA kernels need sm_80 or newer (tf32 mma, bf16 math) and the guard below refuses anything older: silently
@@ -246,13 +245,6 @@ add_library(strata_artifact INTERFACE)
 target_include_directories(strata_artifact INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(strata_artifact INTERFACE strata_warnings)
 
-add_executable(strata-gguf src/common/artifact/gguf_reader.cpp)
-target_link_libraries(strata-gguf PRIVATE strata_artifact)
-
-add_executable(strata-dequant src/common/artifact/dequant.cpp)
-target_link_libraries(strata-dequant PRIVATE strata_artifact)
-# this file is now nothing but the CLI entry point, and its inherited guard spells that as a "selftest"
-target_compile_definitions(strata-dequant PRIVATE STRATA_DEQUANT_SELFTEST)
 if(STRATA_BUILD_TESTS)
   add_executable(logit_bias_test src/common/sample/logit_bias_test.cpp)
   target_include_directories(logit_bias_test PRIVATE include)
@@ -365,9 +357,6 @@ endif()
 add_library(strata_plan INTERFACE)
 target_include_directories(strata_plan INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(strata_plan INTERFACE strata_warnings)
-
-add_executable(strata-plan src/models/qwen38/plan/plan_main.cpp)
-target_link_libraries(strata-plan PRIVATE strata_plan)
 
 # ---- strata_core (GPU runtime) ---------------------------------------------
 # Only built when a GPU backend is on, so the Phase 1 targets keep working without a toolkit.
@@ -538,11 +527,6 @@ if(STRATA_NATIVE_EXPERTS)
   endif()
 endif()
 
-if(STRATA_ENABLE_CUDA AND STRATA_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bench/micro/hit_cpu_order_parity.cu")
-  add_executable(hit_cpu_order_parity bench/micro/hit_cpu_order_parity.cu)
-  target_link_libraries(hit_cpu_order_parity PRIVATE strata_kernels strata_kernels_cpu ${_strata_gpu_runtime_target})
-endif()
-
 strata_cpu_tests()
 
 # CUDA release kernels must not spill or keep a per-thread array in local memory: every access there is a round trip
@@ -554,10 +538,6 @@ strata_cuda_spill_guard()
 
 if(STRATA_BUILD_TESTS)
   enable_testing()
-  # Model-level checks may be absent from source distributions.
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
-    add_subdirectory(tests)
-  endif()
 endif()
 
 # ---- HIP gfx906: every CUDA source of the tree (and the ggml-cuda MMQ sources) is compiled as HIP ----
@@ -569,13 +549,6 @@ strata_hip_gfx906_sources()
 # 2026-10-23: the CPU lane is exactly what a box without a usable GPU needs to measure).  This branch builds the one target
 # that has no device code, so the CPU-lane A/B runs anywhere.
 strata_cpu_dsv41_host_bench()
-
-# ---- strata-split: the opt-in engine that splits every layer across 2-4 NVIDIA cards (src/split, from sFNX, MIT, John Fink) ----
-# OFF by default, Linux + CUDA or HIP only, no other target depends on it; see src/split/CMakeLists.txt and docs/SPLIT_ENGINE.md.
-option(STRATA_BUILD_SPLIT "Build strata-split: sFNX's split-every-layer engine, host-memory exchange (Linux, CUDA or HIP gfx1201, 2-4 cards)" OFF)
-if(STRATA_BUILD_SPLIT)
-  add_subdirectory(src/split)
-endif()
 
 # What this configure registered, so a missing capability is a stated skip (tools/check prints this line too).
 if(STRATA_BUILD_TESTS)

@@ -227,8 +227,6 @@ public:
     /// The elastic K/V (--kv-grow): the arena in a VMM range (vmm.hpp) instead of one cudaMalloc, so the K/V can take
     /// single chunks of it and give them back. Applies to the next `open`; ignored where VMM is not available.
     static void set_vmm(bool enabled);
-    /// The arena's range (null: one cudaMalloc).
-    VmmRange* vmm_range() { return vmm_.get(); }
     /// Byte offset of slot `s` in the arena (s == slots(): the end).
     uint64_t slot_offset(int64_t s) const { return off_.empty() ? (uint64_t) s * (uint64_t) blob_ : off_[(size_t) s]; }
     /// The arena bytes of slot `s` (its blob, any slack and the guard).

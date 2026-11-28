@@ -37,20 +37,17 @@ int main() {
             for (int64_t vl : {int64_t(-1), int64_t(0), int64_t(1400)})
                 for (int64_t pf : {int64_t(0), int64_t(160 + 4096 * 680 / 1024)})
                     for (int later = 0; later < 2; ++later)
-                        for (int dr = 0; dr < 2; ++dr)
-                            for (int64_t pw : {int64_t(0), int64_t(1), int64_t(2)}) {
-                                Inputs in;
-                                in.base_reserve_mib = later && vl >= 0 ? vl : vr;
-                                in.prompt_buffers_mib = pf;
-                                in.later = later != 0;
-                                in.drafter = dr != 0;
-                                in.pipe_window_mib = pw > 0 ? 160 : 0;
-                                in.pipe_snap_mib = pw >= 2 ? 96 : 0;
-                                ++cases;
-                                check(room_bytes(fb, in) == legacy_room(fb, vr, vl, pf, later != 0, dr != 0, pw),
-                                      "room differs from the old expression (fb " + std::to_string(fb >> 20) + " MiB, reserve " +
-                                          std::to_string(vr) + "/" + std::to_string(vl) + ", later " + std::to_string(later) + ")");
-                            }
+                        for (int dr = 0; dr < 2; ++dr) {
+                            Inputs in;
+                            in.base_reserve_mib = later && vl >= 0 ? vl : vr;
+                            in.prompt_buffers_mib = pf;
+                            in.later = later != 0;
+                            in.drafter = dr != 0;
+                            ++cases;
+                            check(room_bytes(fb, in) == legacy_room(fb, vr, vl, pf, later != 0, dr != 0, 0),
+                                  "room differs from the old expression (fb " + std::to_string(fb >> 20) + " MiB, reserve " +
+                                      std::to_string(vr) + "/" + std::to_string(vl) + ", later " + std::to_string(later) + ")");
+                        }
     // the configuration of #3702: default reserves (700), borrowed prompt buffers, CUDA1 = the last card with the drafter
     {
         Inputs in;
@@ -62,8 +59,6 @@ int main() {
         check(reserve_mib(in) == 796, "a later card without the drafter keeps 796 MiB planned");
         in.later = false;
         check(reserve_mib(in) == 700, "the first card keeps the base reserve alone");
-        in.pipe_snap_mib = 96;
-        check(reserve_mib(in) == 796, "the first card books the pipeline's second GDN state");
     }
     // the same arithmetic with --vram-reserve-later-mib 1400 (the workaround that worked in #3702)
     {

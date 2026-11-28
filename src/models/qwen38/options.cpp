@@ -140,10 +140,6 @@ void print_usage() {
                  "                       window (STRATA_BATCH_MTP=1 does the same); works on one GPU and on a layer split (the\n"
                  "                       slot drafters sit on the last stage's GPU; not with --batch-groups); needs VRAM per slot\n"
                  "  --batch-groups G     --batch with a layer split: the slots in G groups pipelined through the GPUs\n"
-                 "  --pipeline-windows N --serve with a layer split on two GPUs (on by default for 2+ stages on AMD gfx12;\n"
-                 "                       STRATA_PIPELINE_AUTO=0 or N=0 turns it off): one conversation's verify windows\n"
-                 "                       with the GPUs overlapped - 1 = the prompt's short reads, 2 = decode as well\n"
-                 "                       (stage 0 runs the next window while stage 1 verifies this one); docs/MULTI_GPU.md\n"
                  "  --prompt-cache-every N  --serve: also checkpoint every N fresh prompt tokens (default 16384, 0 = off)\n"
                  "  --prompt-cache-spread  --serve: keep the checkpoints spread back from the conversation's end (dense\n"
                  "                       near it, thinner further back) instead of the most recently used: a client that\n"
@@ -171,15 +167,10 @@ void print_usage() {
                  "                       (default) or one per stream (llama.cpp's MTP graph)\n"
                  "  --mtp-q4 all|proj|head  opt-in: the draft layer's projections and/or draft head as 4-bit copies\n"
                  "  --mtp-draft-vocab FILE  opt-in: the draft head's token subset (default <mtp>/draft_vocab.bin)\n"
-                 "  --draft mtp|dflash2  the draft source (default mtp); dflash2 needs --draft-model PACK (tools/dflash2_pack.py)\n"
                  "                       and loads no MTP layer (--draft-fallback mtp keeps it as the fallback) (opt-in, Flash-Next, CUDA / HIP)\n"
-                 "  --draft-fallback mtp|none  with --draft dflash2 (default none): none = the MTP layer is not loaded at all, DFlash2 is the only drafter and a DFlash2 that cannot start is an error;\n"
                  "                       mtp = load both, the MTP drafts if DFlash2 cannot start (--draft auto always loads both)\n"
                  "                       (the MTP layer's ~0.9 GiB of VRAM goes to the expert cache; --mtp DIR is still needed for DIR/draft_vocab.bin)\n"
-                 "  --draft-conf P       with --draft dflash2: end the window where the product of the selector's probabilities falls below P (default 0 = --spec-min-p)\n"
-                 "  --draft auto         (serve) both drafters stay current; a request picks one: draft=mtp|dflash2, else --draft-rule df2|mtp|learn;\n"
                  "                       MTP requests use --draft-mtp-spec N (default 4)\n"
-                 "  --draft-cap N        the widest verify window with --draft dflash2 (default by card: 8 on Strix Halo / iGPU and on Blackwell cc 12.0 with 48 GB or more, 6 on other Blackwell, --spec as given elsewhere)\n"
                  "  --control-vector-scaled FILE:SCALE[,...]  a control vector GGUF on the residual stream (llama.cpp's\n"
                  "                       format; --control-vector FILE = scale 1).  --serve: requests switch it (cvec=0|1)\n"
                  "  --control-vector-layer-range A B  the layers it follows (inclusive; default 1 .. the last)\n"
@@ -226,7 +217,6 @@ void print_usage() {
                  "  --expert-cache-device1 N|auto  fill CUDA1 with N experts or as many as fit\n"
                  "  --expert-cache-device2 N|auto  fill CUDA2 with more experts\n"
                  "  --expert-cache-device3 N|auto  fill CUDA3 with more experts\n"
-                 "  --remote-expert-opt   enable remote-expert decode optimizations (serve mode)\n"
                  "  --expert-cache-remote-placement stripe|layer  distribute expert ranks or whole\n"
                  "                       layers across CUDA1..3 (default: stripe)\n"
                  "  --peer-device N      a second GPU as an adaptive expert-cache tier (rows over P2P; it also\n"
@@ -234,7 +224,6 @@ void print_usage() {
                  "                       --expert-cache-device1..3.  Default output unchanged without it.\n"
                  "  --peer-reserve-mib N  VRAM the peer tier leaves free on its card (default 600)\n"
                  "  --peer-slots N       expert slots on the peer (default: what fits)\n"
-                 "  --peer-adapt-swaps N  peer cache swaps per adaptation step (default: --adapt-swaps)\n"
                  "  --expert-cache-per-layer  R4.2g: give each layer its OWN slots instead of letting the first\n"
                  "                       position take all of them.  The default policy fills in arrival order\n"
                  "                       from one shared counter, so 256 slots went to ~26 layers of position 0\n"
@@ -456,10 +445,8 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
             o.expert_cache_remote_auto[r] = v == "auto";
             o.expert_cache_remote[r] = v == "auto" ? std::numeric_limits<int>::max() : std::atoi(v.c_str());
         }
-        else if (a == "--remote-expert-opt") o.remote_expert_opt = true;
         else if (a == "--expert-cache-remote-placement")
             o.expert_cache_remote_placement = next("--expert-cache-remote-placement");
-        else if (a == "--vram-reserve-mib") { o.vram_reserve_mib = std::atoi(next("--vram-reserve-mib")); o.vram_reserve_given = true; }
         else if (a == "--vram-reserve-later-mib")
             o.vram_reserve_later_mib = std::atoi(next("--vram-reserve-later-mib"));
         else if (a == "--prefill-chunk") {
@@ -494,12 +481,11 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         else if (a == "--spec") o.spec = std::atoi(next("--spec"));
         else if (a == "--batch") o.batch = std::atoi(next("--batch"));
         else if (a == "--trim-stage-weights") {}   // accepted for older run configs: every split now loads only each card's layers
-        else if (a == "--batch-groups") {
-            const char* bgv = next("--batch-groups");
-            o.batch_groups_set = true;
-            if (std::strcmp(bgv, "auto") == 0) o.batch_groups_auto = true;
-            else o.batch_groups = std::atoi(bgv);
-        }
+        // accepted for older run configs: strata-q38 always ignored the DFlash2 drafter and the pipelined windows
+        else if (a == "--draft" || a == "--draft-model" || a == "--draft-fallback" || a == "--draft-conf" || a == "--draft-cap" ||
+                 a == "--draft-mtp-spec" || a == "--pipeline-windows" || a == "--peer-adapt-swaps")
+            next(a.c_str());
+        else if (a == "--stop-eos") {}
         else if (a == "--batch-mtp") o.batch_mtp = true;
         else if (a == "--mtp") o.mtp = next("--mtp");
         else if (a == "--mtp-window") o.mtp_window = std::atoll(next("--mtp-window"));
@@ -509,7 +495,6 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         else if (a == "--adapt-min-gain") o.adapt_min_gain = (float) std::atof(next("--adapt-min-gain"));
         else if (a == "--adapt-async") o.adapt_async = std::atoi(next("--adapt-async")) != 0 ? 1 : 0;
         else if (a == "--spec-min-p") o.spec_min_p = std::atof(next("--spec-min-p"));
-        else if (a == "--stop-eos") o.stop_eos = true;
         else if (a == "--spec-split") o.spec_split = true;
         else if (a == "--layer-split") o.layer_split = next("--layer-split");
         else if (a == "--split-device") o.split_device = next("--split-device");
@@ -540,12 +525,7 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         else if (a == "--tail-role-token") o.tail_role_token = std::atoll(next("--tail-role-token"));
         else if (a == "--short-read") o.short_read = std::max(0LL, std::atoll(next("--short-read")));
         else if (a == "--prefill-head-alias") o.prefill_head_alias = true;
-        else if (a == "--pipeline-windows") o.pipeline_windows = std::max(0, std::min(2, std::atoi(next("--pipeline-windows"))));
-        else if (a == "--suffix-draft") o.suffix_draft = std::max(0, std::atoi(next("--suffix-draft")));
-        else if (a == "--mtp-max-t") o.mtp_max_t = std::max(0, std::atoi(next("--mtp-max-t")));
         else if (a == "--lookup-max-t") o.lookup_max_t = std::max(0, std::atoi(next("--lookup-max-t")));
-        else if (a == "--lookup-chain") o.lookup_chain = std::clamp(std::atoi(next("--lookup-chain")), 0, 7);
-        else if (a == "--lookup-chain-min") o.lookup_chain_min = std::max(3, std::atoi(next("--lookup-chain-min")));
         else if (a == "--mtp-hnorm") {
             const std::string v = next("--mtp-hnorm");
             if (v != "pooled" && v != "stream") {
@@ -562,26 +542,6 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
             }
         }
         else if (a == "--mtp-draft-vocab") o.mtp_draft_vocab = next("--mtp-draft-vocab");
-        else if (a == "--draft") {
-            o.draft = next("--draft");
-            if (o.draft == "auto") { o.draft = "dflash2"; o.draft_auto = true; }
-            if (o.draft != "dflash2" && o.draft != "mtp") {
-                std::fprintf(stderr, "strata generate: --draft takes mtp, dflash2 or auto\n");
-                std::exit(2);
-            }
-        }
-        else if (a == "--draft-rule") o.draft_rule = next("--draft-rule");
-        else if (a == "--draft-mtp-spec") { o.draft_mtp_spec = std::max(2, std::atoi(next("--draft-mtp-spec"))); o.draft_mtp_spec_set = true; }
-        else if (a == "--draft-model") o.draft_model = next("--draft-model");
-        else if (a == "--draft-fallback") {
-            o.draft_fallback = next("--draft-fallback");
-            if (o.draft_fallback != "mtp" && o.draft_fallback != "none") {
-                std::fprintf(stderr, "strata generate: --draft-fallback takes mtp or none\n");
-                std::exit(2);
-            }
-        }
-        else if (a == "--draft-conf") o.draft_conf = std::clamp(std::atof(next("--draft-conf")), 0.0, 1.0);
-        else if (a == "--draft-cap") o.draft_cap = std::max(0, std::atoi(next("--draft-cap")));
         else if (a == "--control-vector") o.cvec_files.push_back({next("--control-vector"), 1.0f});
         else if (a == "--control-vector-scaled") {
             // FILE:SCALE, comma-separated; the LAST colon splits, so a Windows path (C:\...) keeps its drive
@@ -618,7 +578,6 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         else if (a == "--eos-ids") {
             std::string e;
             if (!parse_i64_list(next("--eos-ids"), o.eos_ids, e)) { std::fprintf(stderr, "--eos-ids: %s\n", e.c_str()); return 2; }
-            o.stop_eos = true;
         }
         else if (a == "--adapt-swaps") o.adapt_swaps = std::atoi(next("--adapt-swaps"));
         else if (a == "--expert-cache-cpu-order") o.expert_cache_cpu_order = true;
@@ -626,7 +585,6 @@ int parse_options(int argc, char** argv, Options& o, bool& have_tokens) {
         else if (a == "--peer-device") o.peer_device = std::atoi(next("--peer-device"));
         else if (a == "--peer-reserve-mib") o.peer_reserve_mib = std::atoi(next("--peer-reserve-mib"));
         else if (a == "--peer-slots") o.peer_slots = std::atoll(next("--peer-slots"));
-        else if (a == "--peer-adapt-swaps") o.peer_adapt_swaps = std::atoi(next("--peer-adapt-swaps"));
         else if (a == "--no-hit-poke") o.no_hit_poke = true;
         else if (a == "--expert-profile") o.expert_profile = next("--expert-profile");
         else if (a == "--expert-profile-save") o.expert_profile_save = next("--expert-profile-save");

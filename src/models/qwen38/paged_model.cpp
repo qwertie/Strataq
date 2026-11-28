@@ -411,12 +411,9 @@ int run_paged_engine(int argc, char** argv) {
     o.batch = 0;
     if (!drafting)
         o.mtp.clear();
-    o.draft.clear();
     o.spec = strata::kernels::kVerifyMaxT;   // the verify windows' room: --rows may change up to it
     o.kv_grow = false;
     o.kv_resident = 0;
-    // strata-q38 does not pipeline verify windows across cards; 0 also keeps the drafter on the last card (mtp_first)
-    o.pipeline_windows = 0;
     // Paged caches cannot lend the contiguous expert arena that the prompt-buffer planner assumes; the engine lends
     // the prompt paths their buffers from the page pools instead, for each prompt the largest chunk up to --prefill
     // (a ceiling here) that they can lend then

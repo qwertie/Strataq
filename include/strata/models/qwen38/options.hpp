@@ -157,7 +157,6 @@ struct Options {
     int expert_cache = 0;
     std::array<int, 3> expert_cache_remote{}; ///< CUDA1..3 slots; CUDA0 keeps dense/state/MTP
     std::array<bool, 3> expert_cache_remote_auto{};
-    bool remote_expert_opt = false; ///< optional optimization of the existing remote-expert decode path
     std::string expert_cache_remote_placement = "stripe"; ///< stripe experts or assign complete layers to CUDA1..3
     bool expert_cache_cpu_order = false;
     /// **R4.2g.  ROUND 328 MEASURED THAT THE GLOBAL ADMISSION POLICY CANNOT WORK, AND THIS IS THE FIX.**
@@ -167,12 +166,10 @@ struct Options {
     /// **70.4%** for 64, from `Memory/cache_allocation.py` on the same run's routing.  Off by default.
     bool expert_cache_per_layer = false;
     /// Multi-GPU: a second expert tier on CUDA device `peer_device` (-1 = off), `peer_reserve_mib` left free
-    /// there, `peer_slots` caps its size (0 = as many as fit), `peer_adapt_swaps` per adaptive round
-    /// (-1 = adapt_swaps).
+    /// there, `peer_slots` caps its size (0 = as many as fit).
     int peer_device = -1;
     int peer_reserve_mib = 600;
     int64_t peer_slots = 0;
-    int peer_adapt_swaps = -1;
     /// The PLE gather's prefetch, as an A/B arm.  The gather measured 2.10-2.61 ms/token because its sixteen
     /// row reads are sixteen SEPARATE page faults into a 26.8 GB mapping; see `ple_prefetch_enable`.
     bool no_ple_prefetch = false;
@@ -281,7 +278,6 @@ struct Options {
     /// this probability under the draft layer; 0 = always --spec-1 drafts.
     double spec_min_p = 0.0;
     /// Stop when the model emits an end-of-turn token (<|endoftext|> 248044, <|im_end|> 248046, or --eos-ids).
-    bool stop_eos = false;
     std::vector<int64_t> eos_ids = {248044, 248046};
     bool spec_split = false;   ///< opt-in split verify window (the overlap study: ~7% slower; not bit-exact against no-split, the batch shape of its windows differs)
     /// --serve, multi-GPU layer split: "K" or "K1,K2,.." (the first layer of each later stage) or "auto" (placed
@@ -328,12 +324,6 @@ struct Options {
     /// the batched path)
     int64_t short_read = 64;
     bool prefill_head_alias = false;   // lend the native output head's VRAM to prompt buffers between request phases
-    /// --pipeline-windows N (--serve, a layer split on exactly two GPUs; opt-in): 1 = a prompt's short reads through
-    /// the verify windows run with the stages overlapped (stage 0 reads window K+1 while stage 1 reads window K);
-    /// 2 = the decode windows too: stage 0 runs window K+1 speculatively while stage 1 verifies window K (rolled back
-    /// when K is not accepted as guessed).  0 = off (the stages take turns).
-    /// -1 (not asked for) = 2 on gfx12 (HIP) layer splits of 3 or more stages, else 0; --pipeline-windows N asks for it.
-    int pipeline_windows = -1;
     /// The suffix drafter (prompt lookup): when the text being written repeats an earlier stretch of the context (code
     /// edits, quoted input, tool-call JSON) by at least this many tokens, the window may be filled with what followed
     /// it there instead of the MTP's drafts, where the MTP's own first guess agrees and the draft policy expects it to
@@ -359,20 +349,6 @@ struct Options {
     std::string mtp_q4;   ///< "" (off), all, proj (the projections only) or head (the draft head only)
     /// --mtp-draft-vocab FILE (opt-in): the draft head's token subset from FILE instead of <mtp>/draft_vocab.bin
     std::string mtp_draft_vocab;
-    /// --draft dflash2 --draft-model PACK (opt-in, CUDA / HIP): the DFlash2 block drafter for Qwen3.8-Flash-Next (tools/dflash2_pack.py) drafts instead
-    /// of the MTP layer, which is not loaded (--draft-fallback mtp loads it too, as the fallback).  Needs --mtp DIR (its draft_vocab.bin), --spec, --draft-model and a native pack; DFlash2 that cannot start is an error unless the fallback is mtp.
-    std::string draft, draft_model;
-    /// --draft-fallback mtp|none (with --draft dflash2): none = the MTP layer is NOT loaded, DFlash2 is the only drafter (the draft vocabulary still comes
-    /// from <mtp>/draft_vocab.bin).  A DFlash2 that cannot start then ends the start with an error: nothing drafts instead.  A per-run choice, not a per-round one.
-    /// Unset: `--draft dflash2` means none (the owner's order: the DFlash2 and the MTP layer are never loaded together unless asked); `--draft auto` needs both.
-    std::string draft_fallback;
-    double draft_conf = 0.0;   ///< --draft-conf P: with --draft dflash2 the window ends where the product of the selector's probabilities falls below P (replaces --spec-min-p)
-    /// --draft auto (serve): both drafters stay current and each request picks one (its key draft=mtp|dflash2, else draft_rule); the CLI treats auto as dflash2
-    bool draft_auto = false;
-    std::string draft_rule = "df2";   ///< --draft-rule df2|mtp|learn: what a request without a draft= key gets
-    int draft_mtp_spec = 4;   ///< --draft-mtp-spec N: the widest window of a request that drafts with the MTP layer under --draft auto
-    bool draft_mtp_spec_set = false;   ///< --draft-mtp-spec was given: it is also the window the MTP runs when --draft dflash2 falls back to it (the wider --spec was for DFlash2)
-    int draft_cap = 0;   ///< --draft-cap N: the widest verify window with --draft dflash2 (0 = by card class, see where the drafter loads)
     /// A control vector on the residual stream (strata/models/qwen38/kernels/cvec.hpp), with llama.cpp's flags: the
     /// `experimental-speed-projection` profile passes `--control-vector-scaled FILE:1.0 --control-vector-layer-range
     /// 4 44 --cvec-mode project --cvec-dir per-layer`.  None by default; --serve switches a loaded one per request.

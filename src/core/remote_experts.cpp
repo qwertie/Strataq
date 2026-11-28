@@ -2,7 +2,6 @@
 #include "strata/base/platform/env.hpp"
 #include "strata/core/remote_experts.hpp"
 #include "strata/base/gpu/device.hpp"   // primary_device() (STRATA_PRIMARY_DEVICE)
-#include "strata/core/remote_expert_opt.hpp"
 
 #include "strata/common/kernels/cpu/expert_layout.hpp"
 #include "strata/common/kernels/cpu/hadamard.hpp"
@@ -209,7 +208,7 @@ bool RemoteExperts::open(int device, int slots, int64_t layers, int64_t experts,
     const size_t scratch = std::max<size_t>(
         (size_t) strata::kernels::moe_hit_grouped_scratch_bytes(CAP, H, FF),
         strata::kernels::native_expert_scratch_bytes(CAP, FF));
-    const size_t meta_bytes = sizeof(RemoteMeta) + (remote_opt_ ? remote_opt_->metadata_bytes() : 0);
+    const size_t meta_bytes = sizeof(RemoteMeta);
     const bool allocated =
         check(cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking), "stream", err, device) &&
         check(strata::core::allocate_host((void**) &h_x_, (size_t) CAP * H * sizeof(float), cudaHostAllocPortable |
@@ -331,15 +330,13 @@ bool RemoteExperts::begin(int64_t layer, const float* x, const int32_t* ids, int
     std::memcpy(meta->dst, dst_.data(), dst_.size() * sizeof(dst_[0]));
     std::memcpy(meta->tok, tok_.data(), tok_.size() * sizeof(tok_[0]));
     meta->count = (int32_t) group_id_.size();
-    const bool reduce = remote_opt_ && remote_opt_->active();
-    if (reduce) remote_opt_->prepare(*this, meta + 1);
     DeviceScope scope(device_);
     if (!scope.ok) { err = scope.error(device_); return false; }
     groups_ = (int32_t) group_id_.size();
     const cudaStream_t s = stream_;
     const bool staged =
         (zero_copy_ || check(cudaMemcpyAsync(d_x_, h_x_, (size_t) n_tok * H * sizeof(float), cudaMemcpyHostToDevice, s), "copy input", err, device_)) &&
-        check(cudaMemcpyAsync(d_meta_, h_meta_, sizeof(RemoteMeta) + (reduce ? remote_opt_->metadata_bytes() : 0),
+        check(cudaMemcpyAsync(d_meta_, h_meta_, sizeof(RemoteMeta),
                               cudaMemcpyHostToDevice, s), "copy group metadata", err, device_);
     if (!staged) return false;
     const auto& lay = strata::kernels::cpu::expert_layout();
@@ -354,17 +351,15 @@ bool RemoteExperts::begin(int64_t layer, const float* x, const int32_t* ids, int
         auto L = strata::kernels::native_expert_layout(fmt.gu_type, fmt.d_type, fmt.n_embd, fmt.n_ff);
         if (fmt.had_d) { L.had_block = fmt.had_block; L.d_signs = d_sh_; }
         strata::kernels::native_expert_grouped(L, d_ptr_, d_start_, d_count_, d_dst_, d_tok_,
-                                               groups_, (int64_t) dst_.size(), d_q8_, d_scratch_, zero_copy_ && !reduce ? z_out_ : d_out_, s);
+                                               groups_, (int64_t) dst_.size(), d_q8_, d_scratch_, zero_copy_ ? z_out_ : d_out_, s);
     } else {
         strata::kernels::quantize_q8_0_scaled(zero_copy_ ? z_x_ : d_x_, d_q8_, d_scales_, n_tok * H, s);
         strata::kernels::moe_grouped_s2_window(d_ptr_, d_start_, d_count_, d_dst_, d_tok_,
-                                               groups_, (int64_t) dst_.size(), d_q8_, d_scales_, d_scratch_, zero_copy_ && !reduce ? z_out_ : d_out_, s,
+                                               groups_, (int64_t) dst_.size(), d_q8_, d_scales_, d_scratch_, zero_copy_ ? z_out_ : d_out_, s,
                                                (int) n_tok);
     }
-    const uint64_t compact_bytes = (uint64_t) (reduce ? n_tok : dst_.size()) * H * sizeof(float);
-    if (reduce) {
-        if (!remote_opt_->reduce(*this, (RemoteMeta*) d_meta_ + 1, err)) return false;
-    } else if (!zero_copy_ && !check(cudaMemcpyAsync(h_out_, d_out_, (size_t) compact_bytes, cudaMemcpyDeviceToHost, s),
+    const uint64_t compact_bytes = (uint64_t) dst_.size() * H * sizeof(float);
+    if (!zero_copy_ && !check(cudaMemcpyAsync(h_out_, d_out_, (size_t) compact_bytes, cudaMemcpyDeviceToHost, s),
                "copy results", err, device_)) return false;
     ++launched_layers_;
     returned_bytes_ += compact_bytes;
@@ -396,7 +391,6 @@ bool RemoteExperts::finish(float* out, std::string& err) {
     if (!check(cudaStreamSynchronize(stream_), "finish", err, device_)) return false;
 #endif
     ms_wait_ += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - w0).count();
-    if (remote_opt_ && remote_opt_->active()) { remote_opt_->accumulate(*this); return true; }
     for (size_t i = 0; i < original_row_.size(); ++i)
         std::memcpy(out + (size_t) original_row_[i] * H, h_out_ + i * H, (size_t) H * sizeof(float));
     return true;

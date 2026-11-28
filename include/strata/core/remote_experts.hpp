@@ -13,7 +13,6 @@
 #include <vector>
 
 namespace strata::core {
-class RemoteExpertOpt;
 
 /// A static, profile-filled expert tier on another CUDA device. CUDA0 keeps all
 /// dense weights and state; results return through the existing pinned CPU rows.
@@ -41,16 +40,10 @@ public:
     bool owns(int64_t index) const { return owned_[(size_t) index] != 0; }
     /// This helper's cache holds (layer, expert): begin() will take its rows unless the plan gave them away.
     bool holds(int64_t layer, int32_t expert) const { return cache_.slot_of(layer, expert) >= 0; }
-    bool optimized_decode() const { return remote_opt_ != nullptr; }
     bool finish(float* out, std::string& err);
     int64_t resident() const { return cache_.resident(); }
     int64_t computed() const { return computed_; }
-    int64_t launched_layers() const { return launched_layers_; }
     double gib() const { return cache_.gib(); }
-    uint64_t returned_bytes() const { return returned_bytes_; }
-    uint64_t full_row_bytes() const { return full_row_bytes_; }
-    /// host time spent in begin() (staging + launches) and in finish() (waiting for this GPU), cumulative
-    double ms_begin() const { return ms_begin_; }
     double ms_wait() const { return ms_wait_; }
 
     /// STRATA_PREFILL_HELPER_SOURCE (opt-in): copy up to `n` cached blobs into the host buffers `dst[i]`
@@ -63,8 +56,6 @@ public:
                            uint8_t* hit, std::string& err);
 
 private:
-    friend class RemoteExpertOpt;
-    RemoteExpertOpt* remote_opt_ = nullptr;
     int device_ = -1;
     int64_t n_expert_ = 0;
     int32_t groups_ = 0;
@@ -123,9 +114,6 @@ public:
         for (const RemoteExperts* h : helpers_) if (h->holds(layer, (int32_t) expert)) return true;
         return false;
     }
-    /// Blobs / bytes this source has taken from the helpers so far (the per-request evidence line).
-    uint64_t helper_blobs() const { return helper_blobs_.load(std::memory_order_relaxed); }
-    uint64_t helper_bytes() const { return helper_bytes_.load(std::memory_order_relaxed); }
 
     const uint8_t* blob(int64_t layer, int64_t expert) override { return fallback_.blob(layer, expert); }
     const uint8_t* blob_stable(int64_t layer, int64_t expert) override {

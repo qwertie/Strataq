@@ -458,48 +458,4 @@ bool PeerExperts::adapt(const float* usage, const int32_t* res0, int max_swaps, 
     return true;
 }
 
-volatile int32_t* PeerExperts::set_overlap_gate(std::atomic<int32_t>* landed, std::vector<uint8_t>* has, int32_t* last,
-                                                bool copy_signal) {
-    gate_landed_ = landed;
-    gate_has_ = has;
-    gate_last_ = last;
-    ticks_.resize((size_t) n_layers_);
-    for (int64_t l = 0; l < n_layers_; ++l) ticks_[(size_t) l] = {landed, (int32_t) l};
-    if (copy_signal && h_gate_ == nullptr) {
-        OnDevice on(device_);
-        std::vector<int32_t> iota((size_t) n_layers_);
-        for (size_t i = 0; i < iota.size(); ++i) iota[i] = (int32_t) i;
-        int32_t* vals = nullptr;
-        void* hp = nullptr;
-        if (strata::core::allocate_device(&vals, iota.size() * 4, {"other", "Peer experts", "Peer transfer buffers"}) ==
-                cudaSuccess &&
-            cudaMemcpy(vals, iota.data(), iota.size() * 4, cudaMemcpyHostToDevice) == cudaSuccess &&
-            strata::core::allocate_host(&hp, 64, cudaHostAllocPortable, {"other", "Peer experts", "Peer transfer buffers"}) ==
-                cudaSuccess) {
-            *(volatile int32_t*) hp = -1;
-            d_gate_vals_ = vals;
-            h_gate_ = (volatile int32_t*) hp;
-        } else {   // host functions then
-            (void) cudaGetLastError();
-            if (vals) strata::core::release_device(vals);
-        }
-    }
-    return h_gate_;
-}
-
-void PeerExperts::flip_pending() {
-    for (const auto& [i, slot] : pending_) res_[(size_t) i] = slot;
-}
-
-void PeerExperts::apply_pending(bool wait) {
-    if (pending_.empty()) return;
-    {
-        OnDevice on(device_);
-        if (wait) cudaEventSynchronize(refill_ev_);
-        else if (cudaEventQuery(refill_ev_) != cudaSuccess) return;
-    }
-    for (const auto& [i, slot] : pending_) res_[(size_t) i] = slot;
-    pending_.clear();
-}
-
 }  // namespace strata::core

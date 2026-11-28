@@ -78,19 +78,6 @@ public:
     /// or -1) nor the peer holds into the peer's least-used slots.  Copies run on the peer's refill stream; a
     /// swapped-in expert becomes resident at `apply_pending`.  Call only between verify windows.
     bool adapt(const float* usage, const int32_t* res0, int max_swaps, std::string& err);
-    void apply_pending(bool wait);
-    /// STRATA_ADAPT_OVERLAP=1 with a peer: adapt() then issues its copies in layer order and raises `*landed` to each
-    /// layer as that layer's copies land (host functions on the refill stream), marking `(*has)[layer]` and `*last`
-    /// first; the verify window holds such a layer's plan back until then (AdaptGate).  Call once after open().
-    /// `copy_signal`: the landing is told by a stream-ordered D2H copy of the layer number into a pinned int instead
-    /// (no callback thread to schedule beside the pool's spinning workers); that int is returned, null when host
-    /// functions are used.
-    volatile int32_t* set_overlap_gate(std::atomic<int32_t>* landed, std::vector<uint8_t>* has, int32_t* last,
-                                       bool copy_signal);
-    /// The pending swaps enter the residency table now, their copies still landing (the gate protects every read);
-    /// apply_pending(true) after the window still waits for them and clears the list.
-    void flip_pending();
-    bool has_pending() const { return !pending_.empty(); }
 
     int64_t resident() const { return resident_; }
     /// the last launch writes its rows into the host rows itself (the caller must not touch them)
