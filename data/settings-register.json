@@ -4077,11 +4077,11 @@
    "since": "v0.2.10",
    "last_commit": "0be5d73f00",
    "last_date": "2026-10-31",
-   "status": "research",
+   "status": "retired",
    "owner": "dsv41",
-   "note": "[auto] not documented for users; code default not readable from the call",
+   "note": "Retired in 0.2.13: strata-dsv41 was deleted, and with it its restore points inside one prompt read (Model::feed_marks); strata-ds41 never read it. [auto] not documented for users; code default not readable from the call",
    "retire_after": "",
-   "retired_in": ""
+   "retired_in": "0.2.13"
   },
   {
    "name": "STRATA_DS4_NO_LIGHT",
@@ -4196,11 +4196,11 @@
    "since": "v0.2.10",
    "last_commit": "a280f5bbd0",
    "last_date": "2026-10-31",
-   "status": "default",
+   "status": "retired",
    "owner": "dsv41",
-   "note": "[checked] Windows one-GPU DeepSeek path pins by need by default; =0 turns it off (src/dsv41/ds4_model.cu:6058-6059 comment).",
+   "note": "Retired in 0.2.13: strata-dsv41 was deleted, and with it page-locking the old engine's RAM copy of the experts; strata-ds41 never read it. [checked] Windows one-GPU DeepSeek path pins by need by default; =0 turns it off (src/dsv41/ds4_model.cu:6058-6059 comment).",
    "retire_after": "",
-   "retired_in": ""
+   "retired_in": "0.2.13"
   },
   {
    "name": "STRATA_DS4_PIN_GB",
@@ -4229,11 +4229,11 @@
    "since": "v0.2.10",
    "last_commit": "a280f5bbd0",
    "last_date": "2026-10-31",
-   "status": "research",
+   "status": "retired",
    "owner": "dsv41",
-   "note": "[auto] not documented for users; code default not readable from the call",
+   "note": "Retired in 0.2.13: strata-dsv41 was deleted, and with it page-locking the old engine's RAM copy of the experts; strata-ds41 never read it. [auto] not documented for users; code default not readable from the call",
    "retire_after": "",
-   "retired_in": ""
+   "retired_in": "0.2.13"
   },
   {
    "name": "STRATA_DS4_PROMPT_SKIP",
@@ -4334,11 +4334,11 @@
    "since": "v0.2.4",
    "last_commit": "1b667c7abb",
    "last_date": "2026-10-25",
-   "status": "research",
+   "status": "retired",
    "owner": "dsv41",
-   "note": "[reviewed] RAM tier was slower than page cache on a V100/64 GB; hardware-specific, no explicit not-shipped verdict. [src/dsv41/ds4_model.cu:1360]",
+   "note": "Retired in 0.2.13: strata-dsv41 was deleted, and with it the old engine's RAM tier of experts; strata-ds41 never read it. [reviewed] RAM tier was slower than page cache on a V100/64 GB; hardware-specific, no explicit not-shipped verdict. [src/dsv41/ds4_model.cu:1360]",
    "retire_after": "",
-   "retired_in": ""
+   "retired_in": "0.2.13"
   },
   {
    "name": "STRATA_DS4_RESTORE_POINTS",
@@ -4433,11 +4433,11 @@
    "since": "v0.2.10",
    "last_commit": "216252f034",
    "last_date": "2026-10-31",
-   "status": "research",
+   "status": "retired",
    "owner": "dsv41",
-   "note": "[auto] not documented for users; code default not readable from the call",
+   "note": "Retired in 0.2.13: strata-dsv41 was deleted, and with it the old engine's PCIe lane; strata-ds41 never read it. [auto] not documented for users; code default not readable from the call",
    "retire_after": "",
-   "retired_in": ""
+   "retired_in": "0.2.13"
   },
   {
    "name": "STRATA_DS4_TQ_WORDS",
