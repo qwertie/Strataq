@@ -3,12 +3,12 @@
 // /proc/<pid>/task/<tid>/comm, Windows GetThreadDescription (Process Explorer, WinDbg, the tools/ probes).
 // A name changes nothing the thread does.
 //
-// Linux and macOS: header-only.  Windows: the function is defined in src/common/kernels/cpu/pool.cpp, because that file already
+// Linux: header-only.  Windows: the function is defined in src/common/kernels/cpu/pool.cpp, because that file already
 // includes <windows.h> and this header must not pull it into every file that includes aux_cpus.hpp (its macros, and
 // WIN32_LEAN_AND_MEAN, change what those files see).  The callers on Windows are the ones that link strata_kernels_cpu.
 #pragma once
 
-#if defined(__linux__) || defined(__APPLE__)
+#if defined(__linux__)
 #include <pthread.h>
 
 #include <cstdio>
@@ -22,16 +22,12 @@ namespace strata::platform {
 void name_this_thread(const char* base, int index = -1);
 #else
 inline void name_this_thread(const char* base, int index = -1) {
-#if defined(__linux__) || defined(__APPLE__)
+#if defined(__linux__)
     char name[64];
     if (index >= 0) std::snprintf(name, sizeof name, "%s-%d", base, index);
     else std::snprintf(name, sizeof name, "%s", base);
-#if defined(__linux__)
     name[15] = '\0';
     (void) pthread_setname_np(pthread_self(), name);
-#else
-    (void) pthread_setname_np(name);
-#endif
 #else
     (void) base;
     (void) index;

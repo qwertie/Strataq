@@ -148,10 +148,6 @@ static void fill_plan_fields(CpuTopology& topo, bool skip_first) {
     (void) skip_first;
     topo.logical = (int) GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
     return;   // (the sockets of a Windows box are not told apart: one package)
-#elif defined(__APPLE__)
-    (void) skip_first;
-    topo.logical = (int) std::thread::hardware_concurrency();
-    return;   // no SMT on Apple silicon and no sysfs: the cores are the processors
 #else
     std::vector<unsigned long> mask;
     std::vector<int> allowed;
@@ -625,7 +621,7 @@ int numa_node_count() {
 }
 
 // The real-node split for threads on `thread_core` (numa_pool.hpp).  Linux only: the placement of the experts' memory
-// (first touch by threads pinned to a node, move_pages to check) has no Windows or macOS version.
+// (first touch by threads pinned to a node, move_pages to check) has no Windows version.
 NumaSplitDecision decide_real_numa_split([[maybe_unused]] const std::vector<int>& thread_core, [[maybe_unused]] int n_workers,
                                          [[maybe_unused]] bool pinned) {
 #if defined(__linux__)

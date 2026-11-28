@@ -336,10 +336,10 @@ struct Options {
     /// verify window (the window grows to at most 8).  Greedy verification keeps the output; its own counts are kept.
     int lookup_chain = 0;
     int lookup_chain_min = 3;   ///< --lookup-chain-min M: the shortest match (in tokens, drafts included) it extends on
-    /// --lookup-max-t N (-1 = not given: 12 on a build whose windows hold 8 rows, one GPU, no batch / DFlash2 / lookup chain, owner decision
-    /// 11-01 for #4040; 0 = off, the --spec + 2 rule): prompt-lookup windows up to N tokens (<= kVerifyLongT) while
-    /// the MTP keeps its --spec windows.  A copy-heavy turn (an edit that rewrites a file) accepts nearly every lookup
-    /// draft, so its decode is bound by the window length.  Each window size is a graph of its own (~20-35 MiB of
+    /// --lookup-max-t N (-1 = not given: 12 on a build whose windows hold 8 rows, one GPU, no batch or lookup chain,
+    /// owner decision 11-01 for #4040; 0 = off, the --spec + 2 rule): prompt-lookup windows up to N tokens
+    /// (<= kVerifyLongT) while the MTP keeps its --spec windows.  A copy-heavy turn (an edit that rewrites a file)
+    /// accepts nearly every lookup draft, so its decode is bound by the window length.  Each window size is a graph of its own (~20-35 MiB of
     /// VRAM), so only --lookup-sizes get one past the MTP's sizes; a size whose graph finds no VRAM is dropped.
     int lookup_max_t = -1;
     /// --mtp-hnorm stream (opt-in): the draft layer's pre_fc_norm_hidden normalizes each hyper-connection stream on

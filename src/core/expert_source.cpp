@@ -3456,12 +3456,10 @@ bool FileExpertSource::pin_cache_complement(
                 fail("FileExpertSource: madvise could not release mapped expert layer " + std::to_string(layer));
                 return;
             }
-#if !defined(__APPLE__)   // macOS has no posix_fadvise; the madvise above already released the mapping
             if (posix_fadvise(fd_, (off_t) layer_offset, (off_t) layer_bytes, POSIX_FADV_DONTNEED) != 0) {
                 fail("FileExpertSource: posix_fadvise could not release expert layer " + std::to_string(layer));
                 return;
             }
-#endif
             }
 #endif
             const int64_t done = layers_done.fetch_add(1) + 1;

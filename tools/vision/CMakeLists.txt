@@ -94,7 +94,7 @@ if(WIN32 AND STRATA_VISION_HIP)
   target_link_libraries(strata-vision PRIVATE delayimp)
   target_link_options(strata-vision PRIVATE -Wl,/delayload:hipblas.dll)
 endif()
-if(UNIX AND NOT APPLE)
+if(UNIX)
   # the libraries it needs are the ones in its own folder (a component folder is relocatable): RUNPATH $ORIGIN
   set_target_properties(strata-vision PROPERTIES BUILD_WITH_INSTALL_RPATH ON INSTALL_RPATH "$ORIGIN")
   target_link_options(strata-vision PRIVATE -Wl,--enable-new-dtags)
