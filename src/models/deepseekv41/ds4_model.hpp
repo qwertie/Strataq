@@ -19,9 +19,11 @@
 #include "strata/models/deepseekv41/conversation_state.hpp"
 #include "strata/models/deepseekv41/kv_rows.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <utility>
 #include <memory>
@@ -119,6 +121,27 @@ struct Stats {
     int64_t draft_reached[8] = {}, draft_kept[8] = {};
     double draft_ms = 0.0, verify_ms = 0.0;   // the drafter's time, the verification windows' time
 };
+
+/// Formats model-wide work per token fed between snapshots for PagedDeepSeek's request-end log. Concurrent
+/// conversations, including their prompts, contribute too; these are not timings of an individual request.
+inline std::string describe_decode_counters(const Stats& a, const Stats& b) {
+    const double n = (double) std::max<int64_t>(1, b.tokens - a.tokens);
+    char text[640];
+    int at = std::snprintf(text, sizeof text,
+        "decode counters (model-wide interval, includes concurrent work): %lld tokens; "
+        "ms a token: layers %.2f (routing waits %.2f, CPU lane %.2f), head wait %.2f, "
+        "Engram %.2f; experts a token %.1f, CPU lane %.2f",
+        (long long) (b.tokens - a.tokens), (b.layer_ms - a.layer_ms) / n, (b.gpu_wait_ms - a.gpu_wait_ms) / n,
+        (b.cpu_ms - a.cpu_ms) / n, (b.head_ms - a.head_ms) / n, (b.engram_ms - a.engram_ms) / n,
+        (double) (b.experts - a.experts) / n, (double) (b.cpu_experts - a.cpu_experts) / n);
+    if (const double pt = (double) (b.prof_tokens - a.prof_tokens); pt > 0 && at > 0 && at < (int) sizeof text)
+        std::snprintf(text + at, sizeof text - (size_t) at, "; GPU (DS4_PROF) between %.2f attention %.2f routing %.2f "
+                      "gate/up %.2f CPU wait %.2f down %.2f", (b.prof_ms[0] - a.prof_ms[0]) / pt,
+                      (b.prof_ms[1] - a.prof_ms[1]) / pt, (b.prof_ms[2] - a.prof_ms[2]) / pt,
+                      (b.prof_ms[3] - a.prof_ms[3]) / pt, (b.prof_ms[4] - a.prof_ms[4]) / pt,
+                      (b.prof_ms[5] - a.prof_ms[5]) / pt);
+    return text;
+}
 
 class Model {
 public:

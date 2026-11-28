@@ -378,7 +378,14 @@ public:
                     d.prompt_ms, d.decode_ms, d.finish, (long long) d.guessed_right, (long long) d.guessed,
                     (long long) d.resumed);
     }
-    void end_request() override { m_.save_profile(); }
+    void end_request() override {
+        const Stats now = m_.stats();
+        if (counters_from_ && now.tokens > counters_from_->tokens)
+            std::fprintf(stderr, "%s: %s\n", kProgram.c_str(),
+                         describe_decode_counters(*counters_from_, now).c_str());
+        counters_from_ = now;
+        m_.save_profile();
+    }
     void begin_step(int) override { router_bad_.reset(); }
 
 private:
@@ -448,6 +455,8 @@ private:
     int verified_ = 0; ///< Counts sampled rows in a standalone verify window; joint_windows_ tracks joint passes.
     /// Caches the take-and-clear device result for all groups; begin_step resets it during group preparation.
     std::optional<bool> router_bad_;
+    /// Bounds the logged interval at the latest prompt end or request end; empty before either has occurred.
+    std::optional<Stats> counters_from_;
 };
 
 /// Gets the Part a PagedPart of this model is.
@@ -1186,6 +1195,7 @@ bool PagedDeepSeek::is_drafter_ready() const {
 /// Keeps the model's state at the end of `p`'s prompt as a checkpoint, and the one before its last token as the anchor
 /// when its conversation started over or went back (Part::pin_next), as the old engine does.
 void PagedDeepSeek::end_prompt(Part& p) {
+    counters_from_ = m_.stats();
     m_.checkpoint(kPromptEndCheck);
     if (p.pin_next)
         m_.pin();
