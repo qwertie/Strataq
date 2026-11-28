@@ -5,27 +5,28 @@
 Strataq is a fork of [Strata](https://github.com/Niko1221/Strata) by Niko1221. It runs the same models
 (Qwen3.8-Flash-Next, Qwen3.6-35B-A3B and DeepSeek V4.1-Flash) with the same OpenAI- and Anthropic-compatible API, but
 its engines for Qwen3.8 and DeepSeek keep conversations and experts in shared memory pools. That lets them serve
-several conversations at once, start answering sooner, and change most settings while they run. Qwen3.6 still runs
-on its own engine, as in upstream.
+several conversations at once, start answering sooner, and change most settings while they run. (Qwen3.6 still runs
+on its own engine, as in upstream.)
 
 ## What is new in Strataq
 
 - **A shared engine core for Qwen3.8 and DeepSeek.** The code was reorganized into layers
   ([ARCHITECTURE.md](docs/ARCHITECTURE.md)), so Qwen3.8 and DeepSeek V4.1 run on one shared engine (the "paged
   engine"), and NVIDIA (CUDA) and AMD (HIP) builds compile the same sources. A fix in the shared part reaches every model.
-- **Conversations take memory as they grow.** Upstream reserves memory for a whole context window per conversation.
-  Strataq's engines keep conversations in pages of a pool that they share with the experts. Several conversations
-  decode in one step, which can increase total throughput. On an AMD Ryzen AI Max+ 395 (Strix Halo, Windows,
-  Qwen3.8 IQ3_S, no drafting), one conversation decoded at 33.4 tokens/s and three at once at 63.7 tokens/s in total
+- **Conversations take memory as they grow.** Upstream reserves memory for an entire full context window for each
+  conversation. In Strataq you only pay for what you use, and conversation pages share the same memory pool as experts
+  and prompt processing, allowing old ones to be evicted. It's designed for running multiple conversations at once
+  to increase total throughput. On an AMD Ryzen AI Max+ 395 (Strix Halo, Windows, no drafting), one Qwen3.8 IQ3_S
+  conversation decoded at 33.4 tokens/s, and four at once with drafting at 85 tokens/s in total
   ([measurements](bench/results/2026-11-05-old-local-vs-new/README.md)).
 - **Conversations are paused, not dropped.** A conversation that is not decoding moves down to RAM and then the SSD,
   and comes back when it is needed. Paused conversations survive an engine restart. Higher-priority requests decode
   first.
-- **Start chatting before all experts are loaded.** The engine says it is ready as soon as the dense weights are in
-  memory, and fills the GPU and RAM pools with experts while it serves.
+- **Start chatting faster.** The engine says it is ready as soon as the dense weights are in memory, so you can
+  see the dashboard and start a conversation as experts load.
 - **One memory mode instead of several "low-RAM" modes.** The same GPU, RAM and SSD pools scale smoothly from a PC
-  with little RAM to one that holds every expert on the GPU. Experts move between the GPU and RAM by how often they
-  are used.
+  with little RAM to one that holds every expert on the GPU, no specialized modes or code paths. Experts move 
+  between the GPU and RAM by how often they are used.
 - **Live settings.** Most settings (conversations at once, token budgets, the VRAM reserve, pool sizes, drafting,
   prompt chunk size and more) change while the model runs, from the Memory panel of the web page or the desktop app.
   Each setting has a tooltip that says what it is for and how to use it.
